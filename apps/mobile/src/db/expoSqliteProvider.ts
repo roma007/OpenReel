@@ -1,5 +1,9 @@
 import * as SQLite from 'expo-sqlite';
-import { File, Paths, getFreeDiskStorageAsync } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
+// 空闲空间查询属于 legacy API：新版 expo-file-system 主入口只导出 Paths/File/Directory，
+// 从主入口导入 getFreeDiskStorageAsync 会在运行时抛废弃错误，导致 ensureDiskCapacity 的
+// 「空间不足则拒绝迁移」保护被静默跳过（低端机尤其危险）。项目内已有同入口先例（ActivityMonitor）。
+import { getFreeDiskStorageAsync } from 'expo-file-system/legacy';
 import {
   PRAGMA_SQL,
   SCHEMA_SQL,
@@ -19,6 +23,7 @@ import {
   rowToFavorite,
   rowToWatchHistory,
   rowToCollectTask,
+  resolveCollectTaskCutoff,
   expandSubTypes,
   extractFirstSubtypes,
 } from '@movie-app/core';
@@ -560,8 +565,9 @@ const MIGRATIONS: Migration[] = [
     version: 61,
     description: 'pk_integer_refactor',
     // 实际迁移为多语句重建流程（590 万行级、需回读校验），由 init() 在 runMigrations 之后
-    // 调用 migratePkToInteger() 以代码执行（检测 episode.id 类型驱动、幂等可重入）。
-    // v61 仅作为结构升级已发生的版本标记；未升级老库即使当前版本>=60 也会由 JS 检测补齐。
+    // 调用 migratePkToInteger() 以代码执行。触发与否由 init() 在 runMigrations 之前采集的
+    // 逐表状态判定（detectPkRebuildState）驱动：全新库跳过、老库完整重建、
+    // 部分完成态抛错中止、已完成则只补收尾。v61 仅作为结构升级已发生的版本标记。
     sql: `SELECT 1;`,
   },
 ];
@@ -582,31 +588,71 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   private reportProgress(percent: number, label: string): void {
-    this.migrationProgressCb?.({
-      percent: Math.min(100, Math.max(0, Math.round(percent * 10) / 10)),
-      label,
-    });
+    this.migrationProgressCb?.({ percent: Math.min(100, Math.max(0, Math.round(percent))), label });
   }
 
-  /** 磁盘预检：可用空间 < 库大小×2 时抛 MigrationDiskError，不执行任何迁移（库不被改动）。 */
-  private async ensureDiskCapacity(): Promise<void> {
+  /**
+   * 取库文件真实大小（字节）。这是「占用了多少磁盘」的直接答案，不依赖 PRAGMA 能否返回结果行。
+   * 顺序：表值 PRAGMA（`SELECT * FROM pragma_page_count`，iOS/Android 均可靠，桌面端同一写法）
+   * → 库文件真实大小兜底。
+   */
+  private async getDbSizeBytes(): Promise<number> {
     try {
-      const pc = await this.db!.getFirstAsync<{ page_count: number }>('PRAGMA page_count');
-      const ps = await this.db!.getFirstAsync<{ page_size: number }>('PRAGMA page_size');
-      const dbBytes = Number(pc?.page_count ?? 0) * Number(ps?.page_size ?? 0);
-      if (!dbBytes) return;
-      const free = await getFreeDiskStorageAsync();
-      if (free == null) return;
-      const need = dbBytes * 2;
-      if (free < need) {
-        const fmt = (n: number) => `${(n / 1073741824).toFixed(2)}GB`;
-        console.error(`[DB] 磁盘空间不足，无法完成数据库升级：需要约 ${fmt(need)}，当前可用 ${fmt(free)}`);
-        throw new MigrationDiskError(need, free, dbBytes);
-      }
-    } catch (err) {
-      if (err instanceof MigrationDiskError) throw err;
-      console.warn('[DB] 磁盘预检探测失败，跳过：', err instanceof Error ? err.message : String(err));
+      const pc = await this.db!.getFirstAsync<{ page_count: number }>('SELECT * FROM pragma_page_count');
+      const ps = await this.db!.getFirstAsync<{ page_size: number }>('SELECT * FROM pragma_page_size');
+      const bytes = Number(pc?.page_count ?? 0) * Number(ps?.page_size ?? 0);
+      if (bytes > 0) return bytes;
+    } catch {
+      // 落到文件大小
     }
+    try {
+      const f = new File(Paths.document, 'SQLite/movieapp.db');
+      if (f.exists) return Number(f.size ?? 0);
+    } catch {
+      // 落到 0（= 无法确定）
+    }
+    return 0;
+  }
+
+  /**
+   * 磁盘预检：可用空间 < 库大小×2 时抛 MigrationDiskError，不执行任何迁移（库不被改动）。
+   *
+   * 历史缺陷（曾使预检在 iOS 上彻底失效，空间不足也放行）：旧实现用 `getFirstAsync('PRAGMA page_count')`
+   * 取库大小，expo-sqlite 在 iOS 上对该语句形式不返回结果行 → dbBytes=0 → 静默 return。
+   * 现在库大小走表值 PRAGMA / 文件大小兜底，且「无法验证」与「空间不足」严格区分、必有日志，
+   * 不再存在无声放弃校验的路径。
+   */
+  private async ensureDiskCapacity(): Promise<void> {
+    const fmt = (n: number) => `${(n / 1073741824).toFixed(2)}GB`;
+
+    const dbBytes = await this.getDbSizeBytes();
+    if (!(dbBytes > 0)) {
+      console.warn('[DB] 磁盘预检：无法确定库大小，跳过本次校验（注意：这不是「空间充足」的结论）');
+      return;
+    }
+
+    let free: number;
+    try {
+      const v = await getFreeDiskStorageAsync();
+      if (v == null) {
+        console.warn('[DB] 磁盘预检：可用空间返回为空，跳过本次校验（注意：这不是「空间充足」的结论）');
+        return;
+      }
+      free = Number(v);
+    } catch (err) {
+      console.warn(
+        '[DB] 磁盘预检：读取可用空间失败，跳过本次校验（注意：这不是「空间充足」的结论）：',
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+
+    const need = dbBytes * 2;
+    if (free < need) {
+      console.error(`[DB] 磁盘空间不足，无法完成数据库升级：需要约 ${fmt(need)}，当前可用 ${fmt(free)}（库 ${fmt(dbBytes)}）`);
+      throw new MigrationDiskError(need, free, dbBytes);
+    }
+    console.warn(`[DB] 磁盘预检通过：库 ${fmt(dbBytes)}，需要 ${fmt(need)}，系统报告可用 ${fmt(free)}`);
   }
 
   /** 儿童模式开关缓存（启动时由 system_config 初始化，setKidModeActive 同步更新）。 */
@@ -679,13 +725,22 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     }
     mark('pragmas');
 
+    // 主键重建状态必须在 runMigrations() 之前采集：SCHEMA_SQL 自身即用 INTEGER 主键，
+    // 之后采集会把全新安装误判为「已重建」（详见 detectPkRebuildState 注释）。
+    this.pkRebuildState = await this.detectPkRebuildState();
+
     await this.runMigrations();
     mark('migrations');
 
     // 主键 INTEGER 化迁移：老库字符串主键 → 自增整数主键。置 runMigrations 之后执行，
-    // 以便 v61 版本标记生效；实际由 episode.id 列类型驱动，幂等可重入。
-    await this.migratePkToInteger();
+    // 因为重建的 INSERT ... SELECT 依赖迁移 2~60 补齐的列；重建会 DROP 掉索引与 FTS，
+    // 故紧随其后补跑一次 SCHEMA_SQL（见 reapplySchemaAfterRebuild）。
+    const pkResult = await this.migratePkToInteger();
     mark('pk_integer');
+
+    if (pkResult !== 'skipped') {
+      await this.reapplySchemaAfterRebuild();
+    }
 
     // 初始化儿童模式开关缓存（启动时读一次，作为查询层过滤的唯一依据）
     const kidModeRow = (await wrappedDb.getFirstAsync(
@@ -816,15 +871,133 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   /**
+   * 主键重建的逐表探针：[表名, 用于判定新旧结构的列名]。
+   * 覆盖 migratePkToInteger swap 的全部 10 张表，避免只看 episode 造成的部分完成误判。
+   * favorite / watch_history 的 id 本身即 TEXT（新旧一致），故探外键列 media_id。
+   */
+  private static readonly PK_REBUILD_PROBES: ReadonlyArray<readonly [string, string]> = [
+    ['episode', 'id'],
+    ['play_source', 'id'],
+    ['media', 'id'],
+    ['favorite', 'media_id'],
+    ['impression', 'media_id'],
+    ['recommend_candidates', 'media_id'],
+    ['dislike', 'media_id'],
+    ['media_change_log', 'media_id'],
+    ['watch_history', 'media_id'],
+    ['watch_line_progress', 'media_id'],
+  ];
+
+  /** init() 在 runMigrations() 之前采集的重建状态；null 表示尚未采集。 */
+  private pkRebuildState: 'fresh' | 'old' | 'new' | 'mixed' | null = null;
+
+  /**
+   * 逐表判定主键重建状态：
+   * - fresh  表不存在（全新安装）
+   * - old    全部探针为 TEXT（老字符串主键库，需完整重建）
+   * - new    全部探针为 INTEGER（重建已完成）
+   * - mixed  部分 INTEGER（重建被中断，部分完成态）
+   */
+  private async detectPkRebuildState(): Promise<'fresh' | 'old' | 'new' | 'mixed'> {
+    let probed = 0;
+    let integerCount = 0;
+    for (const [table, col] of ExpoSqliteProvider.PK_REBUILD_PROBES) {
+      const cols =
+        (await this.db!.getAllAsync<{ name: string; type: string }>(`PRAGMA table_info(${table})`)) || [];
+      if (cols.length === 0) continue; // 表不存在
+      const target = cols.find((c) => c.name === col);
+      if (!target) continue;
+      probed++;
+      if (target.type.toUpperCase() === 'INTEGER') integerCount++;
+    }
+    if (probed === 0) return 'fresh';
+    if (integerCount === 0) return 'old';
+    if (integerCount === probed) return 'new';
+    return 'mixed';
+  }
+
+  /** 重建收尾是否已完成（VACUUM 缩库成功并写入完成标记）。 */
+  private async isPkRebuildFinalized(): Promise<boolean> {
+    const row = (await this.db!.getFirstAsync(
+      "SELECT value FROM system_config WHERE key = 'db.pkIntegerMigrated'"
+    )) as { value: string } | null;
+    return row?.value === '1';
+  }
+
+  /**
+   * 重建收尾：VACUUM 归还 DROP 旧表产生的空页 + 写完成标记。
+   * VACUUM 失败不阻断启动（仅损失缩库收益），此时不写标记，下次启动会重试收尾。
+   */
+  private async finalizePkRebuild(): Promise<void> {
+    this.reportProgress(88, '正在压缩数据库体积（耗时较长，请勿关闭）');
+
+    // 先把重建全程累积的 WAL 落盘并截断：重建 590 万行会产生 GB 级 WAL，
+    // 既占磁盘又压在进程内存上（低内存设备上 VACUUM 期间易触发 bad_alloc 被系统杀死）。
+    // TRUNCATE 失败不阻断，继续尝试 VACUUM。
+    try {
+      await this.db!.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (e) {
+      console.warn('[DB] VACUUM 前 WAL checkpoint 失败（继续）:', e);
+    }
+
+    try {
+      await this.db!.execAsync('VACUUM');
+    } catch (e) {
+      console.warn('[DB] VACUUM 失败（缩库跳过，下次启动重试）:', e);
+      return;
+    }
+    await this.db!.runAsync(
+      "INSERT OR REPLACE INTO system_config (key, value) VALUES ('db.pkIntegerMigrated', '1')"
+    );
+  }
+
+  /**
    * 主键 INTEGER 化迁移（移动端）：逻辑与桌面 tauriSqlProvider.migratePkToInteger 完全一致，
    * 仅底层 API 不同（execAsync/runAsync/getAllAsync）。详见该方法的注释：
    * 触发条件、合并去重键、孤儿落 0 哨兵、FTS 先拆后建、可重入等语义全一致。
+   *
+   * 与桌面端的差异（有意为之）：
+   * 桌面端 initSchema() 顺序为「先 PK 重建 → 后 SCHEMA_SQL」，故索引/FTS 由 SCHEMA_SQL 补回。
+   * 移动端必须「先 runMigrations() → 后 PK 重建」，因为重建的 INSERT ... SELECT 使用 33 列
+   * 显式列表，其中 rating / personal_score / series_group / vod_id 等列依赖迁移 2~60 的
+   * ALTER TABLE ADD COLUMN 先补齐，提前重建会因缺列而整条 SELECT 失败。
+   * 因此移动端改为：重建完成后由 init() 补跑一次 SCHEMA_SQL 并重建 FTS 内容（见 reapplySchemaAfterRebuild）。
+   *
+   * 返回值供 init() 判断是否需要补跑 SCHEMA_SQL：
+   * - skipped   无需动作（全新安装，或重建与收尾均已完成）
+   * - rebuilt   本次执行了完整重建
+   * - finalized 重建早已完成，本次只补了收尾
    */
-  private async migratePkToInteger(): Promise<void> {
-    const cols = (await this.db!.getAllAsync<{ name: string; type: string }>('PRAGMA table_info(episode)')) || [];
-    if (cols.length === 0) return;
-    const idCol = cols.find((c) => c.name === 'id');
-    if (idCol && idCol.type.toUpperCase() === 'INTEGER') return; // 已迁移或全新库
+  private async migratePkToInteger(): Promise<'skipped' | 'rebuilt' | 'finalized'> {
+    // 状态必须在 runMigrations() 之前采集：SCHEMA_SQL 自身即用 INTEGER 主键
+    // （schema.ts media/episode/play_source 均为 id INTEGER PRIMARY KEY），
+    // 若在 SCHEMA_SQL 之后采集，全新建库会被误判为「已重建」而白跑一次 VACUUM。
+    const state = this.pkRebuildState ?? (await this.detectPkRebuildState());
+
+    if (state === 'fresh') return 'skipped'; // 全新安装：SCHEMA_SQL 已建正确结构
+
+    if (state === 'mixed') {
+      // 重建 swap 顺序为 episode → play_source → media → favorite → …，
+      // 中断只会产生「前缀已换、后缀未换」的部分完成态。此时整体重跑并不安全：
+      // m_map/ep_map/ps_map 在流程开头已 DROP（重建时靠它们做 old→new 映射），
+      // 已换表的外键列是新 INTEGER 值，与 m.old(TEXT) 匹配不到 → 整表数据丢失。
+      // 故宁可启动失败并明示，也不静默产出半迁移库。
+      const err = new Error(
+        '检测到数据库处于主键迁移「部分完成」状态（重建被中断）。' +
+          '为避免数据错位，已中止启动；请从升级前的备份恢复数据库后重试。'
+      );
+      console.error('[DB] 主键 INTEGER 迁移处于部分完成状态，中止启动：', err.message);
+      throw err;
+    }
+
+    if (state === 'new') {
+      // 全部表已是新结构：重建本体已完成。缺标记说明收尾（VACUUM 缩库）被中断，
+      // 只补收尾，不重复重建（避免每次启动都全表重扫）。
+      if (await this.isPkRebuildFinalized()) return 'skipped';
+      console.warn('[DB] 主键 INTEGER 重建已完成但收尾被中断，仅补做缩库收尾…');
+      await this.finalizePkRebuild();
+      return 'finalized';
+    }
 
     console.warn('[DB] 检测到旧字符串主键库，开始主键 INTEGER 迁移（590 万行级，可能耗时，允许中断重试）...');
     const exec = (sql: string) => this.db!.execAsync(sql);
@@ -846,6 +1019,19 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await exec('DROP TRIGGER IF EXISTS media_au');
     await exec('DROP TRIGGER IF EXISTS media_ad');
     await exec('DROP TABLE IF EXISTS media_fts');
+
+    // AGENTS「重建表标准流程」第 1 步：关闭外键校验，此前遗漏导致迁移硬失败。
+    // 1) *_pkv2 已带真实 FK 约束（episode.media_id / play_source.episode_id，对齐 SCHEMA_SQL），
+    //    而旧库本就残留悬空 play_source（历史缺陷），开着 FK 时
+    //    「INSERT INTO play_source_pkv2 SELECT ... FROM play_source」被约束当场拒绝：
+    //    实测旧库报 FOREIGN KEY constraint failed，迁移在第 3 张表中止、App 起不来。
+    // 2) 换表阶段的 DROP TABLE / RENAME 也会被 FK 误判。
+    // 注意：PRAGMA foreign_keys 在事务内是 no-op；此处每条语句独立 autocommit，可生效。
+    await exec('PRAGMA foreign_keys = OFF');
+    // 存量孤儿不清理，迁移后 foreign_keys=ON 时任何触碰这些行的写操作都会抛错、
+    // foreign_key_check 也永远不为 0，故在重建前先洗一遍。
+    await this.purgeOrphanRowsBeforeRebuild();
+
     this.reportProgress(3, '正在重建影片数据');
 
     await exec(`CREATE TABLE media_pkv2 (
@@ -879,91 +1065,45 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       SELECT oldm.id, newm.id
       FROM (SELECT id, row_number() OVER (ORDER BY rowid) AS rn FROM media) oldm
       JOIN media_pkv2 newm ON newm.id = oldm.rn`);
-    this.reportProgress(12, '正在重建剧集数据（第 0/0 批）');
-
-    // 按 m_map.rowid 分段批量重建（去重键含 media_id，按媒体切批不会把同一键拆到两批）。
-    // 每批完成即上报真实进度，避免单条大 SQL 长时间无进度导致误判卡死。
-    const MEDIA_BATCH = 10000;
-    const mediaCount = Number(
-      (await this.db!.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM m_map'))?.c ?? 0
-    );
-    const mediaBatches = Math.max(1, Math.ceil(mediaCount / MEDIA_BATCH));
+    this.reportProgress(12, '正在重建剧集数据（数据量较大，较耗时）');
 
     await exec(`CREATE TABLE episode_pkv2 (
       id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL, season_number INTEGER DEFAULT 1,
-      episode_number INTEGER NOT NULL, title TEXT, duration INTEGER, source_id TEXT
+      episode_number INTEGER NOT NULL, title TEXT, duration INTEGER, source_id TEXT,
+      FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
     )`);
-    // 迁移内置同 SCHEMA 索引（swap 后随表带走）：ep_map 分批 JOIN 必需走索引，
-    // 否则每批对 590 万行 episode_pkv2 全表扫描，批数×全扫次数导致数百倍降速。
-    await exec(
-      'CREATE INDEX IF NOT EXISTS idx_episode_media_season_source ON episode_pkv2(media_id, season_number, source_id)'
-    );
-    for (let b = 0; b < mediaBatches; b++) {
-      const lo = b * MEDIA_BATCH;
-      const hi = Math.min((b + 1) * MEDIA_BATCH, mediaCount);
-      await exec(`INSERT INTO episode_pkv2 (media_id, season_number, episode_number, title, duration, source_id)
-        SELECT m.new, e.season_number, e.episode_number, e.title, e.duration, e.source_id
-        FROM episode e JOIN m_map m ON e.media_id = m.old
-        WHERE m.rowid > ${lo} AND m.rowid <= ${hi}
-        GROUP BY e.media_id, e.season_number, e.episode_number, e.source_id`);
-      this.reportProgress(12 + (b / mediaBatches) * 18, `正在重建剧集数据（第 ${b + 1}/${mediaBatches} 批）`);
-    }
-
+    await exec(`INSERT INTO episode_pkv2 (media_id, season_number, episode_number, title, duration, source_id)
+      SELECT m.new, e.season_number, e.episode_number, e.title, e.duration, e.source_id
+      FROM episode e JOIN m_map m ON e.media_id = m.old
+      GROUP BY e.media_id, e.season_number, e.episode_number, e.source_id`);
     await exec('CREATE TABLE ep_map (old TEXT PRIMARY KEY, new INTEGER)');
-    for (let b = 0; b < mediaBatches; b++) {
-      const lo = b * MEDIA_BATCH;
-      const hi = Math.min((b + 1) * MEDIA_BATCH, mediaCount);
-      await exec(`INSERT INTO ep_map
-        SELECT e.id, n.id
-        FROM episode e
-        JOIN m_map m ON e.media_id = m.old
-        JOIN episode_pkv2 n
-          ON m.new = n.media_id AND e.season_number = n.season_number
-         AND e.episode_number = n.episode_number AND COALESCE(e.source_id, '') = COALESCE(n.source_id, '')
-        WHERE m.rowid > ${lo} AND m.rowid <= ${hi}`);
-      this.reportProgress(30 + (b / mediaBatches) * 10, `正在构建剧集映射（第 ${b + 1}/${mediaBatches} 批）`);
-    }
-
-    const EP_BATCH = 50000;
-    const episodeCount = Number(
-      (await this.db!.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM ep_map'))?.c ?? 0
-    );
-    const epBatches = Math.max(1, Math.ceil(episodeCount / EP_BATCH));
+    await exec(`INSERT INTO ep_map
+      SELECT e.id, n.id
+      FROM episode e
+      JOIN m_map m ON e.media_id = m.old
+      JOIN episode_pkv2 n
+        ON m.new = n.media_id AND e.season_number = n.season_number
+       AND e.episode_number = n.episode_number AND COALESCE(e.source_id, '') = COALESCE(n.source_id, '')`);
+    this.reportProgress(40, '正在重建播放源数据（数据量较大，较耗时）');
 
     await exec(`CREATE TABLE play_source_pkv2 (
       id INTEGER PRIMARY KEY, episode_id INTEGER NOT NULL, source_id TEXT NOT NULL, source_name TEXT,
       url TEXT NOT NULL, quality TEXT, language TEXT, is_active INTEGER DEFAULT 1,
-      fail_count INTEGER DEFAULT 0, last_fail_at TEXT
+      fail_count INTEGER DEFAULT 0, last_fail_at TEXT,
+      FOREIGN KEY (episode_id) REFERENCES episode(id) ON DELETE CASCADE
     )`);
-    // 同 episode 段原因：ps_map 分批 JOIN 需走 episode_id 索引，避免每批全扫
-    await exec(
-      'CREATE INDEX IF NOT EXISTS idx_play_source_episode_id ON play_source_pkv2(episode_id)'
-    );
-    for (let b = 0; b < epBatches; b++) {
-      const lo = b * EP_BATCH;
-      const hi = Math.min((b + 1) * EP_BATCH, episodeCount);
-      await exec(`INSERT INTO play_source_pkv2 (episode_id, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at)
-        SELECT enew, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at
-        FROM (SELECT ep_map.new AS enew, ps.source_id, ps.source_name, ps.url, ps.quality,
-                     ps.language, ps.is_active, ps.fail_count, ps.last_fail_at
-              FROM play_source ps JOIN ep_map ON ps.episode_id = ep_map.old
-              WHERE ep_map.new > ${lo} AND ep_map.new <= ${hi})
-        GROUP BY enew, url`);
-      this.reportProgress(40 + (b / epBatches) * 18, `正在重建播放源数据（第 ${b + 1}/${epBatches} 批）`);
-    }
-
+    await exec(`INSERT INTO play_source_pkv2 (episode_id, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at)
+      SELECT enew, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at
+      FROM (SELECT ep_map.new AS enew, ps.source_id, ps.source_name, ps.url, ps.quality,
+                   ps.language, ps.is_active, ps.fail_count, ps.last_fail_at
+            FROM play_source ps JOIN ep_map ON ps.episode_id = ep_map.old)
+      GROUP BY enew, url`);
     await exec('CREATE TABLE ps_map (old TEXT PRIMARY KEY, new INTEGER)');
-    for (let b = 0; b < epBatches; b++) {
-      const lo = b * EP_BATCH;
-      const hi = Math.min((b + 1) * EP_BATCH, episodeCount);
-      await exec(`INSERT INTO ps_map
-        SELECT ps.id, n.id
-        FROM play_source ps
-        JOIN ep_map e ON ps.episode_id = e.old
-        JOIN play_source_pkv2 n ON ps.url = n.url AND n.episode_id = e.new
-        WHERE e.new > ${lo} AND e.new <= ${hi}`);
-      this.reportProgress(58 + (b / epBatches) * 8, `正在构建播放源映射（第 ${b + 1}/${epBatches} 批）`);
-    }
+    await exec(`INSERT INTO ps_map
+      SELECT ps.id, n.id
+      FROM play_source ps
+      JOIN ep_map e ON ps.episode_id = e.old
+      JOIN play_source_pkv2 n ON ps.url = n.url AND n.episode_id = e.new`);
     this.reportProgress(66, '正在迁移收藏与推荐数据');
 
     await exec('CREATE TABLE favorite_pkv2 (id TEXT PRIMARY KEY, media_id INTEGER NOT NULL, created_at TEXT)');
@@ -981,6 +1121,15 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       SELECT COALESCE(m.new, 0), MAX(c.position), MAX(c.score), MAX(c.genre_group)
       FROM recommend_candidates c LEFT JOIN m_map m ON c.media_id = m.old
       GROUP BY COALESCE(m.new, 0)`);
+
+    // 所有重型 INSERT ... SELECT（episode/play_source 各 590 万行）已执行完，
+    // 此刻把累积的 WAL 回写截断。实测重建期 WAL 峰值约 1.2GB，若不中途截断，
+    // 「膨胀后的主库 + GB 级 WAL」双份占用会把低端机磁盘顶穿（SQLITE_FULL）。
+    try {
+      await exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (e) {
+      console.warn('[DB] 重建中途 WAL checkpoint 失败（继续）:', e);
+    }
 
     await exec('CREATE TABLE dislike_pkv2 (media_id INTEGER PRIMARY KEY, created_at TEXT)');
     await exec(`INSERT INTO dislike_pkv2 (media_id, created_at)
@@ -1052,17 +1201,120 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await exec('DROP TABLE m_map');
     await exec('DROP TABLE ep_map');
     await exec('DROP TABLE ps_map');
-    this.reportProgress(88, '正在压缩数据库体积（耗时较长，请勿关闭）');
 
-    // 回收 DROP 旧表产生的空页，避免升级后库文件膨胀（失败仅损失缩库收益，不阻断）
+    // AGENTS「重建表标准流程」收尾：恢复外键校验并自查残留违规。
+    // 放在 finalizePkRebuild() 之前，使 VACUUM 与后续 SCHEMA_SQL 补跑都在 FK 生效下进行。
+    await exec('PRAGMA foreign_keys = ON');
     try {
-      await exec('VACUUM');
+      const fkState = await this.db!.getFirstAsync<{ foreign_keys: number }>('PRAGMA foreign_keys');
+      const violations = await this.db!.getAllAsync<unknown>('PRAGMA foreign_key_check');
+      console.warn(
+        `[DB] 外键校验已恢复（foreign_keys=${fkState?.foreign_keys ?? '?'}），` +
+        `foreign_key_check 剩余违规 ${violations.length} 行`
+      );
     } catch (e) {
-      console.warn('[DB] VACUUM 失败（缩库跳过）:', e);
+      console.warn('[DB] 外键状态自查失败:', e);
     }
+
+    // 收尾：VACUUM 归还空页 + 写完成标记（索引/FTS 由 init() 补跑 SCHEMA_SQL 恢复）
+    await this.finalizePkRebuild();
     this.reportProgress(100, '数据升级完成');
 
-    console.warn('[DB] 主键 INTEGER 迁移完成（索引与 FTS 由 SCHEMA_SQL/postInit 重建）');
+    console.warn('[DB] 主键 INTEGER 迁移完成（索引与 FTS 由 init() 补跑 SCHEMA_SQL 重建）');
+    return 'rebuilt';
+  }
+
+  /**
+   * 重建前清理存量孤儿数据。
+   *
+   * 背景：episode/play_source 的 FK 约束是本轮才补齐的，但旧库里已经存在悬空行
+   * （由历史缺陷「删 episode 不级联清理 play_source」产生，此前只堵住新产生、没清存量）。
+   * 悬空 play_source 在迁移期会被约束拒绝，悬空行即使侥幸搬过去，迁移后 foreign_keys=ON
+   * 时任何 UPDATE 到这些行的写操作都会抛错，foreign_key_check 也永远不为 0。
+   *
+   * 删除顺序按子→父，避免删父表时留下新的悬空子行。
+   */
+  private async purgeOrphanRowsBeforeRebuild(): Promise<void> {
+    const del = async (label: string, sql: string) => {
+      try {
+        const r = await this.db!.runAsync(sql);
+        if (r.changes > 0) console.warn(`[DB] 清理孤儿数据 ${label}: ${r.changes} 行`);
+        return r.changes;
+      } catch (e) {
+        console.warn(`[DB] 清理孤儿数据 ${label} 失败:`, e);
+        return 0;
+      }
+    };
+
+    // 有 FK 约束的两张表：不清理则迁移必然失败
+    const ps = await del('play_source（episode 不存在）',
+      'DELETE FROM play_source WHERE episode_id NOT IN (SELECT id FROM episode)');
+    const ep = await del('episode（media 不存在）',
+      'DELETE FROM episode WHERE media_id NOT IN (SELECT id FROM media)');
+
+    // 以下表无 FK 约束，但 media_id 是本次 TEXT→INTEGER 重建的对象，
+    // 重建 SQL 用 COALESCE(m.new, 0) 填充，「不存在的 media」会被写成 0，属同一类脏数据，一并清。
+    let child = 0;
+    for (const t of [
+      'favorite', 'impression', 'dislike', 'media_change_log',
+      'recommend_candidates', 'watch_history', 'watch_line_progress',
+    ]) {
+      child += await del(`${t}（media 不存在）`,
+        `DELETE FROM ${t} WHERE media_id NOT IN (SELECT id FROM media)`);
+    }
+
+    if (ps + ep + child > 0) {
+      console.warn(`[DB] 孤儿数据清理合计: play_source ${ps} 行、episode ${ep} 行、其他 media 子表 ${child} 行`);
+    } else {
+      console.warn('[DB] 孤儿数据清理: 未发现存量孤儿行');
+    }
+  }
+
+  /**
+   * 主键重建后补跑 SCHEMA_SQL 并重建 FTS 内容。
+   *
+   * 背景：migratePkToInteger 会 DROP 旧表（连带删掉表上的普通/UNIQUE 索引与同步触发器）
+   * 并 DROP TABLE media_fts，而 SCHEMA_SQL 只在 runMigrations() 里执行过一次、不会重跑，
+   * postInit 也只补普通索引。缺失表现为：
+   * - uq_episode_media_season_ep_source / uq_play_source_episode_id_url / uq_favorite_media_id
+   *   丢失 → 任何 ON CONFLICT 写入报「does not match any PRIMARY KEY or UNIQUE constraint」
+   * - media_fts 及其 3 个同步触发器丢失 → searchMedia 的 MATCH 查询永远返回空
+   *
+   * SCHEMA_SQL 全部为 IF NOT EXISTS，重复执行幂等；此处等价于桌面端「重建在前、SCHEMA_SQL 在后」的顺序效果。
+   */
+  private async reapplySchemaAfterRebuild(): Promise<void> {
+    console.warn('[DB] 主键重建后补跑 SCHEMA_SQL，恢复 UNIQUE 索引与 FTS…');
+    for (const stmt of splitSqlStatements(SCHEMA_SQL)) {
+      try {
+        await this.db!.execAsync(stmt);
+      } catch (e) {
+        console.warn('[DB] 补跑 SCHEMA_SQL 语句失败:', stmt, e);
+      }
+    }
+
+    // media_fts 已在重建开头 DROP，此处 SCHEMA_SQL 重建的是空索引，必须全量回填，
+    // 否则 searchMedia 的 MATCH 查询永远返回空。
+    // 注意：不能用 `SELECT count(*) FROM media_fts` 判断是否为空——外部内容表（content='media'）
+    // 的 count 读的是内容表行数，只要 media 非空就恒 >0，会让回填被错误跳过。桌面端 rebuildFts5
+    // 同样是无条件执行这一步。
+    try {
+      await this.db!.execAsync("INSERT INTO media_fts(media_fts) VALUES('rebuild')");
+      console.warn('[DB] media_fts 内容已回填');
+    } catch (e) {
+      console.warn('[DB] media_fts 回填失败（搜索可能为空）:', e);
+    }
+
+    // 上一步建 3 个 UNIQUE 索引（episode/play_source 各 590 万行）+ 回填 FTS 会再产生 GB 级 WAL。
+    // 必须在 open_read_db 之前回写截断：只读连接一旦打开，其长读事务会让后续
+    // wal_checkpoint(TRUNCATE) 报「database table is locked」而长期失败
+    // （实测 init 尾部的 post_walCheckpoint 即如此），导致 WAL 永久滞留、
+    // 设备磁盘占用比逻辑体积多出 1GB 以上。
+    try {
+      await this.db!.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+      console.warn('[DB] 索引与 FTS 补跑后的 WAL 已回写截断');
+    } catch (e) {
+      console.warn('[DB] 补跑后 WAL checkpoint 失败（磁盘占用偏高）:', e);
+    }
   }
 
   private async fixGenreData(): Promise<void> {
@@ -1715,6 +1967,16 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async deleteEpisodesByMediaIdAndSourceId(mediaId: number, sourceId: string): Promise<void> {
+    // 必须先删这些剧集自己的播放源：调用方（collectorService 重采集路径）是
+    // 「先删后写」，剧集删掉后 id 会被 upsertEpisodesBatch 重新分配，旧播放源若不删
+    // 就指向不存在的 episode（悬空记录）。实测 20 分钟可积出 5 万余条。
+    // 迁移后的库没有 play_source→episode 外键（迁移重建表时未复制 FOREIGN KEY 子句，
+    // 而 SCHEMA_SQL 的 CREATE TABLE IF NOT EXISTS 无法为已存在的表补约束），
+    // 不能指望 ON DELETE CASCADE 兜底，必须显式清理。
+    await this.db!.runAsync(
+      'DELETE FROM play_source WHERE episode_id IN (SELECT id FROM episode WHERE media_id = ? AND source_id = ?)',
+      [mediaId, sourceId]
+    );
     await this.db!.runAsync('DELETE FROM episode WHERE media_id = ? AND source_id = ?', [mediaId, sourceId]);
   }
 
@@ -2557,7 +2819,11 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async deleteOldTasks(days: number): Promise<void> {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = resolveCollectTaskCutoff(days);
+    if (cutoff === null) {
+      await this.db!.runAsync('DELETE FROM collect_task');
+      return;
+    }
     await this.db!.runAsync('DELETE FROM collect_task WHERE created_at < ?', [cutoff]);
   }
 

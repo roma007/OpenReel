@@ -18,6 +18,21 @@ import type {
 export const UNCATEGORIZED_GENRE = '未分类';
 
 /**
+ * 解析「删除 days 天前的采集任务」的时间界限，返回可直接与 `created_at` 比较的 ISO 串；
+ * 返回 null 表示语义为「删除全部任务记录」（不再带 WHERE 条件）。
+ *
+ * days 大到让界限落到公元 1 年之前（或超出 Date 可表示范围）时必须返回 null：
+ * `toISOString()` 会输出负年份扩展格式（如 '-000712-10-29T…'），而 SQLite 对 TEXT 按
+ * BINARY（memcmp）比较，真实 `created_at` 以 '2'(0x32) 开头、界限以 '-'(0x2D) 开头，
+ * `created_at < cutoff` 恒为 false → DELETE 匹配 0 行，表现为「删除全部」点了没反应。
+ */
+export function resolveCollectTaskCutoff(days: number, now: number = Date.now()): string | null {
+  const ts = now - days * 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(ts) || ts <= 0 || ts > 8.64e15) return null;
+  return new Date(ts).toISOString();
+}
+
+/**
  * 与数据库筛选谓词（buildWhere/分类页 CSV 筛选）语义等价的 JS 判定，
  * 用于「推荐排序」候选段在内存中过滤候选行（候选表仅数百~数千行）。
  * row 为 media 表的行（snake_case 字段）。参数为 ListParams。

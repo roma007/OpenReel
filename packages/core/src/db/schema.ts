@@ -34,6 +34,12 @@ export const PRAGMA_SQL = `
   PRAGMA busy_timeout = 5000;
   PRAGMA synchronous = NORMAL;
   PRAGMA cache_size = -20000;
+  -- 强制临时表/临时库落盘。SQLite 的 temp_store 默认值取决于各平台编译宏
+  -- （SQLITE_TEMP_STORE 可能是 1=FILE 也可能是 2=MEMORY），一旦为 MEMORY，
+  -- 5.9M 行 GROUP BY 排序器与 VACUUM 的整份临时库会全部驻留原生堆：
+  -- 实测 Android 上 Native Heap 15MB→1.5GB 后被 OOM Killer 杀死。
+  -- 低端机（可用内存 <2GB）必然复现，故此处显式指定 FILE，不依赖编译默认值。
+  PRAGMA temp_store = FILE;
 `;
 
 export const SCHEMA_SQL = `

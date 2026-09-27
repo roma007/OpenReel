@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { DatabaseProvider } from '../db/provider';
+import { resolveCollectTaskCutoff } from '../db/provider';
 import type { Media, VideoSource, ImportSourceItem, ParsedImportSource, Favorite, WatchHistory, PaginatedMeta, CollectTask, CollectPreviewItem, SavePreviewResult, UserUsageType } from '../types';
 import type { CollectConfig, ShortDramaConfig } from '../services/systemConfigService';
 import { RatingService } from '../services/ratingService';
@@ -975,6 +976,17 @@ export function createAppStore(db: DatabaseProvider) {
 
     deleteOldTasks: async (days: number) => {
       try {
+        // 与单条删除一致：先中断「本次将被删除」的行所对应的运行中采集，
+        // 否则采集会继续跑并写回新任务行（列表删不空），
+        // 且 DELETE 在单连接队列中会被持续入队的采集写事务拖慢（大库下可达 10s+）。
+        // 只中断真正落在删除范围内的任务，避免误杀「删 7 天前」时正在跑的新任务。
+        const cutoff = resolveCollectTaskCutoff(days);
+        const running = await get().loadRunningCollectTasks();
+        for (const task of running) {
+          if (cutoff === null || task.createdAt < cutoff) {
+            collectorService.cancelTask(task.taskId);
+          }
+        }
         await db.deleteOldTasks(days);
         await get().loadCollectTasks();
       } catch (err: any) {

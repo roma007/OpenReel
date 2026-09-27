@@ -425,8 +425,25 @@ sourceUpdatedAt,
       ? <T>(label: string, fn: () => Promise<T>) => meter.trace(label, fn)
       : <T>(_label: string, fn: () => Promise<T>) => fn();
     const media = prep.media;
-    const mergeInto = prep.mergeMode ? prep.mergeTargetId : null;
+    let mergeInto = prep.mergeMode ? prep.mergeTargetId : null;
     return this.db.withTransactionAsync(async () => {
+      // 父行存在性校验：必须早于本事务内一切写入。prepare 阶段在写锁外并发执行，
+      // 其间 mergeTvIntoMovie / mergeVersionIntoMain 可能已 DELETE 掉目标 media；
+      // 合并路径更是直接盲信 prepare 捕获的 mergeTargetId。不校验则后续
+      // upsertEpisodesBatch 必被 episode→media 外键拒绝，该 media 本次采集整批丢失。
+      // 按业务键回查（getMediaByFingerprint 不做儿童模式隐藏过滤，null 即真不存在）；
+      // 行被同键重建时改指新 id，避免写向已消失的行。prep.existing 为空时本事务
+      // 会自行 upsertMedia 建行，无需校验。
+      const existingRow = prep.existing;
+      if (existingRow) {
+        const alive = await trace('dbLookup.parent', () => this.db.getMediaByFingerprint(existingRow.fingerprint));
+        if (!alive) {
+          console.warn(`[Collector] 目标 media 已被并发合并删除，跳过「${media.title}」本次写入`);
+          return media;
+        }
+        if (alive.id !== media.id) media.id = alive.id;
+        if (mergeInto != null) mergeInto = alive.id;
+      }
       if (mergeInto) {
         // 合并路径（只增不删）：不写 media 行，主条目元数据（标题/海报/简介）保持不被版本条目覆盖
       } else if (prep.existing) {
@@ -528,11 +545,20 @@ sourceUpdatedAt,
         }
         epIdMap = await trace('dbWrite.eps', () => this.db.upsertEpisodesBatch(episodesBatch));
       }
-      // play_source.episode_id 按回读的 episode 整数 id 回填
-      for (let i = 0; i < playSourcesBatch.length; i++) {
-        playSourcesBatch[i].episodeId = epIdMap.get(playSourceEpKeys[i]) ?? 0;
+      // play_source.episode_id 按回读的 episode 整数 id 回填。
+      // 解析不到目标剧集的播放源必须丢弃，不能写 episode_id=0：
+      // 迁移重建后的库带 play_source→episode 外键（0 不是合法 episode），写 0 会直接报错；
+      // 即使没有外键，留下的也是永远无法播放的悬空记录。
+      const resolvable = playSourcesBatch.filter((_, i) => epIdMap.has(playSourceEpKeys[i]));
+      for (let i = 0; i < resolvable.length; i++) {
+        resolvable[i].episodeId = epIdMap.get(playSourceEpKeys[i])!;
       }
-      await trace('dbWrite.ps', () => this.db.upsertPlaySourcesBatch(playSourcesBatch));
+      if (resolvable.length !== playSourcesBatch.length) {
+        console.warn(
+          `[Collector] ${playSourcesBatch.length - resolvable.length} 条播放源找不到对应剧集，已丢弃`
+        );
+      }
+      await trace('dbWrite.ps', () => this.db.upsertPlaySourcesBatch(resolvable));
 
       return media;
     });
@@ -1508,6 +1534,12 @@ const title = await normalizer.normalizeTitle(item.vod_name);
             continue;
           }
           urlSeen.add(ps.url);
+          if (newEpId === 0) {
+            // 目标剧集不存在，且本集马上就要被删（见下方删除循环），没有合法去处：
+            // 删除而不是转指 0，否则留下悬空记录 / 违反 play_source→episode 外键。
+            await this.db.execute('DELETE FROM play_source WHERE id = ?', [ps.id]);
+            continue;
+          }
           await this.db.execute(
             'UPDATE play_source SET episode_id = ?, source_id = ?, language = ? WHERE id = ?',
             [newEpId, ps.sourceId || 'default', lang ?? ps.language, ps.id]

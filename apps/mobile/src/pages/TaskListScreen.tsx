@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, Alert, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { ArrowLeft, RefreshCw, Trash2 } from 'lucide-react-native';
 import { useAppStore } from '../useAppStore';
@@ -35,9 +35,31 @@ export default function TaskListScreen({ navigation }: Props) {
   const surfaceBg = hexToRgba(colors.surface, cardOpacity / 100);
   const s = useScaledFontSize();
   const [isLoading, setIsLoading] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+
+  // 像视频列表页一样分页：先渲染 PAGE_STEP 条，滚动触底「上拉显示更多」追加
+  const PAGE_STEP = 20;
+  const [visibleCount, setVisibleCount] = useState(PAGE_STEP);
+  const loadingMoreRef = useRef(false);
+  const loadMore = useCallback(() => {
+    if (loadingMoreRef.current) return;
+    setVisibleCount((c) => {
+      const total = collectTasks.length;
+      if (c >= total) return c;
+      loadingMoreRef.current = true;
+      setTimeout(() => { loadingMoreRef.current = false; }, 400);
+      return Math.min(c + PAGE_STEP, total);
+    });
+  }, [collectTasks.length]);
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 80) {
+      loadMore();
+    }
+  }, [loadMore]);
 
   function parseFailedItems(task: CollectTask): FailedItem[] {
     if (!task.failedItems) return [];
@@ -168,8 +190,14 @@ export default function TaskListScreen({ navigation }: Props) {
     Alert.alert('清理所有任务', '确定要删除所有任务记录吗？', [
       { text: '取消', style: 'cancel' },
       { text: '确定', style: 'destructive', onPress: async () => {
-        await deleteOldTasks(999999);
-        await loadCollectTasks();
+        setDeletingAll(true);
+        try {
+          await deleteOldTasks(999999);
+          await loadCollectTasks();
+          Alert.alert('完成', '删除完成');
+        } finally {
+          setDeletingAll(false);
+        }
       }},
     ]);
   };
@@ -203,11 +231,13 @@ export default function TaskListScreen({ navigation }: Props) {
     failedTitle: { fontSize: s(12), color: colors.text, fontWeight: '500', flexShrink: 1 },
     failedError: { fontSize: s(11), color: colors.mutedForeground, flexShrink: 1 },
     failedEmpty: { fontSize: s(12), color: colors.success, paddingVertical: 2 },
+    footer: { paddingVertical: 18, alignItems: 'center' },
+    footerText: { fontSize: s(12), color: colors.mutedForeground },
   }), [colors, cardBg, surfaceBg, s]);
 
   return (
     <BlurredBackground imageUrl={null}>
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} onScroll={handleScroll} scrollEventThrottle={200}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Button variant="icon" size="sm" onPress={() => navigation.goBack()}>
@@ -215,8 +245,12 @@ export default function TaskListScreen({ navigation }: Props) {
           </Button>
           <Text style={styles.title}>任务列表</Text>
           <View style={styles.headerActions}>
-            <Button variant="secondary" size="sm" onPress={handleClearAll}>
-              <Trash2 size={16} color={colors.text} />
+            <Button variant="secondary" size="sm" onPress={handleClearAll} disabled={deletingAll}>
+              {deletingAll ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Trash2 size={16} color={colors.text} />
+              )}
             </Button>
             <Button variant="primary" size="sm" onPress={() => { setIsLoading(true); loadCollectTasks().finally(() => setIsLoading(false)); }}>
               <RefreshCw size={16} color={colors.text} />
@@ -231,7 +265,7 @@ export default function TaskListScreen({ navigation }: Props) {
         <Text style={styles.empty}>暂无采集任务</Text>
       ) : (
         <View style={styles.taskList}>
-          {collectTasks.map((task: CollectTask) => {
+          {collectTasks.slice(0, visibleCount).map((task: CollectTask) => {
             const statusStyle = getStatusStyle(task.status);
             const progress = task.totalPages > 0 ? Math.round((task.currentPage / task.totalPages) * 100) : 0;
             return (
@@ -325,6 +359,15 @@ export default function TaskListScreen({ navigation }: Props) {
               </View>
             );
           })}
+        </View>
+      )}
+      {collectTasks.length > 0 && (
+        <View style={styles.footer}>
+          {visibleCount >= collectTasks.length ? (
+            <Text style={styles.footerText}>已显示全部 {collectTasks.length} 条任务</Text>
+          ) : (
+            <Text style={styles.footerText}>上拉显示更多</Text>
+          )}
         </View>
       )}
     </ScrollView>

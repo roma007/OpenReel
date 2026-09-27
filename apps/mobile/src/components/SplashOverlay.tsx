@@ -174,13 +174,13 @@ export function SplashOverlay({ ready, migrationProgress, diskBlocked }: SplashO
             <Text style={styles.logoText}>MovieApp</Text>
             <Text style={styles.migrateDesc}>
               {stageLabel
-                ? `正在升级数据库（${progress.toFixed(1)}%）：${stageLabel}`
+                ? `正在升级数据库（${progress}%）：${stageLabel}`
                 : '正在升级数据库，请勿关闭应用…'}
             </Text>
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${progress}%` }]} />
             </View>
-            <Text style={styles.trackPercent}>{progress.toFixed(1)}%</Text>
+            <Text style={styles.trackPercent}>{progress}%</Text>
           </View>
         </View>
       )}

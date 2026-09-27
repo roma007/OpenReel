@@ -343,3 +343,19 @@ Xcode 26 用 CoreDevice 机制连真机，不依赖传统 DeviceSupport 目录�
   emulator -avd movieapp -dns-server 8.8.8.8,8.8.4.4
   ```
 - **验证**：`adb -s emulator-5554 shell ping -c 2 www.baidu.com` 应解析并收到回包。
+
+## iOS 模拟器操作铁律（AI 必读）
+
+> 已踩坑多次，必须遵守：任何对 iOS 模拟器的操作，**必须让用户看得见模拟器窗口**；禁止在不可见/未打开图形的状态下对着后台设备反复操作。
+
+### 铁律
+1. **`simctl boot` ≠ 打开模拟器**。boot 只是在后台启动设备进程，屏幕上不会有任何窗口。
+   - 操作顺序：**先 `open -a Simulator`** 打开图形界面（会显示已 boot / 正在 boot 的设备）→ 再 `xcrun simctl launch / io screenshot / spawn log` 等一切 simctl 命令。
+   - 若 `open -a Simulator` 后就绪前需要等待，用 `xcrun simctl bootstatus <udid> -b` 等待，但**必须**确认 Simulator.app 窗口在 Mac 前台可见后才开始验证。
+2. **`xcrun simctl screenshot` 会成功截出任何已 boot 设备**——截图内容不代表用户能看到窗口，不要用截图结果自我证明「模拟器已打开」。判定「已打开」的唯一标准：Simulator.app 窗口在屏幕上可见（可 `open -a Simulator` 后 `osascript` 确认 process 存在）。
+3. **显式 launch**：`simctl terminate` 之后不 `simctl launch` 等于没启动 App（曾因此白跑一轮）。每次 terminate 后必须跟上 launch。
+4. **禁止用全新 `-derivedDataPath` 目录构建模拟器**：等于把 ExpoModulesCore/Hermes/expo-sqlite 全部原生从零重编（曾 15+ 分钟不出 .app；AGENTS「移动端构建同步铁律」早有相关警告）。需要重建时走**默认 DerivedData 增量**，或用「纯 JS 覆盖 bundle」热替换路径避免原生编译。
+5. **移动端 SQLite 实际文件路径（Expo，易错）**：
+   - 安卓模拟器：`/data/data/com.movie.app/files/SQLite/movieapp.db`，替换用 `adb shell run-as com.movie.app cp ...`（**不是** `databases/movieapp.db`）。
+   - iOS 模拟器：`<data-container>/Documents/SQLite/movieapp.db`，`data-container` 由 `xcrun simctl get_app_container booted com.mengfeng.movieapp data` 获取。
+6. 任何模拟器验证（升级/进度条/UI）必须以**截图 + OCR** 为证据，且截图来自用户可见的模拟器窗口状态。

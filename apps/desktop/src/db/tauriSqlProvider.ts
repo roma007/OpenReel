@@ -17,6 +17,7 @@ import {
   rowToFavorite,
   rowToWatchHistory,
   rowToCollectTask,
+  resolveCollectTaskCutoff,
   expandSubTypes,
   extractFirstSubtypes,
 } from '@movie-app/core';
@@ -81,10 +82,7 @@ export class TauriSqlProvider implements DatabaseProvider {
   }
 
   private reportProgress(percent: number, label: string): void {
-    this.migrationProgressCb?.({
-      percent: Math.min(100, Math.max(0, Math.round(percent * 10) / 10)),
-      label,
-    });
+    this.migrationProgressCb?.({ percent: Math.min(100, Math.max(0, Math.round(percent))), label });
   }
 
   /** 事务进行中标志：事务内写操作绕过 writeState acquire（改由 withTransactionAsync 长持锁），避免重入死锁。
@@ -368,7 +366,9 @@ export class TauriSqlProvider implements DatabaseProvider {
    * 注意事项：
    * - 桌面端 tauri-plugin-sql 为连接池伪事务，无跨语句原子性；Drop/Rename 阶段理论上
    *   中断可能留下半迁移态（重启重入可自愈到「检测通过」前一步骤），已在留档列明风险。
-   * - DROP 顺序严格先子后父，避免依赖 PRAGMA foreign_keys（连接池 per-connection）。
+   * - FK 恒为 ON（sqlx-sqlite 在每条连接建立时即置 foreign_keys=ON），因此父表绝对不能 DROP：
+   *   DROP TABLE 会隐式 DELETE FROM 并触发 ON DELETE CASCADE，把子表数据级联清空。
+   *   故父表一律用 RENAME 让位（旧表改名保留，末尾再按先子后父顺序清理）。
    */
   /**
    * episode.id 列是否已是 INTEGER 主键（迁移完成判定，幂等触发源）。
@@ -433,6 +433,7 @@ export class TauriSqlProvider implements DatabaseProvider {
 
     // 可重入：清上一轮残留的临时表（已 rename 成功的表 DROP IF EXISTS 静默跳过）
     for (const t of [
+      'episode_old_pk', 'media_old_pk',
       'media_pkv2', 'episode_pkv2', 'play_source_pkv2',
       'favorite_pkv2', 'impression_pkv2', 'recommend_candidates_pkv2',
       'dislike_pkv2', 'media_change_log_pkv2', 'watch_history_pkv2', 'watch_line_progress_pkv2',
@@ -479,93 +480,68 @@ export class TauriSqlProvider implements DatabaseProvider {
       SELECT oldm.id, newm.id
       FROM (SELECT id, row_number() OVER (ORDER BY rowid) AS rn FROM media) oldm
       JOIN media_pkv2 newm ON newm.id = oldm.rn`);
-    this.reportProgress(12, '正在重建剧集数据（第 0/0 批）');
+
+    // ---- 1b. media 换表：只改名让位，绝不 DROP ----
+    // FK 恒为 ON（sqlx-sqlite 每条连接建立时即置 ON，见 sqlx-sqlite/src/options/mod.rs:185），
+    // 而 DROP TABLE 在 FK 开启时会隐式 DELETE FROM 并触发 ON DELETE CASCADE，
+    // 先 DROP media 会把 590 万 episode 行级联清空。RENAME 不删行、不触发 CASCADE，
+    // 旧库仅 episode 引用 media，其 FK 子句被 SQLite 自动改写到 media_old_pk。
+    // 换表后 media.id 已是 INTEGER，后续 episode_pkv2 的 FK 才可能被满足。
+    await this.db!.execute('ALTER TABLE media RENAME TO media_old_pk');
+    await this.db!.execute('ALTER TABLE media_pkv2 RENAME TO media');
+    this.reportProgress(12, '正在重建剧集数据（数据量较大，较耗时）');
 
     // ---- 2. episode：业务键合并去重 + media_id 重映射 ----
-    // 按 m_map.rowid 分段批量重建（去重键含 media_id，按媒体切批不会把同一键拆到两批）。
-    // 每批完成即上报真实进度，避免单条大 SQL 长时间无进度导致误判卡死。
-    const MEDIA_BATCH = 10000;
-    const mediaCount = Number(
-      ((await this.db!.select('SELECT COUNT(*) AS c FROM m_map')) as { c: number }[])[0]?.c ?? 0
-    );
-    const mediaBatches = Math.max(1, Math.ceil(mediaCount / MEDIA_BATCH));
-
     await this.db!.execute(`CREATE TABLE episode_pkv2 (
       id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL, season_number INTEGER DEFAULT 1,
-      episode_number INTEGER NOT NULL, title TEXT, duration INTEGER, source_id TEXT
+      episode_number INTEGER NOT NULL, title TEXT, duration INTEGER, source_id TEXT,
+      FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
     )`);
-    // 迁移内置同 SCHEMA 索引（swap 后随表带走）：ep_map 分批 JOIN 必需走索引，
-    // 否则每批对 590 万行 episode_pkv2 全表扫描，批数×全扫次数导致数百倍降速。
-    await this.db!.execute(
-      'CREATE INDEX IF NOT EXISTS idx_episode_media_season_source ON episode_pkv2(media_id, season_number, source_id)'
-    );
-    for (let b = 0; b < mediaBatches; b++) {
-      const lo = b * MEDIA_BATCH;
-      const hi = Math.min((b + 1) * MEDIA_BATCH, mediaCount);
-      await this.db!.execute(`INSERT INTO episode_pkv2 (media_id, season_number, episode_number, title, duration, source_id)
-        SELECT m.new, e.season_number, e.episode_number, e.title, e.duration, e.source_id
-        FROM episode e JOIN m_map m ON e.media_id = m.old
-        WHERE m.rowid > ${lo} AND m.rowid <= ${hi}
-        GROUP BY e.media_id, e.season_number, e.episode_number, e.source_id`);
-      this.reportProgress(12 + (b / mediaBatches) * 18, `正在重建剧集数据（第 ${b + 1}/${mediaBatches} 批）`);
-    }
-
+    await this.db!.execute(`INSERT INTO episode_pkv2 (media_id, season_number, episode_number, title, duration, source_id)
+      SELECT m.new, e.season_number, e.episode_number, e.title, e.duration, e.source_id
+      FROM episode e JOIN m_map m ON e.media_id = m.old
+      GROUP BY e.media_id, e.season_number, e.episode_number, e.source_id`);
     await this.db!.execute('CREATE TABLE ep_map (old TEXT PRIMARY KEY, new INTEGER)');
-    for (let b = 0; b < mediaBatches; b++) {
-      const lo = b * MEDIA_BATCH;
-      const hi = Math.min((b + 1) * MEDIA_BATCH, mediaCount);
-      await this.db!.execute(`INSERT INTO ep_map
-        SELECT e.id, n.id
-        FROM episode e
-        JOIN m_map m ON e.media_id = m.old
-        JOIN episode_pkv2 n
-          ON m.new = n.media_id AND e.season_number = n.season_number
-         AND e.episode_number = n.episode_number AND COALESCE(e.source_id, '') = COALESCE(n.source_id, '')
-        WHERE m.rowid > ${lo} AND m.rowid <= ${hi}`);
-      this.reportProgress(30 + (b / mediaBatches) * 10, `正在构建剧集映射（第 ${b + 1}/${mediaBatches} 批）`);
-    }
+    await this.db!.execute(`INSERT INTO ep_map
+      SELECT e.id, n.id
+      FROM episode e
+      JOIN m_map m ON e.media_id = m.old
+      JOIN episode_pkv2 n
+        ON m.new = n.media_id AND e.season_number = n.season_number
+       AND e.episode_number = n.episode_number AND COALESCE(e.source_id, '') = COALESCE(n.source_id, '')`);
+
+    // ---- 2b. episode 换表：同样只改名不 DROP ----
+    // 旧 play_source 的 FK 会被改写到 episode_old_pk，因此 episode_old_pk 必须留到
+    // play_source 换表完成后才能 DROP，否则会级联清空尚未迁移的旧 play_source 源数据。
+    await this.db!.execute('ALTER TABLE episode RENAME TO episode_old_pk');
+    await this.db!.execute('ALTER TABLE episode_pkv2 RENAME TO episode');
+    this.reportProgress(40, '正在重建播放源数据（数据量较大，较耗时）');
 
     // ---- 3. play_source：按 (episode_id,url) 合并去重 + episode_id 重映射，建 ps_map ----
-    const EP_BATCH = 50000;
-    const episodeCount = Number(
-      ((await this.db!.select('SELECT COUNT(*) AS c FROM ep_map')) as { c: number }[])[0]?.c ?? 0
-    );
-    const epBatches = Math.max(1, Math.ceil(episodeCount / EP_BATCH));
-
     await this.db!.execute(`CREATE TABLE play_source_pkv2 (
       id INTEGER PRIMARY KEY, episode_id INTEGER NOT NULL, source_id TEXT NOT NULL, source_name TEXT,
       url TEXT NOT NULL, quality TEXT, language TEXT, is_active INTEGER DEFAULT 1,
-      fail_count INTEGER DEFAULT 0, last_fail_at TEXT
+      fail_count INTEGER DEFAULT 0, last_fail_at TEXT,
+      FOREIGN KEY (episode_id) REFERENCES episode(id) ON DELETE CASCADE
     )`);
-    // 同 episode 段原因：ps_map 分批 JOIN 需走 episode_id 索引，避免每批全扫
-    await this.db!.execute(
-      'CREATE INDEX IF NOT EXISTS idx_play_source_episode_id ON play_source_pkv2(episode_id)'
-    );
-    for (let b = 0; b < epBatches; b++) {
-      const lo = b * EP_BATCH;
-      const hi = Math.min((b + 1) * EP_BATCH, episodeCount);
-      await this.db!.execute(`INSERT INTO play_source_pkv2 (episode_id, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at)
-        SELECT enew, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at
-        FROM (SELECT ep_map.new AS enew, ps.source_id, ps.source_name, ps.url, ps.quality,
-                     ps.language, ps.is_active, ps.fail_count, ps.last_fail_at
-              FROM play_source ps JOIN ep_map ON ps.episode_id = ep_map.old
-              WHERE ep_map.new > ${lo} AND ep_map.new <= ${hi})
-        GROUP BY enew, url`);
-      this.reportProgress(40 + (b / epBatches) * 18, `正在重建播放源数据（第 ${b + 1}/${epBatches} 批）`);
-    }
-
+    await this.db!.execute(`INSERT INTO play_source_pkv2 (episode_id, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at)
+      SELECT enew, source_id, source_name, url, quality, language, is_active, fail_count, last_fail_at
+      FROM (SELECT ep_map.new AS enew, ps.source_id, ps.source_name, ps.url, ps.quality,
+                   ps.language, ps.is_active, ps.fail_count, ps.last_fail_at
+            FROM play_source ps JOIN ep_map ON ps.episode_id = ep_map.old)
+      GROUP BY enew, url`);
     await this.db!.execute('CREATE TABLE ps_map (old TEXT PRIMARY KEY, new INTEGER)');
-    for (let b = 0; b < epBatches; b++) {
-      const lo = b * EP_BATCH;
-      const hi = Math.min((b + 1) * EP_BATCH, episodeCount);
-      await this.db!.execute(`INSERT INTO ps_map
-        SELECT ps.id, n.id
-        FROM play_source ps
-        JOIN ep_map e ON ps.episode_id = e.old
-        JOIN play_source_pkv2 n ON ps.url = n.url AND n.episode_id = e.new
-        WHERE e.new > ${lo} AND e.new <= ${hi}`);
-      this.reportProgress(58 + (b / epBatches) * 8, `正在构建播放源映射（第 ${b + 1}/${epBatches} 批）`);
-    }
+    await this.db!.execute(`INSERT INTO ps_map
+      SELECT ps.id, n.id
+      FROM play_source ps
+      JOIN ep_map e ON ps.episode_id = e.old
+      JOIN play_source_pkv2 n ON ps.url = n.url AND n.episode_id = e.new`);
+
+    // ---- 3b. play_source 换表：叶子表，可安全 DROP ----
+    // 此刻 episode 已是新 INTEGER 表，play_source_pkv2 的 FK 得以满足；
+    // DROP 叶子表不触发任何 CASCADE。旧 episode（episode_old_pk）留待末尾统一清理。
+    await this.db!.execute('DROP TABLE play_source');
+    await this.db!.execute('ALTER TABLE play_source_pkv2 RENAME TO play_source');
     this.reportProgress(66, '正在迁移收藏与推荐数据');
 
     // ---- 4. 小表引用重映射（MEDIA 级：LEFT JOIN m_map；孤儿落 0 哨兵） ----
@@ -633,13 +609,8 @@ export class TauriSqlProvider implements DatabaseProvider {
       LEFT JOIN ps_map p ON w.play_source_id = p.old`);
     this.reportProgress(82, '正在切换新旧数据');
 
-    // ---- 5. swap：先子后父避免外键约束冲突；DROP 自动连带原索引，交由 initSchema 恢复 ----
-    await this.db!.execute('DROP TABLE play_source');
-    await this.db!.execute('ALTER TABLE play_source_pkv2 RENAME TO play_source');
-    await this.db!.execute('DROP TABLE episode');
-    await this.db!.execute('ALTER TABLE episode_pkv2 RENAME TO episode');
-    await this.db!.execute('DROP TABLE media');
-    await this.db!.execute('ALTER TABLE media_pkv2 RENAME TO media');
+    // ---- 5. swap：media/episode/play_source 已在各自重建后立即改名换表（见 1b/2b/3b），
+    //      此处只处理无 FK 子句的小表；DROP 自动连带原索引，交由 initSchema 恢复 ----
     await this.db!.execute('DROP TABLE favorite');
     await this.db!.execute('ALTER TABLE favorite_pkv2 RENAME TO favorite');
     await this.db!.execute('DROP TABLE impression');
@@ -654,6 +625,12 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.db!.execute('ALTER TABLE watch_history_pkv2 RENAME TO watch_history');
     await this.db!.execute('DROP TABLE watch_line_progress');
     await this.db!.execute('ALTER TABLE watch_line_progress_pkv2 RENAME TO watch_line_progress');
+
+    // ---- 6. 清理让位用的旧表：先子后父（episode_old_pk → media_old_pk）。
+    //      此刻已无任何表引用它们——episode/play_source 均已换为新表，小表无 FK 子句，
+    //      故 DROP 不会触发 CASCADE。----
+    await this.db!.execute('DROP TABLE IF EXISTS episode_old_pk');
+    await this.db!.execute('DROP TABLE IF EXISTS media_old_pk');
     this.reportProgress(86, '正在清理迁移辅助数据');
     await this.db!.execute('DROP TABLE m_map');
     await this.db!.execute('DROP TABLE ep_map');
@@ -936,6 +913,15 @@ export class TauriSqlProvider implements DatabaseProvider {
    * 若表存在且包含指定列，则通过重建表删除该列。
    * SQLite 不支持 ALTER TABLE DROP COLUMN，需走重建表流程。
    * 当前仅用于 video_source 表删除 rate_limit 列，重建时显式还原表结构（含主键/唯一约束）。
+   *
+   * 前置条件（重要）：调用方须保证该表**未被任何 FK 子句引用**。
+   * 全库仅 `episode→media.id` 与 `play_source→episode.id` 两组 FK，均不指向 video_source，
+   * 故 FK 全开时 DROP TABLE video_source 既不触发级联、也不被约束拦截，无需关闭外键。
+   * 本函数曾在此处执行 `PRAGMA foreign_keys=OFF/ON` 以「规避」外键，属多余且有害：
+   * 两次 execute 是两次独立的连接池获取，若落在不同连接，被 OFF 的那条连接
+   * 在其剩余寿命（sqlx 默认 idle 10min / max_lifetime 30min）内不会再被开回来，
+   * 该期间所有写入都不受外键约束。FK 本就恒为 ON（sqlx-sqlite 每条连接建立时即置 ON），
+   * 关闭它没有任何收益。若将来本函数被复用到 episode/play_source，必须重新评估。
    */
   private async dropColumnIfExists(table: string, column: string): Promise<void> {
     const cols = await this.db!.select<{ name: string }[]>(
@@ -943,10 +929,7 @@ export class TauriSqlProvider implements DatabaseProvider {
     );
     if (!cols.some(c => c.name === column)) return;
 
-    // 1. 禁用外键约束
-    await this.db!.execute('PRAGMA foreign_keys=OFF');
-
-    // 2. 显式重建 video_source 表（保留主键/唯一约束，移除 rate_limit 列）
+    // 1. 显式重建 video_source 表（保留主键/唯一约束，移除 rate_limit 列）
     await this.db!.execute(`CREATE TABLE ${table}_new (
       id TEXT PRIMARY KEY,
       code TEXT UNIQUE,
@@ -965,20 +948,17 @@ export class TauriSqlProvider implements DatabaseProvider {
       total_requests INTEGER DEFAULT 0
     )`);
 
-    // 3. 复制数据（跳过被删列）
+    // 2. 复制数据（跳过被删列）
     await this.db!.execute(
       `INSERT INTO ${table}_new (id, code, name, base_url, type, is_enabled, health_status, last_check_at, last_success_at, avg_response_time, last_collected_at, last_incremental_collected_at, created_at, fail_count, total_requests)
        SELECT id, code, name, base_url, type, is_enabled, health_status, last_check_at, last_success_at, avg_response_time, last_collected_at, last_incremental_collected_at, created_at, fail_count, total_requests FROM ${table}`
     );
 
-    // 4. 删除旧表
+    // 3. 删除旧表
     await this.db!.execute(`DROP TABLE ${table}`);
 
-    // 5. 重命名新表
+    // 4. 重命名新表
     await this.db!.execute(`ALTER TABLE ${table}_new RENAME TO ${table}`);
-
-    // 6. 恢复外键约束
-    await this.db!.execute('PRAGMA foreign_keys=ON');
   }
 
   /**
@@ -1684,6 +1664,16 @@ export class TauriSqlProvider implements DatabaseProvider {
   }
 
   async deleteEpisodesByMediaIdAndSourceId(mediaId: number, sourceId: string): Promise<void> {
+    // 必须先删这些剧集自己的播放源：调用方（collectorService 重采集路径）是
+    // 「先删后写」，剧集删掉后 id 会被 upsertEpisodesBatch 重新分配，旧播放源若不删
+    // 就指向不存在的 episode（悬空记录）。实测 20 分钟可积出 5 万余条。
+    // 迁移后的库没有 play_source→episode 外键（迁移重建表时未复制 FOREIGN KEY 子句，
+    // 而 SCHEMA_SQL 的 CREATE TABLE IF NOT EXISTS 无法为已存在的表补约束），
+    // 不能指望 ON DELETE CASCADE 兜底，必须显式清理。
+    await this.db!.execute(
+      'DELETE FROM play_source WHERE episode_id IN (SELECT id FROM episode WHERE media_id = ? AND source_id = ?)',
+      [mediaId, sourceId]
+    );
     await this.db!.execute('DELETE FROM episode WHERE media_id = ? AND source_id = ?', [mediaId, sourceId]);
   }
 
@@ -2498,7 +2488,11 @@ async clearWatchHistory(): Promise<void> {
   }
 
   async deleteOldTasks(days: number): Promise<void> {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = resolveCollectTaskCutoff(days);
+    if (cutoff === null) {
+      await this.db!.execute('DELETE FROM collect_task');
+      return;
+    }
     await this.db!.execute('DELETE FROM collect_task WHERE created_at < ?', [cutoff]);
   }
 

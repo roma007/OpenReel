@@ -140,7 +140,7 @@ export function SplashOverlay({ ready, migrating = false, migrationProgress, dis
           <div className="mt-4 text-lg font-bold tracking-wide text-white/90">MovieApp</div>
           <div className="mt-6 max-w-md text-center text-sm text-white/80">
             {stageLabel
-              ? `正在升级数据库（${progress.toFixed(1)}%）：${stageLabel}`
+              ? `正在升级数据库（${progress}%）：${stageLabel}`
               : '正在升级数据库，请勿关闭应用…'}
           </div>
           <div className="mt-5 h-2 w-80 overflow-hidden rounded-full bg-white/10">
@@ -149,7 +149,7 @@ export function SplashOverlay({ ready, migrating = false, migrationProgress, dis
               style={{ width: `${progress}%` }}
             />
           </div>
-          <div className="mt-2 text-xs text-white/50">{progress.toFixed(1)}%</div>
+          <div className="mt-2 text-xs text-white/50">{progress}%</div>
         </div>
       )}
 
