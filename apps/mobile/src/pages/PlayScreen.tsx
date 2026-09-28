@@ -1571,8 +1571,12 @@ export default function PlayScreen({ route, navigation }: Props) {
   }
   const [nextPreview, setNextPreview] = useState<SwipePreview | null>(null);
   const [prevPreview, setPrevPreview] = useState<SwipePreview | null>(null);
+  // 跟手滑动切集期间冻结预览刷新：卡片组还停在 ±screenH（中央=next/prev 预渲染卡）时，
+  // 若随 currentEpisodeId 立刻重算，next 会变「下下集」，中央卡在归位前闪出多一集的集数
+  const swipePreviewFrozenRef = useRef(false);
 
   const loadSwipePreviews = useCallback(async () => {
+    if (swipePreviewFrozenRef.current) return;
     try {
       const [n, p] = await Promise.all([resolveSwipeTarget('next'), resolveSwipeTarget('prev')]);
       const nextInfo: SwipePreview | null = n
@@ -1604,9 +1608,15 @@ export default function PlayScreen({ route, navigation }: Props) {
         Animated.spring(yVal, { toValue: 0, useNativeDriver: true, friction: 8, tension: 60 }).start();
         return;
       }
+      // 切集时 episodes 不变（effect 不会重跑）→ 归位后必须主动重算；
+      // 切 media 时 episodes 随后会被新媒体的剧集覆盖，交由 effect 重算，避免用旧 episodes 算出错误预览
+      let needPreviewRefreshOnSnapback = false;
       if (target.kind === 'episode') {
+        swipePreviewFrozenRef.current = true;
+        needPreviewRefreshOnSnapback = true;
         await handleEpisodePress(target.ep);
       } else {
+        swipePreviewFrozenRef.current = true;
         await switchToMediaById(target.media.id, target.index);
       }
       // 切集/切源成功后复位速率与锁定标：长按瞬时倍速/锁定 2x 不跨集残留
@@ -1616,9 +1626,15 @@ export default function PlayScreen({ route, navigation }: Props) {
       // 必须在新内容状态已提交后归位，避免归位时仍是旧内容）——setTimeout 宏任务确保 setMediaId/setXxx 已 flush
       setTimeout(() => {
         yVal.setValue(0);
+        // 归位后再解冻：上面的 setValue(0) 走 native 立即生效，
+        // 而 setNextPreview 至少晚一帧提交，保证中央卡在刷新前已滑出屏幕
+        swipePreviewFrozenRef.current = false;
+        if (needPreviewRefreshOnSnapback) void loadSwipePreviews();
       }, 0);
     } catch (e) {
       if (__DEV__) console.log('[MOBSWIPE] completeSwipe-err', e);
+      // 切集未发生（state 未变）→ 预览仍是正确旧值，解冻即可，无需重算
+      swipePreviewFrozenRef.current = false;
       Animated.spring(yVal, { toValue: 0, useNativeDriver: true, friction: 8, tension: 60 }).start();
     }
   };

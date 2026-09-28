@@ -105,6 +105,8 @@ export function ResourceOverlay({ routeRef }: Props) {
   if (hidden) return null;
   const fps = local.fps;
   const busy = local.totalBusyPct;
+  const cpu = local.cpuActive ? local.totalCpuPct : null;
+  const showCpu = local.cpuActive;
   const storage = local.storageMB;
   const displayFuncs = local.funcs;
   const sinceLabel = local.since ? local.since.replace('T', ' ').slice(5, 16) : '';
@@ -120,8 +122,17 @@ export function ResourceOverlay({ routeRef }: Props) {
             实时监控
           </Text>
           <Text style={styles.line}>
-            <Text style={styles.k}>主线程忙 </Text>
-            {busy != null ? `${busy.toFixed(1)}%` : '-'}
+            {showCpu ? (
+              <>
+                <Text style={styles.k}>CPU </Text>
+                {cpu != null ? `${cpu.toFixed(1)}%` : '-'}
+              </>
+            ) : (
+              <>
+                <Text style={styles.k}>主线程忙 </Text>
+                {busy != null ? `${busy.toFixed(1)}%` : '-'}
+              </>
+            )}
             <Text style={styles.sep}>  </Text>
             <Text style={styles.k}>帧率 </Text>
             {fps.toFixed(1)}
@@ -145,7 +156,9 @@ export function ResourceOverlay({ routeRef }: Props) {
             </View>
             {sinceLabel ? (
               <Text style={styles.detailSince}>
-                {`统计自 ${sinceLabel} · 忙% = 该功能对总忙碌的贡献占比，之和恒 = 总主线程忙`}
+                {`统计自 ${sinceLabel} · 忙% = 该功能对总忙碌的贡献占比，之和恒 = 总${
+                  showCpu ? 'CPU' : '主线程忙'
+                }`}
               </Text>
             ) : null}
             <ScrollView style={styles.detailScroll} nestedScrollEnabled>

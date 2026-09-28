@@ -916,6 +916,85 @@ function patchIOStopServer() {
   console.log('[patch] iOS expo-video-cache 已打功能18 stopServer 补丁');
 }
 
+// ---------- iOS: 功能19 进程 CPU 采样（浮窗真实忙碌展示） ----------
+// 背景：浮窗「主线程忙%」只量 JS 调度滞后，视频解码/字节供给在原生层不占 JS 主线程，播放中恒 0.0%。
+// 方案 A（用户拍板）：浮窗改显示真实进程 CPU 占用。
+// 实现：clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒（user+system），差分 / 墙钟增量。
+// 注意：不用 task_threads/thread_info 逐线程遍历——该方案在 iOS 模拟器 AsyncFunction 环境触发 SIGTRAP，
+// 且 proc_pidinfo/PROC_PIDTASKINFO 不在 iOS SDK 的 Swift 可见作用域；clock_gettime 实测最稳。
+// CPU 时间单位是秒，pct 可 >100（多核合计）。幂等以「功能19」标记。
+function patchIOSTrueCpu() {
+  const pkgDir = resolvePkg('expo-video-cache');
+  if (!pkgDir) {
+    console.log('[patch] expo-video-cache 未安装，跳过功能19 iOS CPU 采样补丁');
+    return;
+  }
+  const mod = join(pkgDir, 'ios', 'ExpoVideoCacheModule.swift');
+  if (!existsSync(mod)) {
+    console.log('[patch] ExpoVideoCacheModule.swift 缺失，跳过功能19 iOS CPU 采样补丁');
+    return;
+  }
+  let mContent = readFileSync(mod, 'utf8');
+
+  if (mContent.includes('功能19')) {
+    console.log('[patch] iOS CPU 采样已打过补丁，跳过');
+    return;
+  }
+
+  // 1) 模块属性：差分采样状态
+  const propAnchor = '    private var proxyServer: VideoProxyServer?\n    private var activePort: Int = 9000';
+  if (!mContent.includes(propAnchor)) {
+    console.log('[patch][iOS CPU] 未匹配到属性锚点，需手动补丁（见 NATIVE_PATCHES.md）');
+    return;
+  }
+  mContent = mContent.replace(
+    propAnchor,
+    propAnchor + '\n    \n    // 功能19: 进程 CPU 差分采样状态（clock_gettime CLOCK_PROCESS_CPUTIME_ID）\n    private var cpuLastCpuSec: Double = 0\n    private var cpuSamplerInit: Bool = false\n    private var cpuLastWall: Double = 0\n    private let cpuLock = NSLock()'
+  );
+
+  // 2) processCpuPercent AsyncFunction（插入 definition 末尾 clearCache 之后）
+  const funcAnchor =
+    '        AsyncFunction("clearCache") {\n            if let server = self.proxyServer {\n                server.clearCache()\n            } else {\n                VideoCacheStorage(maxCacheSize: 0).clearAll()\n            }\n        }\n    }';
+  if (!mContent.includes(funcAnchor)) {
+    console.log('[patch][iOS CPU] 未匹配到 definition 锚点，需手动补丁（见 NATIVE_PATCHES.md）');
+    return;
+  }
+  const cpuFunc = `        AsyncFunction("clearCache") {
+            if let server = self.proxyServer {
+                server.clearCache()
+            } else {
+                VideoCacheStorage(maxCacheSize: 0).clearAll()
+            }
+        }
+
+        // 功能19: 返回当前进程自上次调用以来的平均 CPU%（多线程合计，可 >100）。
+        // clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒，差分 / 墙钟增量 = CPU%。
+        AsyncFunction("processCpuPercent") { () -> Double in
+            self.cpuLock.lock()
+            defer { self.cpuLock.unlock() }
+            var ts = timespec()
+            guard clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0 else { return -1 }
+            let cpuSec = Double(ts.tv_sec) + Double(ts.tv_nsec) / 1_000_000_000
+            let wall = ProcessInfo.processInfo.systemUptime
+            guard self.cpuSamplerInit else {
+                self.cpuSamplerInit = true
+                self.cpuLastCpuSec = cpuSec
+                self.cpuLastWall = wall
+                return -1
+            }
+            let dt = wall - self.cpuLastWall
+            let dCpu = cpuSec - self.cpuLastCpuSec
+            self.cpuLastCpuSec = cpuSec
+            self.cpuLastWall = wall
+            guard dt > 1e-4 else { return -1 }
+            return (dCpu / dt) * 100.0
+        }
+    }`;
+  mContent = mContent.replace(funcAnchor, cpuFunc);
+  writeFileSync(mod, mContent);
+  console.log('[patch] iOS expo-video-cache 已打功能19 CPU 采样补丁');
+}
+
 try {
   patchAndroid();
   patchAndroidSegmentProgress();
@@ -924,6 +1003,7 @@ try {
   patchIOSPictureInPicture();
   patchIOSTrace();
   patchIOStopServer();
+  patchIOSTrueCpu();
 } catch (e) {
   console.log('[patch] 原生补丁脚本异常（已忽略，不阻断安装）: ' + (e && e.message));
 }
