@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import App from './App';
+import { isReloadNavigation } from './lib/boot';
 import './index.css';
 import './vidstack.css';
 
@@ -74,4 +75,7 @@ function captureWebviewErrors() {
 
 captureWebviewErrors();
 
-createRoot(document.getElementById('root')!).render(<App />);
+// 必须在首帧渲染前同步求值：刷新（reload）不是应用启动，不播欢迎页与初始广告
+const isReload = isReloadNavigation();
+
+createRoot(document.getElementById('root')!).render(<App isReload={isReload} />);

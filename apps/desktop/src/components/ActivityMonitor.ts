@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import * as FileSystem from 'expo-file-system/legacy';
 
 export interface FuncRow {
+  /** 页面中文名（桌面端由路由 path 分桶得到，保证聚合 key 有限）。 */
   page: string;
   busy_pct: number | null;
   seconds: number;
@@ -11,7 +11,6 @@ export interface LocalMetrics {
   totalBusyPct: number | null;
   funcs: FuncRow[];
   since: string;
-  fps: number;
   storageMB: number | null;
 }
 
@@ -20,49 +19,23 @@ const EMIT_MS = 5000;
 const INACTIVE_TTL = 30000;
 const STORAGE_REFRESH_MS = 30000;
 
-// 递归统计沙盒目录占用（KB->MB 调用方换算）
-async function dirSizeBytes(uri: string): Promise<number> {
-  let total = 0;
-  try {
-    const entries = await FileSystem.readDirectoryAsync(uri);
-    for (const name of entries) {
-      const p = `${uri}${name}`;
-      const it = await FileSystem.getInfoAsync(p);
-      if (!it.exists) continue;
-      try {
-        if (it.isDirectory) {
-          total += await dirSizeBytes(`${p}/`);
-        } else {
-          total += it.size as number;
-        }
-      } catch {
-        total += it.size as number;
-      }
-    }
-  } catch {
-    return 0;
-  }
-  return total;
-}
-
-// iPhone：App 沙盒根目录（含 Documents/Library/tmp）总占用，即「占用存储空间」
+// 存储占用：App 数据目录递归求和（Rust command），语义对应移动端沙盒遍历
 async function calcAppStorageMB(): Promise<number | null> {
   try {
-    const doc = FileSystem.documentDirectory;
-    if (!doc) return null;
-    const root = doc.replace(/\/Documents\/?$/, '');
-    const bytes = await dirSizeBytes(root.endsWith('/') ? root : `${root}/`);
+    const { invoke } = await import('@tauri-apps/api/core');
+    const bytes = await invoke<number>('app_storage_bytes');
     return bytes > 0 ? bytes / 1048576 : null;
   } catch {
     return null;
   }
 }
 
-// iPhone 版资源监控数据源（App 内自包含本地聚合，不依赖 monitor.py）：
-// - 主线程忙%：250ms 调度滞后累积（与安卓 JS 探针同法），按页面归因；
-//   各页贡献占比 = 该页 busy / 全体窗口，之和恒 = 总忙%（与安卓清单对账语义一致）。
-// - 不活跃页面 30s 自动消失；FPS 用 requestAnimationFrame 每秒帧计数。
-// - iOS 沙盒无 App 级处理器/内存 API => 不采集，由 UI 文案注明。
+// 资源监控数据源（App 内自包含本地聚合，与移动端同算法同常量）：
+// - 主线程忙%：250ms 调度滞后累积（长任务真实阻塞主线程），按当前页面归因；
+//   各页贡献占比 = 该页 busy / 全体窗口，之和恒 = 总忙%。
+// - 不活跃页面 30s 自动消失。
+// - 桌面端不采集帧率：macOS WKWebView（Tauri 2）会把 requestAnimationFrame 限流到约 1Hz，
+//   rAF 帧计数恒为 0，属平台限制而非真实渲染帧率，故不展示（不用 native vsync 等代理值顶替）。
 export function useActivityMonitor(routeRef: { current: string }): LocalMetrics {
   const pagesRef = useRef(new Map<string, { busySum: number; winSum: number; lastActive: number }>());
   const busyRef = useRef({ busyMs: 0, started: Date.now(), lastEmit: Date.now() });
@@ -71,7 +44,6 @@ export function useActivityMonitor(routeRef: { current: string }): LocalMetrics 
     totalBusyPct: null,
     funcs: [],
     since: '',
-    fps: 0,
     storageMB: null,
   }));
 
@@ -79,7 +51,7 @@ export function useActivityMonitor(routeRef: { current: string }): LocalMetrics 
     const s = busyRef.current;
     const emit = () => {
       const now = Date.now();
-      const r = routeRef.current || 'Home';
+      const r = routeRef.current || '其它';
       const win = Math.max(1, now - s.started);
       const agg = pagesRef.current.get(r) ?? { busySum: 0, winSum: 0, lastActive: now };
       agg.busySum += s.busyMs;
@@ -114,11 +86,11 @@ export function useActivityMonitor(routeRef: { current: string }): LocalMetrics 
         totalBusyPct: totalWin > 0 ? Math.round((totalBusy / totalWin) * 1000) / 10 : null,
         funcs,
         since: new Date(startAt.current).toISOString(),
-        fps: m.fps,
         storageMB: m.storageMB,
       }));
     };
 
+    // 忙% 探针：setInterval 期望时刻漂移法 —— 滞后 > TICK+10ms 视为被长任务占用
     let expected = Date.now();
     const timer = setInterval(() => {
       const now = Date.now();
@@ -128,27 +100,12 @@ export function useActivityMonitor(routeRef: { current: string }): LocalMetrics 
       if (now - s.lastEmit >= EMIT_MS) emit();
     }, TICK_MS);
 
-    let frames = 0;
-    let rafAlive = true;
-    const rafLoop = () => {
-      if (!rafAlive) return;
-      frames++;
-      requestAnimationFrame(rafLoop);
-    };
-    requestAnimationFrame(rafLoop);
-    const fpsTimer = setInterval(() => {
-      setMetrics((m) => ({ ...m, fps: frames }));
-      frames = 0;
-    }, 1000);
-
     return () => {
       clearInterval(timer);
-      clearInterval(fpsTimer);
-      rafAlive = false;
     };
   }, [routeRef]);
 
-  // 存储占用：沙盒遍历较贵，启动算一次 + 每 30s 重算
+  // 存储占用：目录遍历较贵，启动算一次 + 每 30s 重算（inFlight 去重防并发）
   useEffect(() => {
     let alive = true;
     let inFlight = false;

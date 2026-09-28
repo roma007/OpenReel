@@ -5,8 +5,10 @@ import { MigrationDiskError, type MigrationProgress } from './db/tauriSqlProvide
 import { Layout } from './components/Layout';
 import { PipWindow } from './pip/PipWindow';
 import { SplashOverlay } from './components/SplashOverlay';
+import { MigrationOverlay } from './components/MigrationOverlay';
 
 import { ContextMenu } from './components/ContextMenu';
+import { ResourceOverlay } from './components/ResourceOverlay';
 import { ThemeProvider } from './themes/ThemeProvider';
 import { FontSizeProvider } from './themes/FontSizeProvider';
 import { ConfirmProvider } from './components/ConfirmProvider';
@@ -35,15 +37,20 @@ import TestCollectPage from './pages/TestCollectPage';
 import HelpCenterPage from './pages/HelpCenterPage';
 import DbToolPage from './pages/DbToolPage';
 
-export default function App() {
+interface AppProps {
+  /** 本次页面加载是否为刷新（reload）。刷新属页面级操作，不播欢迎页与初始广告。 */
+  isReload?: boolean;
+}
+
+export default function App({ isReload = false }: AppProps) {
   const isPip =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('view') === 'pip';
   if (isPip) return <PipWindow />;
-  return <MainApp />;
+  return <MainApp isReload={isReload} />;
 }
 
-function MainApp() {
+function MainApp({ isReload }: { isReload: boolean }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 主键 INTEGER 升级进行中：全屏占位，且初始化超时窗口放宽（迁移可能数分钟）
@@ -61,7 +68,8 @@ function MainApp() {
       setReady(true);
     }, migrating ? 30 * 60 * 1000 : 120000);
 
-    // 静默初始化：不再显示「正在加载/数据库步骤」文字，由欢迎页覆盖层承接
+    // 静默初始化：不再显示「正在加载/数据库步骤」文字（冷启动由欢迎页覆盖层承接；
+    // 刷新时为纯背景等待 init 完成）
     initApp(
       undefined,
       (running) => setMigrating(running),
@@ -106,6 +114,8 @@ function MainApp() {
               <ConfirmProvider>
                 <BrowserRouter>
                   <ContextMenu />
+                  {/* 资源监控浮窗：需在 Router 内取 useLocation 按页面归因；ready 门控使其不覆盖启动/迁移占位层 */}
+                  <ResourceOverlay />
                   <Routes>
                     <Route element={<Layout />}>
                       <Route path="/" element={<HomePage />} />
@@ -141,7 +151,10 @@ function MainApp() {
           </ThemeProvider>
         )}
       </div>
-      <SplashOverlay ready={ready} migrating={migrating} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />
+      {/* 欢迎页 + 初始广告属于应用启动序列：刷新时（isReload）不重播 */}
+      {!isReload && <SplashOverlay ready={ready} />}
+      {/* 数据库升级/磁盘不足占位层不属于启动序列，刷新时同样显示 */}
+      <MigrationOverlay migrating={migrating} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />
     </>
   );
 }
