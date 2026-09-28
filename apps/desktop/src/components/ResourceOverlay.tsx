@@ -201,8 +201,8 @@ export function ResourceOverlay() {
       {showDetail && (
         <>
           <div className="fixed inset-0 z-[1006] bg-black/45" onClick={() => setShowDetail(false)} />
-          {/* 弹窗主体不透明（#131722），符合弹窗不透明度规则 */}
-          <div className="fixed left-4 right-4 top-24 z-[1007] rounded-lg border border-white/[0.18] bg-[#131722] p-2.5 shadow-2xl">
+          {/* 弹窗主体不透明（#131722），符合弹窗不透明度规则；固定宽度够用即可，不随窗口拉伸 */}
+          <div className="fixed left-4 top-24 z-[1007] w-[440px] max-w-[calc(100vw-2rem)] rounded-lg border border-white/[0.18] bg-[#131722] p-2.5 shadow-2xl">
             <div className="mb-1 flex items-center justify-between">
               <div className="text-[13px] font-bold text-[#e8e8ee]">功能资源占用</div>
               <button
