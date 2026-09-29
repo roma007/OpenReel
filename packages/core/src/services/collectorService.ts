@@ -1627,13 +1627,20 @@ const title = await normalizer.normalizeTitle(item.vod_name);
 
     console.log(`[Collector] collectLatest: ${sources.length} sources, incrementalMaxPages=${config.incrementalMaxPages}, maxIncrementalHours=${config.maxIncrementalHours}`);
 
-    // 存量纠错：合并历史「电影误判为电视剧」的重复指纹（幂等，失败不影响本次采集）
-    await this.repairMediaTypeMismatches();
-    // 存量同名多版本合并与采集并行：不阻塞首帧进度回调，UI 立即进入「增量采集中」状态
+    // 存量纠错与同名合并一并后台化：二者都是「存量整理」，与本次增量采集无数据依赖。
+    // 过去 repair 串行 await 在建任务行之前，实测阻塞 7417ms（+315ms→+7417ms 期间
+    // 浮窗已显示「采集中 0/6」而任务列表「暂无采集任务」），是 7 秒的假采集中空窗。
+    // 与 runVersionMergeOnce 同为并发写 media（该并发模式本项目已验证：实测合并
+    // 扫描 44978 条耗时 3.9s 期间采集正常入库 6557 部），此处沿用同一前提。
+    const repairPromise = this.repairMediaTypeMismatches().catch((err) => {
+      console.error('[Collector] 存量纠错失败（不影响本次采集）:', err instanceof Error ? err.message : String(err));
+      return 0;
+    });
     const versionMergePromise = this.runVersionMergeOnce(true);
 
     const batchMeter = new PerfMeter();
     await Promise.all([
+      repairPromise,
       versionMergePromise,
       ...sources.map(async (source, si) => {
         const sourceMeter = new PerfMeter();
@@ -1649,6 +1656,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       }
 
       const taskId = `${source.code}-INCREMENTAL-${Date.now()}-${si}-${Math.random().toString(36).slice(2, 6)}`;
+      // 与 collectSourceLatest 同一套取消机制：任务行被用户删除即停止该源采集，
+      // 避免「删了任务却仍在后台抓取入库」（signal 中止网络与后续写事务）。
+      // 必须在 createCollectTask 之前注册，否则 PENDING 窗口内删除时 cancelTask 拿不到 controller。
+      const controller = new AbortController();
+      this.activeAbortControllers.set(taskId, controller);
+      let cancelled = false;
+      const isCancelled = () => controller.signal.aborted;
       const task: CollectTask = {
         id: generateId(),
         taskId,
@@ -1664,8 +1678,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       };
 
       await this.db.createCollectTask(task);
+      // PENDING 窗口内（INSERT 之后、首次进度回调之前）就可能被删除：
+      // 此时必须跳过 running 进度回调，否则 store 会把已删除的源重新写回浮窗。
+      if (!(await this.db.getCollectTaskById(taskId)) || isCancelled()) {
+        cancelled = true;
+      }
 
-      onSourceProgress?.({
+      if (!cancelled) onSourceProgress?.({
         sourceIndex: si,
         sourceName: source.name,
         currentPage: 0,
@@ -1686,9 +1705,19 @@ const title = await normalizer.normalizeTitle(item.vod_name);
 
       try {
         await this.db.updateCollectTask(taskId, { status: 'RUNNING' as TaskStatus, startedAt: now, currentPage });
-        await this.assertSourceReachable(source);
+        // PENDING 阶段就可能被删除：进入探测/循环前先确认任务行还在
+        if (!(await this.db.getCollectTaskById(taskId)) || isCancelled()) {
+          cancelled = true;
+        } else {
+          await this.assertSourceReachable(source);
+        }
 
-        while (hasMore && currentPage <= maxPages) {
+        while (!cancelled && hasMore && currentPage <= maxPages) {
+          // 每页开始前确认任务行仍存在：覆盖「采集中删除」与「源探测期间删除」
+          if (!(await this.db.getCollectTaskById(taskId)) || isCancelled()) {
+            cancelled = true;
+            break;
+          }
           console.log(`[Collector] Processing source ${source.name} page ${currentPage}${hours ? ` hours=${hours}` : ` (定额)`}`);
           let injectedList: CMSListResponse | null = null;
           if (prefetchPromise) {
@@ -1699,13 +1728,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
             }
           }
 
-          const runPromise = this.collectFromSource(source.id, source.baseUrl, currentPage, pageSize, hours, undefined, sourceMeter, injectedList);
+          const runPromise = this.collectFromSource(source.id, source.baseUrl, currentPage, pageSize, hours, controller.signal, sourceMeter, injectedList);
 
           const nextPage = currentPage + 1;
           const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
           if (shouldPrefetch) {
             prefetchPromise = new CMSAdapter(source.baseUrl)
-              .getList(nextPage, pageSize, hours, undefined)
+              .getList(nextPage, pageSize, hours, controller.signal)
               .then((r) => r)
               .catch(() => null);
           }
@@ -1743,25 +1772,36 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           currentPage++;
         }
 
-        await this.db.updateCollectTask(taskId, {
-          status: 'COMPLETED' as TaskStatus,
-          completedAt: new Date().toISOString(),
-        });
+        if (cancelled) {
+          // 任务行已被用户删除：不再写 COMPLETED、不更新源的增量时间戳，
+          // 也不发 done 进度（store 侧已把该源从浮窗移除，避免残留）。
+          console.log(`[Collector] 源「${source.name}」任务行已删除，停止采集（已采 ${collected} 部）`);
+        } else {
+          await this.db.updateCollectTask(taskId, {
+            status: 'COMPLETED' as TaskStatus,
+            completedAt: new Date().toISOString(),
+          });
 
-        await this.db.updateSourceLastIncrementalCollectedAt(source.id, new Date().toISOString());
+          await this.db.updateSourceLastIncrementalCollectedAt(source.id, new Date().toISOString());
 
-        this.logPerf('SOURCE', { src: source.name, taskId, pages: currentPage - 1, collected, failed, status: 'done' }, sourceMeter);
-        batchMeter.merge(sourceMeter);
+          this.logPerf('SOURCE', { src: source.name, taskId, pages: currentPage - 1, collected, failed, status: 'done' }, sourceMeter);
+          batchMeter.merge(sourceMeter);
 
-        onSourceProgress?.({
-          sourceIndex: si,
-          sourceName: source.name,
-          currentPage: currentPage - 1,
-          totalPages,
-          collected,
-          status: 'done',
-        });
+          onSourceProgress?.({
+            sourceIndex: si,
+            sourceName: source.name,
+            currentPage: currentPage - 1,
+            totalPages,
+            collected,
+            status: 'done',
+          });
+        }
       } catch (err) {
+        // 被取消（signal abort）属于用户主动删除的正常路径，不记为失败
+        if (isCancelled()) {
+          console.log(`[Collector] 源「${source.name}」采集已中止（任务已删除）`);
+          return;
+        }
         const errInstance = err instanceof Error ? err : new Error(String(err));
         const errType = classifyError(err);
         const errorMsg = errInstance.message;
@@ -1784,6 +1824,8 @@ const title = await normalizer.normalizeTitle(item.vod_name);
         });
         this.logPerf('SOURCE', { src: source.name, taskId, pages: currentPage, collected, failed, status: 'failed', error: errorMsg }, sourceMeter);
         batchMeter.merge(sourceMeter);
+      } finally {
+        this.activeAbortControllers.delete(taskId);
       }
     })]);
 

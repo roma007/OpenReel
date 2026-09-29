@@ -124,6 +124,7 @@ export interface AppState {
   runningReprobeTask: CollectTask | null;
 
   collectSourceProgress: Array<{
+    sourceCode: string;
     sourceName: string;
     currentPage: number;
     totalPages: number;
@@ -754,6 +755,7 @@ export function createAppStore(db: DatabaseProvider) {
         }
         set({
           collectSourceProgress: sources.map((s) => ({
+            sourceCode: s.code,
             sourceName: s.name,
             currentPage: 0,
             totalPages: 0,
@@ -766,7 +768,12 @@ export function createAppStore(db: DatabaseProvider) {
           set((state) => {
             if (!state.collectSourceProgress) return state;
             const updated = [...state.collectSourceProgress];
-            updated[progress.sourceIndex] = {
+            // 按 sourceName 匹配。任务行被删除后该源已从数组移除，此时若回退到
+            // sourceIndex 会把进度写进别的源（实测导致已删除源"复活"），故找不到即忽略。
+            const idx = updated.findIndex((p) => p.sourceName === progress.sourceName);
+            if (idx < 0) return state;
+            updated[idx] = {
+              ...updated[idx],
               sourceName: progress.sourceName,
               currentPage: progress.currentPage,
               totalPages: progress.totalPages,
@@ -964,10 +971,22 @@ export function createAppStore(db: DatabaseProvider) {
 
     deleteCollectTask: async (taskId: string) => {
       try {
+        // 先取任务行快照：既用于按源名定位浮窗进度项，也用于删除后判断该源是否仍在采集
+        const task = await db.getCollectTaskById(taskId).catch(() => null);
         // 删除运行中任务前先中断该源采集（AbortSignal 中止网络与后续写事务），
         // 避免 DELETE 在单连接队列中被持续入队的采集写事务拖慢（大库下可达 10s+）。
         collectorService.cancelTask(taskId);
         await db.deleteCollectTask(taskId);
+        // 该源任务行已删除 → 从浮窗/进度中移除，避免浮窗残留已删除的源
+        // （若不移除，被删源会停在 running，使 allDone 永不成立，浮窗永久残留）
+        if (task) {
+          set((state) => {
+            if (!state.collectSourceProgress) return state;
+            const remain = state.collectSourceProgress.filter((p) => p.sourceName !== task.sourceName);
+            if (remain.length === state.collectSourceProgress.length) return state;
+            return { collectSourceProgress: remain.length > 0 ? remain : null };
+          });
+        }
         await get().loadCollectTasks();
       } catch (err: any) {
         set({ error: err.message });

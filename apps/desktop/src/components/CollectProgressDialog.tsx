@@ -99,9 +99,9 @@ export function CollectProgressDialog() {
           ) : (
             <Loader2 className="size-3.5 animate-spin" />
           )}
-          <span>{allDone ? '采集完成' : '增量采集中'}</span>
+          <span>{allDone ? '采集完成' : `采集中 ${doneCount + failedCount}/${collectSourceProgress.length}`}</span>
           {totalCollected > 0 && (
-            <span className="text-xs text-muted-foreground">{totalCollected}部</span>
+            <span className="text-xs text-muted-foreground">· {totalCollected}部</span>
           )}
         </Button>
       </div>

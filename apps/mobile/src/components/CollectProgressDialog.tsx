@@ -216,7 +216,7 @@ export default function CollectProgressDialog() {
           </Text>
           {totalCollected > 0 && (
             <Text style={[styles.pillCount, { color: colors.mutedForeground }]}>
-              {totalCollected}部
+              · {totalCollected}部
             </Text>
           )}
         </Button>

@@ -37,6 +37,7 @@ export default function TaskListScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
@@ -136,14 +137,25 @@ export default function TaskListScreen({ navigation }: Props) {
     }
   }, [collectTasks, retryingId]);
 
+  // 删除期间 SQLite 写队列会排队（实测 125ms~2710ms），需禁用按钮并给出反馈，
+  // 否则用户会以为点击无效而重复点击
+  const doDelete = async (task: CollectTask) => {
+    setDeletingId(task.taskId);
+    try {
+      await deleteCollectTask(task.taskId);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleDelete = (task: CollectTask) => {
     if (task.status === 'RUNNING' || task.status === 'PENDING') {
       Alert.alert('删除任务', `确定要删除此${task.status === 'RUNNING' ? '运行中' : '等待中'}的任务吗？`, [
         { text: '取消', style: 'cancel' },
-        { text: '删除', style: 'destructive', onPress: () => deleteCollectTask(task.taskId) },
+        { text: '删除', style: 'destructive', onPress: () => doDelete(task) },
       ]);
     } else {
-      deleteCollectTask(task.taskId);
+      doDelete(task);
     }
   };
 
@@ -323,8 +335,13 @@ export default function TaskListScreen({ navigation }: Props) {
                           {resumingId === task.taskId ? '续采中...' : '继续'}
                         </Button>
                       )}
-                      <Button variant="secondary" size="sm" onPress={() => handleDelete(task)} disabled={resumingId === task.taskId || retryingId === task.taskId}>
-                        删除
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onPress={() => handleDelete(task)}
+                        disabled={deletingId === task.taskId || resumingId === task.taskId || retryingId === task.taskId}
+                      >
+                        {deletingId === task.taskId ? '删除中...' : '删除'}
                       </Button>
                     </View>
                 </View>
