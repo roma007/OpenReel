@@ -570,6 +570,27 @@ const MIGRATIONS: Migration[] = [
     // 部分完成态抛错中止、已完成则只补收尾。v61 仅作为结构升级已发生的版本标记。
     sql: `SELECT 1;`,
   },
+  {
+    version: 62,
+    description: 'search_history_keyword_unique',
+    // 修复搜索历史重复：keyword 原无唯一约束，addSearchHistory 的 SELECT→INSERT 竞态可产生
+    // 多条同关键词记录（曾有「两个李乃文」）。重建表加 UNIQUE(keyword) 并清洗存量重复
+    // （count 取合并、updated_at 取最新）。
+    sql: `
+      CREATE TABLE search_history_new (
+        id TEXT PRIMARY KEY,
+        keyword TEXT NOT NULL UNIQUE,
+        count INTEGER DEFAULT 1,
+        updated_at TEXT
+      );
+      INSERT INTO search_history_new (id, keyword, count, updated_at)
+        SELECT MIN(id), keyword, SUM(count), MAX(updated_at)
+        FROM search_history
+        GROUP BY keyword;
+      DROP TABLE search_history;
+      ALTER TABLE search_history_new RENAME TO search_history;
+    `,
+  },
 ];
 
 /**
@@ -1649,6 +1670,16 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     return rows[0] ? rowToMedia(rows[0]) : null;
   }
 
+  async getMediaByVodIdSet(vodIds: string[]): Promise<Media[]> {
+    const ids = vodIds.filter((v) => v != null && v !== '');
+    if (ids.length === 0) return [];
+    const rows = await this.db!.getAllAsync<any[]>(
+      `SELECT * FROM media WHERE vod_id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    return rows.map(rowToMedia);
+  }
+
   async updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void> {
     await this.db!.runAsync(
       `UPDATE media SET poster_url = ?, updated_at = ? WHERE id = ?`,
@@ -2530,13 +2561,13 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   // —— SearchHistory DAO ——
   async addSearchHistory(keyword: string): Promise<void> {
     const now = new Date().toISOString();
-    const existing = await this.db!.getFirstAsync<any>('SELECT * FROM search_history WHERE keyword = ?', [keyword]);
-    if (existing) {
-      await this.db!.runAsync('UPDATE search_history SET count = count + 1, updated_at = ? WHERE keyword = ?', [now, keyword]);
-    } else {
-      const id = `sh_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-      await this.db!.runAsync('INSERT INTO search_history (id, keyword, count, updated_at) VALUES (?, ?, 1, ?)', [id, keyword, now]);
-    }
+    // 原子 UPSERT：v62 迁移后 keyword 有 UNIQUE 约束（老库已重建清洗），
+    // ON CONFLICT(keyword) 保证并发/重复调用不产生多条同关键词记录（曾有「两个李乃文」）。
+    await this.db!.runAsync(
+      `INSERT INTO search_history (id, keyword, count, updated_at) VALUES (?, ?, 1, ?)
+       ON CONFLICT(keyword) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at`,
+      [`sh_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`, keyword, now]
+    );
   }
 
   async getSearchHistory(limit: number = 10): Promise<{ keyword: string; count: number }[]> {

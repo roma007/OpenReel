@@ -165,7 +165,8 @@ export class CollectorService {
     sourceId: string,
     _sourceName?: string,
     minYear: number = DEFAULT_MIN_YEAR,
-    meter?: PerfMeter
+    meter?: PerfMeter,
+    shortDramaCache?: Map<string, { isShortDrama: boolean; status: 'SUMMARY' | 'PROBE' | 'FALLBACK'; episodeDuration: number | null }>
   ): Promise<PreparedMedia | null> {
     const trace = meter
       ? <T>(label: string, fn: () => Promise<T>) => meter.trace(label, fn)
@@ -274,12 +275,27 @@ export class CollectorService {
           durationCheckStatus = existingStatus;
           episodeDurationSec = existing?.episodeDuration ?? null;
         } else {
-          const configService = new SystemConfigService(this.db);
-          const config = await configService.getShortDramaConfig();
-          const result = await trace('shortDrama', () => this.determineShortDrama(genres, description || '', title, epGroups, config, meter));
-          isShortDrama = result.isShortDrama;
-          durationCheckStatus = result.status;
-          episodeDurationSec = result.episodeDuration;
+          // D2 同指纹探测复用：本次采集内已判定过的同一 fingerprint 直接复用结果，
+          // 避免多源/同源同片重复网络探测（getDurationFromM3U8）与解析。
+          if (shortDramaCache) {
+            const cached = shortDramaCache.get(fingerprint);
+            if (cached) {
+              isShortDrama = cached.isShortDrama;
+              durationCheckStatus = cached.status;
+              episodeDurationSec = cached.episodeDuration;
+            }
+          }
+          if (durationCheckStatus == null) {
+            const configService = new SystemConfigService(this.db);
+            const config = await configService.getShortDramaConfig();
+            const result = await trace('shortDrama', () => this.determineShortDrama(genres, description || '', title, epGroups, config, meter));
+            isShortDrama = result.isShortDrama;
+            durationCheckStatus = result.status;
+            episodeDurationSec = result.episodeDuration;
+            if (shortDramaCache) {
+              shortDramaCache.set(fingerprint, { isShortDrama: result.isShortDrama, status: result.status, episodeDuration: result.episodeDuration });
+            }
+          }
         }
       }
 
@@ -793,6 +809,21 @@ sourceUpdatedAt,
     let failedCount = 0;
     let skippedCount = 0;
     const failedItems: FailedItem[] = [];
+
+    // C2 批量去重前置：页级一次 IN 查询把本页全部 vod_id 的存量行查回
+    // （后续 worker 的 maybeSkipUnchangedSourceItem 用内存 Map 短路，免逐条查库）。
+    const allVodIds = Array.from(new Set(items.map((it) => (it && it.vod_id != null ? String(it.vod_id) : '')).filter(Boolean)));
+    const vodIdCache = new Map<string, Media | null>();
+    if (allVodIds.length > 0) {
+      const existingRows = await this.db.getMediaByVodIdSet(allVodIds);
+      const byVodId = new Map<string, Media>();
+      for (const m of existingRows) {
+        if (m.vodId) byVodId.set(m.vodId, m);
+      }
+      for (const vid of allVodIds) vodIdCache.set(vid, byVodId.get(vid) ?? null);
+    }
+    // D2 同指纹短剧探测复用：本页内多个条目共享同一 fingerprint 时只探测一次
+    const shortDramaCache = new Map<string, { isShortDrama: boolean; status: 'SUMMARY' | 'PROBE' | 'FALLBACK'; episodeDuration: number | null }>();
     // 阶段1 只做网络拉取/归一化/指纹查重（无 DB 写），并行 worker 产出待提交数据
     const prepared: (PreparedMedia | null)[] = new Array(items.length).fill(null);
     const preparedErrors: (string | null)[] = new Array(items.length).fill(null);
@@ -805,7 +836,7 @@ sourceUpdatedAt,
         try {
           console.log(`[Collector] Processing (worker): ${listItem.vod_name} (vod_id=${listItem.vod_id}) index=${currentIndex}`);
 
-          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, config.minYear, config.ignoreSourceSkip);
+          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, config.minYear, config.ignoreSourceSkip, vodIdCache);
           if (skippedExisting) {
             skippedCount++;
             console.log(`[Collector] 跳过(源未变): ${listItem.vod_name}`);
@@ -826,7 +857,7 @@ sourceUpdatedAt,
           }
 
           const item = detailResponse.list[0];
-          const prep = await this.prepareItem(item, sourceId, '', config.minYear, meter);
+          const prep = await this.prepareItem(item, sourceId, '', config.minYear, meter, shortDramaCache);
           prepared[currentIndex] = prep;
           console.log(`[Collector] Worker(${sourceId}) prepared: ${item.vod_name}`);
         } catch (err) {
@@ -967,7 +998,8 @@ sourceUpdatedAt,
   private async maybeSkipUnchangedSourceItem(
     listItem: CMSMediaItem,
     minYear: number,
-    ignoreSourceSkip: boolean
+    ignoreSourceSkip: boolean,
+    vodIdCache?: Map<string, Media | null>
   ): Promise<Media | null> {
     if (ignoreSourceSkip) return null;
     const rawVodTime = listItem.vod_time;
@@ -975,11 +1007,18 @@ sourceUpdatedAt,
     const vodTimeMs = Date.parse(rawVodTime.replace(' ', 'T'));
     if (Number.isNaN(vodTimeMs)) return null;
 
-    // list 精简响应（无 vod_year/vod_play_url，指纹无法复算）时优先按源侧 vod_id 精确匹配；
-    // vod_id 缺失再退回指纹匹配。
-    const existing = listItem.vod_id
-      ? await this.db.getMediaByVodId(String(listItem.vod_id))
-      : null;
+    // C2 批量去重前置：页级已按本页全部 vod_id 一次查回内存 Map，命中即免逐条查库。
+    // Map 值为 null 表示「该 vod_id 无存量行」，与「查库返回 null」语义一致。
+    let existing: Media | null | undefined;
+    if (vodIdCache && listItem.vod_id) {
+      existing = vodIdCache.has(String(listItem.vod_id))
+        ? vodIdCache.get(String(listItem.vod_id))!
+        : undefined;
+    } else {
+      existing = listItem.vod_id
+        ? await this.db.getMediaByVodId(String(listItem.vod_id))
+        : null;
+    }
     if (existing?.sourceUpdatedAt) {
       const lastMs = Date.parse(existing.sourceUpdatedAt);
       if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return existing;

@@ -922,7 +922,18 @@ function patchIOStopServer() {
 // 实现：clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒（user+system），差分 / 墙钟增量。
 // 注意：不用 task_threads/thread_info 逐线程遍历——该方案在 iOS 模拟器 AsyncFunction 环境触发 SIGTRAP，
 // 且 proc_pidinfo/PROC_PIDTASKINFO 不在 iOS SDK 的 Swift 可见作用域；clock_gettime 实测最稳。
-// CPU 时间单位是秒，pct 可 >100（多核合计）。幂等以「功能19」标记。
+// 口径（2026-09-29 修正）：分母 = 墙钟增量 × 逻辑核数，即「占整机全部核的百分比」，上限 100%。
+// 原口径分母只有墙钟增量（100% = 占满 1 核），多核设备会显示 100%+，普通用户无法理解。
+// 幂等以「功能19」标记；公式升级走 replace 幂等替换，不重复插入 AsyncFunction。
+const iosCpuCommentOld = `        // 功能19: 返回当前进程自上次调用以来的平均 CPU%（多线程合计，可 >100）。
+        // clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒，差分 / 墙钟增量 = CPU%。`;
+const iosCpuCommentNew = `        // 功能19: 返回当前进程自上次调用以来的平均 CPU 占用率（占整机全部核的百分比，上限 100%）。
+        // clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒（已跨核累加），
+        // 差分 / (墙钟增量 × 逻辑核数) = 整机口径 CPU%。`;
+const iosCpuFormulaOld = '            return (dCpu / dt) * 100.0';
+const iosCpuFormulaNew =
+  '            let cores = Double(ProcessInfo.processInfo.activeProcessorCount)\n' +
+  '            return (dCpu / (dt * cores)) * 100.0';
 function patchIOSTrueCpu() {
   const pkgDir = resolvePkg('expo-video-cache');
   if (!pkgDir) {
@@ -937,7 +948,15 @@ function patchIOSTrueCpu() {
   let mContent = readFileSync(mod, 'utf8');
 
   if (mContent.includes('功能19')) {
-    console.log('[patch] iOS CPU 采样已打过补丁，跳过');
+    // 已打过补丁：只做公式口径升级（分母补核数），不重复插入 AsyncFunction
+    if (mContent.includes(iosCpuFormulaOld)) {
+      mContent = mContent.replace(iosCpuFormulaOld, iosCpuFormulaNew);
+      mContent = mContent.replace(iosCpuCommentOld, iosCpuCommentNew);
+      writeFileSync(mod, mContent);
+      console.log('[patch] iOS CPU 采样口径已升级为整机百分比（功能19 公式修正）');
+    } else {
+      console.log('[patch] iOS CPU 采样已打过补丁且公式为最新，跳过');
+    }
     return;
   }
 
@@ -967,8 +986,9 @@ function patchIOSTrueCpu() {
             }
         }
 
-        // 功能19: 返回当前进程自上次调用以来的平均 CPU%（多线程合计，可 >100）。
-        // clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒，差分 / 墙钟增量 = CPU%。
+        // 功能19: 返回当前进程自上次调用以来的平均 CPU 占用率（占整机全部核的百分比，上限 100%）。
+        // clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒（已跨核累加），
+        // 差分 / (墙钟增量 × 逻辑核数) = 整机口径 CPU%。
         AsyncFunction("processCpuPercent") { () -> Double in
             self.cpuLock.lock()
             defer { self.cpuLock.unlock() }
@@ -987,7 +1007,8 @@ function patchIOSTrueCpu() {
             self.cpuLastCpuSec = cpuSec
             self.cpuLastWall = wall
             guard dt > 1e-4 else { return -1 }
-            return (dCpu / dt) * 100.0
+            let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+            return (dCpu / (dt * cores)) * 100.0
         }
     }`;
   mContent = mContent.replace(funcAnchor, cpuFunc);
@@ -995,10 +1016,125 @@ function patchIOSTrueCpu() {
   console.log('[patch] iOS expo-video-cache 已打功能19 CPU 采样补丁');
 }
 
+// ---------- Android: 功能19 进程 CPU 采样（与 iOS 一致的浮窗真实忙碌展示） ----------
+// 背景：Android 端浮窗「主线程忙%」只量 JS 调度滞后，解码/字节供给在原生层不占 JS 主线程。
+// 用户要求（2026-09-29）两端一致：浮窗改为显示真实进程 CPU 占用。
+// 实现：读 /proc/self/stat 的 utime+stime（jiffies，CLK_TCK=100），差分 / 墙钟增量。
+// 口径（2026-09-29 修正）：分母 = 墙钟增量 × availableProcessors，即「占整机全部核的百分比」，上限 100%。
+// 原口径分母只有墙钟增量（100% = 占满 1 核），多核设备会显示 100%+，普通用户无法理解。
+// 幂等以「功能19」标记；公式升级走 replace 幂等替换，不重复插入 AsyncFunction。
+const androidCpuCommentOld = `    // 功能19: 返回当前进程自上次调用以来的平均 CPU%（多线程合计，可 >100）。
+    // 读 /proc/self/stat 的 utime+stime（jiffies，CLK_TCK=100），差分 / 墙钟增量 = CPU%。`;
+const androidCpuCommentNew = `    // 功能19: 返回当前进程自上次调用以来的平均 CPU 占用率（占整机全部核的百分比，上限 100%）。
+    // 读 /proc/self/stat 的 utime+stime（jiffies，CLK_TCK=100，已跨核累加），
+    // 差分 / (墙钟增量 × availableProcessors) = 整机口径 CPU%。`;
+const androidCpuFormulaOld = '          if (dt > 1e-4) (dCpu / dt) * 100.0 else -1.0';
+const androidCpuFormulaNew =
+  '          if (dt > 1e-4) {\n' +
+  '            val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)\n' +
+  '            (dCpu / (dt * cores)) * 100.0\n' +
+  '          } else -1.0';
+function patchAndroidTrueCpu() {
+  const pkgDir = resolvePkg('expo-video-cache');
+  if (!pkgDir) {
+    console.log('[patch] expo-video-cache 未安装，跳过功能19 Android CPU 采样补丁');
+    return;
+  }
+  const mod = join(pkgDir, 'android', 'src', 'main', 'java', 'expo', 'modules', 'videocache', 'ExpoVideoCacheModule.kt');
+  if (!existsSync(mod)) {
+    console.log('[patch] ExpoVideoCacheModule.kt 缺失，跳过功能19 Android CPU 采样补丁');
+    return;
+  }
+  let mContent = readFileSync(mod, 'utf8');
+
+  if (mContent.includes('功能19')) {
+    // 已打过补丁：只做公式口径升级（分母补核数），不重复插入 AsyncFunction
+    if (mContent.includes(androidCpuFormulaOld)) {
+      mContent = mContent.replace(androidCpuFormulaOld, androidCpuFormulaNew);
+      mContent = mContent.replace(androidCpuCommentOld, androidCpuCommentNew);
+      writeFileSync(mod, mContent);
+      console.log('[patch] Android CPU 采样口径已升级为整机百分比（功能19 公式修正）');
+    } else {
+      console.log('[patch] Android CPU 采样已打过补丁且公式为最新，跳过');
+    }
+    return;
+  }
+
+  // 1) 引入 android.os.SystemClock
+  if (!mContent.includes('import android.os.SystemClock')) {
+    mContent = mContent.replace(
+      /import expo\.modules\.kotlin\.modules\.Module/,
+      'import android.os.SystemClock\nimport expo.modules.kotlin.modules.Module'
+    );
+  }
+
+  // 2) definition 内追加 AsyncFunction("processCpuPercent")
+  const defAnchor = 'AsyncFunction("clearCache") {\n       Log.d("ExpoVideoCache", "Cache clearing is managed by the native player on Android.")\n    }\n  }\n}';
+  if (!mContent.includes(defAnchor)) {
+    console.log('[patch][Android CPU] 未匹配到 definition 锚点，需手动补丁（见 NATIVE_PATCHES.md）');
+    return;
+  }
+  const cpuFunc = `AsyncFunction("clearCache") {
+       Log.d("ExpoVideoCache", "Cache clearing is managed by the native player on Android.")
+    }
+
+    // 功能19: 返回当前进程自上次调用以来的平均 CPU 占用率（占整机全部核的百分比，上限 100%）。
+    // 读 /proc/self/stat 的 utime+stime（jiffies，CLK_TCK=100，已跨核累加），
+    // 差分 / (墙钟增量 × availableProcessors) = 整机口径 CPU%。
+    AsyncFunction("processCpuPercent") {
+      val jiffies = readProcSelfStatJiffies()
+      val wall = SystemClock.elapsedRealtime() / 1000.0
+      synchronized(this) {
+        if (!cpuSamplerInit) {
+          cpuSamplerInit = true
+          cpuJiffies = jiffies
+          cpuWall = wall
+          -1.0
+        } else {
+          val dt = wall - cpuWall
+          val dCpu = (jiffies - cpuJiffies) / 100.0
+          cpuJiffies = jiffies
+          cpuWall = wall
+          if (dt > 1e-4) {
+            val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            (dCpu / (dt * cores)) * 100.0
+          } else -1.0
+        }
+      }
+    }
+  }
+
+  // 功能19: CPU 差分采样状态
+  private var cpuSamplerInit = false
+  private var cpuJiffies = 0L
+  private var cpuWall = 0.0
+
+  // 读 /proc/self/stat，返回 utime+stime（jiffies）；读取失败返回 -1
+  private fun readProcSelfStatJiffies(): Long {
+    return try {
+      val content = java.io.File("/proc/self/stat").readText()
+      val closeIdx = content.lastIndexOf(')')
+      if (closeIdx < 0) return -1
+      val fields = content.substring(closeIdx + 1).trim().split(Regex("\\\\s+"))
+      if (fields.size < 15) return -1
+      val utime = fields[11].toLong()
+      val stime = fields[12].toLong()
+      utime + stime
+    } catch (e: Exception) {
+      -1
+    }
+  }
+}`;
+  mContent = mContent.replace(defAnchor, cpuFunc);
+  writeFileSync(mod, mContent);
+  console.log('[patch] Android expo-video-cache 已打功能19 CPU 采样补丁');
+}
+
 try {
   patchAndroid();
   patchAndroidSegmentProgress();
   patchAndroidPipAspectRatio();
+  patchAndroidTrueCpu();
   patchIOS();
   patchIOSPictureInPicture();
   patchIOSTrace();

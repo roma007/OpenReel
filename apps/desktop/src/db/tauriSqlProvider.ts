@@ -719,6 +719,8 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.addColumnIfMissing('media', 'rating_updated_at', 'TEXT');
     // 增量迁移：为已有 media 表补齐「越看越懂你」推荐分列
     await this.addColumnIfMissing('media', 'personal_score', 'INTEGER');
+    // 增量迁移：search_history.keyword 加 UNIQUE 并清洗存量重复（防止搜索历史重复条目）
+    await this.ensureSearchHistoryUnique();
     // 清理历史 CMS 评分补充数据（幂等，评分只保留豆瓣抓取结果）
     // 一次性数据清理：标记已存在则跳过。历史 CMS 评分只清理一次（已有库 0 匹配时
     // WHERE rating_source='CMS' 无法走索引，冷启动仍会全表扫约 12s），避免每次启动全表扫。
@@ -907,6 +909,35 @@ export class TauriSqlProvider implements DatabaseProvider {
     );
     if (cols.some(c => c.name === column)) return;
     await this.db!.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+
+  /**
+   * 增量迁移：search_history.keyword 加 UNIQUE 并清洗存量重复。
+   * SCHEMA_SQL 的 CREATE TABLE IF NOT EXISTS 无法为已存在的表补约束，
+   * 老库（v3 建表无唯一约束，addSearchHistory SELECT→INSERT 竞态可留多条同关键词行）
+   * 必须走重建表流程。powered 判定：建表 SQL 是否含 'keyword TEXT NOT NULL UNIQUE'；
+   * 不含则重建（关键字重复行合并 count、updated_at 取最新）。
+   */
+  private async ensureSearchHistoryUnique(): Promise<void> {
+    const rows = await this.db!.select<{ sql: string }[]>(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='search_history'`
+    );
+    if (rows.length === 0) return;
+    if (rows[0].sql.includes('keyword TEXT NOT NULL UNIQUE')) return;
+    await this.db!.execute(
+      `CREATE TABLE search_history_new (
+         id TEXT PRIMARY KEY,
+         keyword TEXT NOT NULL UNIQUE,
+         count INTEGER DEFAULT 1,
+         updated_at TEXT
+       );
+       INSERT INTO search_history_new (id, keyword, count, updated_at)
+         SELECT MIN(id), keyword, SUM(count), MAX(updated_at)
+         FROM search_history
+         GROUP BY keyword;
+       DROP TABLE search_history;
+       ALTER TABLE search_history_new RENAME TO search_history;`
+    );
   }
 
   /**
@@ -1340,6 +1371,16 @@ export class TauriSqlProvider implements DatabaseProvider {
   async getMediaByVodId(vodId: string): Promise<Media | null> {
     const rows = await this.db!.select<any[]>('SELECT * FROM media WHERE vod_id = ? LIMIT 1', [vodId]);
     return rows[0] ? rowToMedia(rows[0]) : null;
+  }
+
+  async getMediaByVodIdSet(vodIds: string[]): Promise<Media[]> {
+    const ids = vodIds.filter((v) => v != null && v !== '');
+    if (ids.length === 0) return [];
+    const rows = await this.db!.select<any[]>(
+      `SELECT * FROM media WHERE vod_id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    return rows.map(rowToMedia);
   }
 
   async updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void> {
@@ -2227,13 +2268,13 @@ async clearWatchHistory(): Promise<void> {
   // —— SearchHistory DAO ——
   async addSearchHistory(keyword: string): Promise<void> {
     const now = new Date().toISOString();
-    const existing = await this.db!.select<any[]>('SELECT * FROM search_history WHERE keyword = ?', [keyword]);
-    if (existing.length > 0) {
-      await this.db!.execute('UPDATE search_history SET count = count + 1, updated_at = ? WHERE keyword = ?', [now, keyword]);
-    } else {
-      const id = `sh_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-      await this.db!.execute('INSERT INTO search_history (id, keyword, count, updated_at) VALUES (?, ?, 1, ?)', [id, keyword, now]);
-    }
+    // 原子 UPSERT：initSchema 的 ensureSearchHistoryUnique() 已给 keyword 加 UNIQUE 并清洗存量重复，
+    // ON CONFLICT(keyword) 保证并发/重复调用不产生多条同关键词记录（曾有「两个李乃文」）。
+    await this.db!.execute(
+      `INSERT INTO search_history (id, keyword, count, updated_at) VALUES (?, ?, 1, ?)
+       ON CONFLICT(keyword) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at`,
+      [`sh_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`, keyword, now]
+    );
   }
 
   async getSearchHistory(limit: number = 10): Promise<{ keyword: string; count: number }[]> {

@@ -85,6 +85,8 @@ export interface DatabaseProvider {
   updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, vodId: string | null): Promise<void>;
   /** 按源侧 vod_id 精确查片（采集跳过判定用，避开 list 精简响应无指纹输入的问题）。 */
   getMediaByVodId(vodId: string): Promise<Media | null>;
+  /** 批量按源侧 vod_id 精确查片（C2 页级去重前置：整页一次 IN 查询，替代逐条 getMediaByVodId）。 */
+  getMediaByVodIdSet(vodIds: string[]): Promise<Media[]>;
   updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void>;
   updateMediaRating(
     mediaId: number,

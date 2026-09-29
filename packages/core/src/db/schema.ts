@@ -164,7 +164,7 @@ export const SCHEMA_SQL = `
 
   CREATE TABLE IF NOT EXISTS search_history (
     id TEXT PRIMARY KEY,
-    keyword TEXT NOT NULL,
+    keyword TEXT NOT NULL UNIQUE,
     count INTEGER DEFAULT 1,
     updated_at TEXT
   );

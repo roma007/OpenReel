@@ -161,15 +161,17 @@ class MonitorState:
             # 进程名可能含空格/括号，从最后一个 ) 之后开始数 field
             if ")" in p:
                 after = p.rsplit(")", 1)[1].split()
-                # field13 utime, field14 stime（field 从 3 起首，after[0]=field3）
+                # /proc/<pid>/stat field 从 3 起首，after[0]=field3(state)，
+                # 故 field N 对应 after[N-3]；utime=field14→after[11]，stime=field15→after[12]。
                 if len(after) >= 13:
-                    proc_ticks = float(after[10]) + float(after[11])
-            if bt.startswith("cpu "):
+                    proc_ticks = float(after[11]) + float(after[12])
+            if bt.startswith("cpu ") and proc_ticks is not None:
                 total = sum(float(x) for x in bt.split()[1:])
                 if self.prev_proc is not None and self.prev_total is not None:
                     dtp = proc_ticks - self.prev_proc
                     dtt = total - self.prev_total
-                    # /proc/stat 的 cpu 合计为所有 guest 核 jiffies 之和；dtp/dtt*100 = 占单个核的百分比（与 top 语义一致）
+                    # /proc/stat 的 cpu 合计为所有 guest 核 jiffies 之和，
+                    # 故 dtp/dtt*100 = 该进程占整机全部核的百分比（上限 100%，与 App 浮窗口径一致）
                     row["cpu_pct"] = round(dtp / dtt * 100.0, 1) if dtt > 0 else 0.0
                 self.prev_proc = proc_ticks
                 self.prev_total = total

@@ -32,6 +32,7 @@ Android 无字节级进度回调（Media3 1.9.0 AnalyticsListener 无 onBytesLoa
 - **Android（功能PiP）**：对 `expo-video` 两处打补丁，PiP 窗口比例始终按视频真实尺寸（竖屏视频也是竖屏窗口）：① `PictureInPictureUtils.kt` 的 `calculatePiPAspectRatio` 优先用 `player.videoSize`（不受 `contentFit=cover` 按 View 全屏横屏影响）；② `PictureInPictureManager.kt` 的 `enterPictureInPictureMode` 携带该 aspectRatio（不被空 params 覆盖为横屏），且 `findAndSetupPipCandidate` 不清掉它。已做幂等。
 - **iOS**：对 `expo-video-cache` 暴露 `maxConcurrency`（best-effort，匹配不到 startServer / 并发符号时只打印手动指引，不破坏原库）。
 - **iOS（功能13）**：对 `expo-video-cache` 的 `NetworkDownloader.swift` `SessionRouter` 注入分片进度跟踪（`Library/Caches/segment_progress.json`）。已做幂等。
+  - **Android + iOS（功能19）**：对 `expo-video-cache` 的 Android `ExpoVideoCacheModule.kt` 与 iOS `ExpoVideoCacheModule.swift` 注入 `processCpuPercent`（进程真实 CPU%：Android 读 `/proc/self/stat` utime+stime 差分，iOS 读 clock_gettime 差分），供浮窗主行显示真实 CPU。口径为**占整机全部核的百分比**（分母 = 墙钟增量 × 核数，上限 100%），与 `scripts/emulator-monitor/monitor.py` 一致。均已做幂等。
 
 因此**一般不需要手动重打**；仅当 iOS 自动补丁未命中时才按下方手动步骤改。
 

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { requireNativeModule } from 'expo';
 
@@ -31,16 +30,11 @@ interface PageAgg {
   lastActive: number;
 }
 
-// iOS 原生模块（功能19 补丁）：进程 CPU 差分采样，返回自上次调用以来的平均 CPU%。
-// 仅 iOS 存在该原生方法；Android/Web 无 → cpuActive=false，UI 回退 JS 主线程探针。
-function resolveNativeCpu(): any | null {
-  if (Platform.OS !== 'ios') return null;
-  try {
-    const mod = requireNativeModule('ExpoVideoCache');
-    return typeof mod.processCpuPercent === 'function' ? mod : null;
-  } catch {
-    return null;
-  }
+// 双端原生模块（功能19 补丁）：进程 CPU 差分采样，返回自上次调用以来的平均 CPU 占用率。
+// 口径 = 该进程占整机全部逻辑核的百分比（分母含核数，上限 100%）。
+// iOS/Android 均通过 expo-video-cache 补丁暴露 processCpuPercent，直接取用、不做存在性回退。
+function resolveNativeCpu(): any {
+  return requireNativeModule('ExpoVideoCache');
 }
 
 // 递归统计沙盒目录占用（KB->MB 调用方换算）
