@@ -2,6 +2,13 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 export const PIP_PAYLOAD_KEY = 'movie_app_pip_payload';
 
+/**
+ * pip 窗口尺寸下限 = 收缩态（DOCK_SIZE）尺寸。
+ * 收缩态要把窗口缩到只剩一个还原按钮，minWidth/minHeight 必须允许该尺寸，
+ * 否则 setSize 会被系统夹回 200x150，收缩功能失效。
+ */
+export const PIP_MIN_SIZE = 44;
+
 let openSeqCounter = 0;
 let createPromise: Promise<WebviewWindow> | null = null;
 
@@ -29,8 +36,8 @@ export function ensurePipWindow(): Promise<WebviewWindow> {
       visible: false,
       width: 400,
       height: 261,
-      minWidth: 200,
-      minHeight: 150,
+      minWidth: PIP_MIN_SIZE,
+      minHeight: PIP_MIN_SIZE,
     });
   })().finally(() => {
     createPromise = null;

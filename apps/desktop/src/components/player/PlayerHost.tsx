@@ -13,7 +13,7 @@ import { VideoPlayer } from './VideoPlayer';
 import { PlayerOverlays } from './PlayerOverlays';
 import { AdFloatOverlay } from './AdFloatOverlay';
 import { usePlayerStore, buildPipPayload, isPipSwitching } from '../../stores/playerStore';
-import { ensurePipWindow, nextOpenSeq, writePipPayload } from '../../pip/pipWindowManager';
+import { ensurePipWindow, nextOpenSeq, writePipPayload, PIP_MIN_SIZE } from '../../pip/pipWindowManager';
 import { getProvider } from '../../init';
 
 const PIP_GEO_KEY = 'movie_app_pip_geo';
@@ -32,8 +32,8 @@ function readPipGeometry(): PipGeometry {
     const raw = localStorage.getItem(PIP_GEO_KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      if (Number.isFinite(p?.w) && p.w >= 200) geo.w = Math.round(p.w);
-      if (Number.isFinite(p?.h) && p.h >= 150) geo.h = Math.round(p.h);
+      if (Number.isFinite(p?.w) && p.w >= PIP_MIN_SIZE) geo.w = Math.round(p.w);
+      if (Number.isFinite(p?.h) && p.h >= PIP_MIN_SIZE) geo.h = Math.round(p.h);
       if (Number.isFinite(p?.x) && Number.isFinite(p?.y)) {
         geo.x = Math.round(p.x);
         geo.y = Math.round(p.y);
