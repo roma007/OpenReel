@@ -917,7 +917,7 @@ function patchIOStopServer() {
 }
 
 // ---------- iOS: 功能19 进程 CPU 采样（浮窗真实忙碌展示） ----------
-// 背景：浮窗「主线程忙%」只量 JS 调度滞后，视频解码/字节供给在原生层不占 JS 主线程，播放中恒 0.0%。
+// 背景：JS 侧调度滞后探针量不到视频解码/字节供给（都在原生层，不占 JS 主线程），播放中恒 0.0%，已整体废弃。
 // 方案 A（用户拍板）：浮窗改显示真实进程 CPU 占用。
 // 实现：clock_gettime(CLOCK_PROCESS_CPUTIME_ID) 取进程累计 CPU 秒（user+system），差分 / 墙钟增量。
 // 注意：不用 task_threads/thread_info 逐线程遍历——该方案在 iOS 模拟器 AsyncFunction 环境触发 SIGTRAP，
@@ -1017,7 +1017,7 @@ function patchIOSTrueCpu() {
 }
 
 // ---------- Android: 功能19 进程 CPU 采样（与 iOS 一致的浮窗真实忙碌展示） ----------
-// 背景：Android 端浮窗「主线程忙%」只量 JS 调度滞后，解码/字节供给在原生层不占 JS 主线程。
+// 背景：JS 侧调度滞后探针量不到视频解码/字节供给（都在原生层，不占 JS 主线程），播放中恒 0.0%，已整体废弃。
 // 用户要求（2026-09-29）两端一致：浮窗改为显示真实进程 CPU 占用。
 // 实现：读 /proc/self/stat 的 utime+stime（jiffies，CLK_TCK=100），差分 / 墙钟增量。
 // 口径（2026-09-29 修正）：分母 = 墙钟增量 × availableProcessors，即「占整机全部核的百分比」，上限 100%。

@@ -3,10 +3,10 @@ import { useLocation } from 'react-router-dom';
 import { useActivityMonitor } from './ActivityMonitor';
 
 // 资源监控悬浮层（桌面端自包含本地聚合）：
-// - 数据来自 ActivityMonitor：250ms 调度滞后探针归因主线程忙%、App 数据目录占用
+// - 数据来自 ActivityMonitor：Rust 进程 CPU 差分采样（占整机全部核的百分比）、App 数据目录占用
 //   （不展示帧率：macOS WKWebView 把 rAF 限流到约 1Hz，rAF 计数恒 0，见 ActivityMonitor 注释）
 // - 按住面板任意位置拖动（松手记忆位置，下次启动恢复）；右上角 x 隐藏（仅本次运行）
-// - 点击面板内容弹出「功能资源占用」明细：各页面的忙%贡献与停留时长
+// - 点击面板内容弹出「功能资源占用」明细：各页面的 CPU%贡献与停留时长
 const POS_KEY = 'movie-app-resource-overlay-pos';
 const DEFAULT_POS = { top: 42, left: 10 };
 /** 位移阈值（px）：未超过视为点击开明细，超过视为拖动 */
@@ -161,7 +161,7 @@ export function ResourceOverlay() {
   };
 
   if (hidden) return null;
-  const busy = local.totalBusyPct;
+  const cpu = local.totalCpuPct;
   const storage = local.storageMB;
   const displayFuncs = local.funcs;
   const sinceLabel = local.since ? local.since.replace('T', ' ').slice(5, 16) : '';
@@ -189,8 +189,8 @@ export function ResourceOverlay() {
         </button>
         <div className="mb-0.5 text-[10px] font-semibold text-[#8fb3ff]">实时监控</div>
         <div className="text-[11px] leading-[15px] text-[#e8e8ee] tabular-nums">
-          <span className="text-[#7f8794]">主线程忙 </span>
-          {busy != null ? `${busy.toFixed(1)}%` : '-'}
+          <span className="text-[#7f8794]">CPU </span>
+          {cpu != null ? `${cpu.toFixed(1)}%` : '-'}
         </div>
         <div className="text-[11px] leading-[15px] text-[#e8e8ee] tabular-nums">
           <span className="text-[#7f8794]">存储 </span>
@@ -216,7 +216,7 @@ export function ResourceOverlay() {
             </div>
             {sinceLabel ? (
               <div className="mb-1.5 text-[9px] leading-3 text-[#7f8794]">
-                {`统计自 ${sinceLabel} · 忙% = 该功能对总忙碌的贡献占比，之和恒 = 总主线程忙`}
+                {`统计自 ${sinceLabel} · CPU% = 该功能对总 CPU 的贡献占比，之和恒 = 总CPU`}
               </div>
             ) : null}
             <div className="max-h-[300px] overflow-y-auto">
@@ -230,7 +230,7 @@ export function ResourceOverlay() {
                   >
                     <div className="mr-2 min-w-0 truncate text-[12px] text-[#8fb3ff]">{f.page}</div>
                     <div className="shrink-0 text-[11px] text-[#e8e8ee] tabular-nums">
-                      忙 {f.busy_pct != null ? `${f.busy_pct.toFixed(1)}%` : '-'}&nbsp;&nbsp;停留 {f.seconds}s
+                      CPU {f.cpu_pct != null ? `${f.cpu_pct.toFixed(1)}%` : '-'}&nbsp;&nbsp;停留 {f.seconds}s
                     </div>
                   </div>
                 ))

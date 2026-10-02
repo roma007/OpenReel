@@ -1,3 +1,4 @@
+mod cpu;
 mod video_fetch;
 mod pip_window;
 mod window_state;
@@ -76,7 +77,8 @@ pub fn run() {
             pip_window::animate_pip_appear,
             pip_window::show_pip,
             disk_free_bytes,
-            app_storage_bytes
+            app_storage_bytes,
+            cpu::process_cpu_percent
         ]);
 
     #[cfg(desktop)]

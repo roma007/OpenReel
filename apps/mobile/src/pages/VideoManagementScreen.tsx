@@ -177,7 +177,7 @@ export default function VideoManagementScreen({ navigation }: Props) {
     getSubTypesByType, getHiddenMediaCount, getHiddenGenres, getUncategorizedCount, hideMediaByGenres, unhideMediaByGenres,
     shortDramaConfig, loadShortDramaConfig, updateShortDramaConfig, getDefaultShortDramaConfig,
     reprobeMediaCount, reprobeMediaList, loadReprobeMediaList,
-    getFullReprobeMediaCount, startReprobeTask, startFullReprobeTask, cancelReprobeTask,
+    startReprobeTask, cancelReprobeTask,
     loadRunningReprobeTask, runningReprobeTask, reprobePoll, startReprobePolling,
     videoManageDeleteType: deleteMediaType, setVideoManageDeleteType, videoManageHideType: hideMediaType, setVideoManageHideType,
   } = useAppStore();
@@ -226,14 +226,11 @@ export default function VideoManagementScreen({ navigation }: Props) {
   const [keywordInput, setKeywordInput] = useState('');
   const [activeLayer, setActiveLayer] = useState<number>(1);
 
-  const [fullReprobeMediaCount, setFullReprobeMediaCount] = useState(0);
-
   useEffect(() => {
     getHiddenMediaCount().then(setHiddenCount).catch(() => {});
     loadShortDramaConfig();
     loadReprobeMediaList();
     loadRunningReprobeTask();
-    getFullReprobeMediaCount().then(setFullReprobeMediaCount).catch(() => {});
     (async () => {
       try {
         const provider = getProvider();
@@ -291,10 +288,8 @@ export default function VideoManagementScreen({ navigation }: Props) {
     }
   }, [shortDramaConfig]);
 
-  const fullReprobing = !!reprobePoll && reprobePoll.full && reprobePoll.status === 'running';
-  const reprobing = !!reprobePoll && !reprobePoll.full && reprobePoll.status === 'running';
-  const fullReprobeResult = reprobePoll?.full ? reprobePoll.result : null;
-  const reprobeResult = reprobePoll && !reprobePoll.full ? reprobePoll.result : null;
+  const reprobing = !!reprobePoll && reprobePoll.status === 'running';
+  const reprobeResult = reprobePoll ? reprobePoll.result : null;
   const reprobeProgress = reprobePoll?.progress ?? null;
 
   const prevPollStatusRef = useRef<string | null>(null);
@@ -309,8 +304,7 @@ export default function VideoManagementScreen({ navigation }: Props) {
 
   useEffect(() => {
     if (runningReprobeTask) {
-      const full = (runningReprobeTask.sourceName || '').includes('全量');
-      startReprobePolling(runningReprobeTask.taskId, full);
+      startReprobePolling(runningReprobeTask.taskId);
     }
   }, [runningReprobeTask, startReprobePolling]);
 
@@ -522,19 +516,6 @@ export default function VideoManagementScreen({ navigation }: Props) {
     persistConfig(defaults);
   }, [getDefaultShortDramaConfig, persistConfig]);
 
-  const handleFullReprobe = useCallback(async () => {
-    Alert.alert('全量重新探测', '将清除所有电视剧的判断结果并重新探测。确定继续？', [
-      { text: '取消', style: 'cancel' },
-      { text: '确定', onPress: async () => {
-        try {
-          await startFullReprobeTask();
-        } catch (err: any) {
-          Alert.alert('错误', err.message);
-        }
-      }},
-    ]);
-  }, [startFullReprobeTask]);
-
   const handleCancelReprobe = useCallback(async () => {
     if (!runningReprobeTask) return;
     Alert.alert('取消探测任务', '确定要取消正在运行的探测任务吗？', [
@@ -563,10 +544,6 @@ export default function VideoManagementScreen({ navigation }: Props) {
       }},
     ]);
   }, [reprobeMediaList, startReprobeTask]);
-
-  const reprobeProgressPct = reprobeProgress && reprobeProgress.total > 0
-    ? Math.round((reprobeProgress.processed / reprobeProgress.total) * 100)
-    : 0;
 
   const styles = useMemo(() => StyleSheet.create({
     container: { flex: 1 },
@@ -607,7 +584,6 @@ export default function VideoManagementScreen({ navigation }: Props) {
     infoBold: { fontWeight: '600', color: colors.text },
     resultBox: { padding: 12, backgroundColor: surfaceBg, borderRadius: radius.md, gap: 6 },
     resultText: { fontSize: s(13), color: colors.textSecondary, lineHeight: 18 },
-    runningBadge: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: hexToRgba(colors.mutedForeground, 0.15), borderRadius: radius.md },
     runningBadgeCol: { flexDirection: 'column', padding: 10, backgroundColor: hexToRgba(colors.mutedForeground, 0.15), borderRadius: radius.md },
     runningText: { fontSize: s(13), color: colors.text, fontWeight: '500' },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -765,76 +741,6 @@ export default function VideoManagementScreen({ navigation }: Props) {
               </Button>
             </>
           )}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>全量重新探测长短剧</Text>
-          <Text style={styles.cardDesc}>
-            清除所有电视剧的已有判断结果，全量重新执行三层判断逻辑。已有单集时长数据的将直接复用。
-          </Text>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoText}>所有电视剧：<Text style={styles.infoBold}>{fullReprobeMediaCount} 部</Text></Text>
-          </View>
-
-          {fullReprobing && reprobeProgress && (
-            <View style={styles.progressSection}>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${reprobeProgressPct}%` }]} />
-              </View>
-              <Text style={styles.progressText}>{reprobeProgress.processed}/{reprobeProgress.total} ({reprobeProgressPct}%)</Text>
-              <View style={styles.statsGrid}>
-                <View style={styles.statBox}>
-                  <Text style={[styles.statNumber, { color: colors.text }]}>{reprobeProgress.processed}</Text>
-                  <Text style={styles.statLabel}>已处理</Text>
-                </View>
-                <View style={styles.statBox}>
-                  <Text style={[styles.statNumber, { color: colors.success }]}>{reprobeProgress.shortDrama}</Text>
-                  <Text style={styles.statLabel}>短剧</Text>
-                </View>
-                <View style={styles.statBox}>
-                  <Text style={[styles.statNumber, { color: colors.textSecondary }]}>{reprobeProgress.longDrama}</Text>
-                  <Text style={styles.statLabel}>长剧</Text>
-                </View>
-                <View style={styles.statBox}>
-                  <Text style={[styles.statNumber, { color: colors.error }]}>{reprobeProgress.failed}</Text>
-                  <Text style={styles.statLabel}>失败</Text>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {fullReprobeResult && !fullReprobing && (
-            <View style={styles.resultBox}>
-              <Text style={styles.resultText}>
-                全量探测完成：共处理 {fullReprobeResult.total} 部{'\n'}
-                短剧: {fullReprobeResult.shortDrama}  长剧: {fullReprobeResult.longDrama}  失败: {fullReprobeResult.failed}
-              </Text>
-            </View>
-          )}
-
-          {runningReprobeTask && !fullReprobing && (
-            <View style={styles.runningBadge}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                <ActivityIndicator size="small" color={colors.mutedForeground} />
-                <Text style={styles.runningText}>探测任务运行中</Text>
-              </View>
-              <TouchableOpacity onPress={handleCancelReprobe}>
-                <Text style={{ color: colors.error, fontSize: s(13), fontWeight: '500' }}>取消</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <Button
-            variant="primary"
-            size="md"
-            fullWidth
-            loading={fullReprobing}
-            disabled={fullReprobing || fullReprobeMediaCount === 0 || !!runningReprobeTask}
-            onPress={handleFullReprobe}
-          >
-            {`开始全量重新探测 (${fullReprobeMediaCount})`}
-          </Button>
         </View>
 
         <View style={styles.card}>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Trash2, Radar, Loader2, CheckCircle2, AlertCircle, Film, Tv, Video, Disc, FileText, Database, EyeOff, X, RotateCcw, Plus, BarChart3, SlidersHorizontal, RefreshCw, Unlink } from 'lucide-react';
+import { ArrowLeft, Trash2, Radar, Loader2, CheckCircle2, AlertCircle, Film, Tv, Video, Disc, FileText, Database, EyeOff, X, RotateCcw, Plus, BarChart3, SlidersHorizontal, Unlink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -228,8 +228,6 @@ export default function VideoManagementPage() {
     getUncategorizedCount,
     runningReprobeTask,
     startReprobeTask,
-    startFullReprobeTask,
-    getFullReprobeMediaCount,
     cancelReprobeTask,
     loadRunningReprobeTask,
     startReprobePolling,
@@ -259,7 +257,6 @@ export default function VideoManagementPage() {
   const [selectedHiddenGenres, setSelectedHiddenGenres] = useState<string[]>([]);
   const [hidingGenres, setHidingGenres] = useState(false);
   const [unhidingGenres, setUnhidingGenres] = useState(false);
-  const [fullReprobeMediaCount, setFullReprobeMediaCount] = useState(0);
   const [localConfig, setLocalConfig] = useState<ShortDramaConfig | null>(null);
   const [patternInput, setPatternInput] = useState('');
   const [keywordInput, setKeywordInput] = useState('');
@@ -275,10 +272,8 @@ export default function VideoManagementPage() {
     { value: 'DOCUMENTARY', label: '纪录片' },
   ];
 
-  const fullReprobing = !!reprobePoll && reprobePoll.full && reprobePoll.status === 'running';
-  const reprobing = !!reprobePoll && !reprobePoll.full && reprobePoll.status === 'running';
-  const fullReprobeResult = reprobePoll?.full ? reprobePoll.result : null;
-  const reprobeResult = reprobePoll && !reprobePoll.full ? reprobePoll.result : null;
+  const reprobing = !!reprobePoll && reprobePoll.status === 'running';
+  const reprobeResult = reprobePoll ? reprobePoll.result : null;
 
   const prevPollStatusRef = useRef<string | null>(null);
   useEffect(() => {
@@ -292,8 +287,7 @@ export default function VideoManagementPage() {
 
   useEffect(() => {
     if (runningReprobeTask) {
-      const full = (runningReprobeTask.sourceName || '').includes('全量');
-      startReprobePolling(runningReprobeTask.taskId, full);
+      startReprobePolling(runningReprobeTask.taskId);
     }
   }, [runningReprobeTask, startReprobePolling]);
 
@@ -320,7 +314,6 @@ export default function VideoManagementPage() {
     loadReprobeMediaList();
     loadRunningReprobeTask();
     loadShortDramaConfig();
-    getFullReprobeMediaCount().then(setFullReprobeMediaCount);
   }, []);
 
   useEffect(() => {
@@ -532,16 +525,6 @@ export default function VideoManagementPage() {
     const next = { ...localConfig, probeEpisodeCount: v };
     setLocalConfig(next);
     persistConfig(next);
-  };
-
-  const handleFullReprobe = async () => {
-    try {
-      const taskId = await startFullReprobeTask();
-      toast(`全量探测任务已启动，任务ID: ${taskId}`);
-    } catch (err: any) {
-      console.error('启动全量探测任务失败:', err);
-      toast(err.message || '启动全量探测任务失败', 'error');
-    }
   };
 
   const handleBatchReprobe = async () => {
@@ -970,90 +953,6 @@ export default function VideoManagementPage() {
               </div>
             </>
           )}
-        </Card>
-
-        <Card className="p-6 mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <RefreshCw className="size-4 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">全量重新探测长短剧</h2>
-          </div>
-          <p className="text-sm text-muted-foreground mb-4">
-            清除所有电视剧的已有判断结果，全量重新执行三层判断逻辑。
-            已有单集时长数据的电视剧将直接复用，无需重新探测视频流。任务在后台运行，可以跳转到其他页面。
-          </p>
-
-          <div className="flex items-center gap-4 p-3 rounded-lg bg-secondary mb-4">
-            <Radar className="size-5 text-muted-foreground" />
-            <div className="text-sm">
-              <span className="text-muted-foreground">所有电视剧：</span>
-              <span className="font-medium ml-1">{fullReprobeMediaCount} 部</span>
-            </div>
-          </div>
-
-          {fullReprobing && reprobePoll?.progress && (
-            <div className="space-y-3 mb-4">
-              <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-muted-foreground transition-all duration-300"
-                  style={{ width: `${reprobePoll.progress.total > 0 ? (reprobePoll.progress.processed / reprobePoll.progress.total) * 100 : 0}%` }}
-                />
-              </div>
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div className="p-2 rounded bg-secondary">
-                  <div className="text-lg font-bold">{reprobePoll.progress.processed}</div>
-                  <div className="text-xs text-muted-foreground">已处理</div>
-                </div>
-                <div className="p-2 rounded bg-secondary">
-                  <div className="text-lg font-bold text-success">{reprobePoll.progress.shortDrama}</div>
-                  <div className="text-xs text-muted-foreground">短剧</div>
-                </div>
-                <div className="p-2 rounded bg-secondary">
-                  <div className="text-lg font-bold text-text-secondary">{reprobePoll.progress.longDrama}</div>
-                  <div className="text-xs text-muted-foreground">长剧</div>
-                </div>
-                <div className="p-2 rounded bg-secondary">
-                  <div className="text-lg font-bold text-destructive">{reprobePoll.progress.failed}</div>
-                  <div className="text-xs text-muted-foreground">失败</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {fullReprobeResult && !fullReprobing && (
-            <div className="space-y-3 mb-4">
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-secondary">
-                {fullReprobeResult.failed < fullReprobeResult.total ? (
-                  <CheckCircle2 className="size-5 text-success shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="size-5 text-muted-foreground shrink-0 mt-0.5" />
-                )}
-                <div className="text-sm">
-                  {fullReprobeResult.total === 0 ? (
-                    <span className="text-muted-foreground">没有电视剧数据</span>
-                  ) : (
-                    <div className="space-y-1">
-                      <div>全量探测完成：共处理 {fullReprobeResult.total} 部电视剧</div>
-                      <div className="flex gap-4 text-muted-foreground">
-                        <span>短剧：<span className="text-success font-medium">{fullReprobeResult.shortDrama}</span></span>
-                        <span>长剧：<span className="text-text-secondary font-medium">{fullReprobeResult.longDrama}</span></span>
-                        <span>失败：<span className="text-destructive font-medium">{fullReprobeResult.failed}</span></span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <Button
-            onClick={handleFullReprobe}
-            disabled={fullReprobing || fullReprobeMediaCount === 0 || !!runningReprobeTask}
-            variant="default"
-            className="w-full"
-          >
-            <Radar className={`size-4 mr-2 ${fullReprobing ? 'animate-spin' : ''}`} />
-            {`开始全量重新探测 (${fullReprobeMediaCount})`}
-          </Button>
         </Card>
 
         <Card className="p-6 mb-6">

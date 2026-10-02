@@ -83,7 +83,9 @@ export default function PlayPage() {
   }
 
   const openingRef = useRef<number | null>(null);
-  const prevEpisodeIdRef = useRef<number | undefined>(undefined);
+  // 上一次 effect 实际看到的路由 episodeId：用于区分「用户主动导航（路由变了）」
+  // 与「pip 主导切集引发的 effect 重跑（路由未变）」，后者绝不能顶回 session。
+  const lastRouteIdRef = useRef<number | undefined>(undefined);
   const prevMediaIdRef = useRef<number | null>(null);
   const pendingLineRef = useRef<{ episodeId: number; playSourceId: number } | null>(null);
 
@@ -226,6 +228,8 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (!episodeId) return;
+    const prevRoute = lastRouteIdRef.current;
+    lastRouteIdRef.current = episodeId;
     if (activeSession) {
       if (!urlSourceAppliedRef.current) {
         const urlSid = urlSourceIdRef.current;
@@ -245,15 +249,13 @@ export default function PlayPage() {
         // session 已同步到当前路由集（PIP 存活恢复等场景），不接管
         return;
       }
-      const isNewNav =
-        prevEpisodeIdRef.current === undefined || prevEpisodeIdRef.current !== episodeId;
+      const isNewNav = prevRoute === undefined || prevRoute !== episodeId;
       if (isNewNav) {
         if (openingRef.current === episodeId) return;
         openingRef.current = episodeId;
         void st.switchEpisodeKeepPip(episodeId).finally(() => {
           if (openingRef.current === episodeId) openingRef.current = null;
         });
-        prevEpisodeIdRef.current = episodeId;
         return;
       }
       return;

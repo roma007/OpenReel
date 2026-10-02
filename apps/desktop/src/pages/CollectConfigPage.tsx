@@ -270,7 +270,14 @@ export default function CollectConfigPage() {
             <div className="text-sm font-medium">启用自动采集</div>
             <Switch
               checked={localConfig.autoEnabled}
-              onCheckedChange={(checked) => setLocalConfig({ ...localConfig, autoEnabled: checked })}
+              onCheckedChange={(checked) =>
+                setLocalConfig({
+                  ...localConfig,
+                  autoEnabled: checked,
+                  // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
+                  autoOnStartup: checked ? localConfig.autoOnStartup : false,
+                })
+              }
             />
             <p className="text-xs text-muted-foreground">关闭后定时与启动触发均不执行</p>
           </div>

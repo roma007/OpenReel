@@ -100,7 +100,7 @@ class MonitorState:
         self.last_uiadump = 0.0
         self.last_route = ""
 
-        # 按页面聚合（内存态，重启清零）：{page: {cpu_sum, rss_sum, n, heap_delta_kb, busy_sum, busy_window}}
+        # 按页面聚合（内存态，重启清零）：{page: {cpu_sum, rss_sum, n, heap_delta_kb}}
         self.func_agg = {}
         self.session_start = _dt.datetime.now().isoformat(timespec="seconds")
 
@@ -374,14 +374,9 @@ class MonitorState:
                 self.func_agg.pop(k, None)
                 self.log(f"[Inactive] 移除不活跃页面 {k}")
 
-            # 总主线程忙%（全页面 busy 之和，与明细清单严格对账：清单忙% 之和 = 此值）
-            _busy_sum = sum(a.get("busy_sum", 0) for a in self.func_agg.values())
-            _busy_win = sum(a.get("busy_window", 0) for a in self.func_agg.values())
-
             with self.lock:
                 self.latest = {
                     "ts": row["ts"], "pid": self.pid, "page": self.page,
-                    "busy_pct": round(_busy_sum / _busy_win * 100.0, 1) if _busy_win > 0 else None,
                     "cpu_pct": row.get("cpu_pct", 0),
                     "rss_mb": row.get("rss_mb", 0),
                     "fps": row.get("fps", 0),
@@ -455,20 +450,19 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path.startswith("/funcs"):
-            # 按页面聚合明细：功能级可区分量（主线程忙% + 停留秒），按忙时降序
+            # 按页面聚合明细：功能级可区分量（该页平均 CPU% + 停留秒），按 CPU 降序
             with self.mon.lock:
                 agg_snapshot = dict(self.mon.func_agg)
             funcs = []
-            total_win = sum(a.get("busy_window", 0) for a in agg_snapshot.values())
             for page, a in agg_snapshot.items():
-                if a.get("n", 0) <= 0 and not a.get("busy_sum", 0):
+                if a.get("n", 0) <= 0:
                     continue
                 funcs.append({
                     "page": page,
-                    "busy_pct": round(a.get("busy_sum", 0) / total_win * 100.0, 1) if total_win > 0 else None,
+                    "cpu_pct": round(a.get("cpu_sum", 0.0) / a["n"], 1),
                     "seconds": a["n"],
                 })
-            funcs.sort(key=lambda f: f["busy_pct"] or 0, reverse=True)
+            funcs.sort(key=lambda f: f["cpu_pct"] or 0, reverse=True)
             body = json.dumps({"since": self.mon.session_start, "funcs": funcs}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -488,24 +482,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 route = ""
             self.mon.set_page_from_route(route or "(unknown)")
-            self.send_response(200)
-            self.end_headers()
-        elif self.path.startswith("/probe"):
-            # JS 侧探针：{page, busy_ms, window_ms} 主线程忙时（功能级 CPU 负载代理），按页面累加
-            try:
-                ln = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(ln).decode("utf-8", "ignore") or "{}")
-                page = body.get("page") or "(unknown)"
-                busy_ms = float(body.get("busy_ms", 0) or 0)
-                window_ms = float(body.get("window_ms", 0) or 0)
-                with self.mon.lock:
-                    agg = self.mon.func_agg.setdefault(page, {"cpu_sum": 0.0, "rss_sum": 0.0, "n": 0})
-                    agg["last_active"] = time.time()
-                    if window_ms > 0:
-                        agg["busy_sum"] = agg.get("busy_sum", 0) + busy_ms
-                        agg["busy_window"] = agg.get("busy_window", 0) + window_ms
-            except Exception:
-                pass
             self.send_response(200)
             self.end_headers()
         else:

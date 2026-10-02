@@ -80,6 +80,9 @@ export function PlayerHost() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<MediaPlayerInstance>(null);
+  // 事件监听 effect 内读取主窗口当前路由（渲染期同步，避免给该 effect 加会变的依赖导致重复注册）
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
 
   const [overlayVisible, setOverlayVisible] = useState(false);
   const overlayDismissedRef = useRef(false);
@@ -200,6 +203,13 @@ export function PlayerHost() {
     on<{ episodeId: number }>('pip://next', async ({ episodeId }) => {
       const st = usePlayerStore.getState();
       await st.switchEpisodeKeepPip(episodeId);
+      // 主窗口同步路由到新集：PlayPage 只认「session.episodeId === 路由 episodeId」，
+      // 不同步会让播放页退化为骨架屏（详情信息消失），并使 PlayPage 误判为用户导航而顶回 session。
+      // 仅当主窗口本来就在播放页时同步，避免把用户从其它页面拽走。
+      const s2 = usePlayerStore.getState().session;
+      if (s2?.episodeId === episodeId && pathnameRef.current.startsWith('/play/')) {
+        navigate(`/play/${episodeId}`, { replace: true });
+      }
     });
     // 主窗口侧发起新播放（非 pip 流程）时关闭 pip，避免双流
     unsubs.push(
@@ -400,8 +410,14 @@ export function PlayerHost() {
     }
 
     setPipActive(true);
+    // 快照前重算下一集：openPlayback 可能早于剧集列表加载完成，此时 session.nextEpisode
+    // 仍是 null，直接快照会让 PIP「下一集」浮窗永远不出现。
+    try {
+      usePlayerStore.getState().updateNextEpisode();
+    } catch {}
+    const freshSession = usePlayerStore.getState().session ?? session;
     const payload: Record<string, unknown> = {
-      ...buildPipPayload(session, currentTime, anim),
+      ...buildPipPayload(freshSession, currentTime, anim),
       openSeq: nextOpenSeq(),
     };
     writePipPayload(payload);

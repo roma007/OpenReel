@@ -59,6 +59,8 @@ function getTypeLabel(type: string): string {
       return '全量采集';
     case 'KEYWORD':
       return '关键词采集';
+    case 'REPROBE':
+      return '长短剧探测';
     default:
       return type;
   }
@@ -258,6 +260,8 @@ export default function TaskListPage() {
               ) : (
                 collectTasks.map((task) => {
                   const statusInfo = getStatusLabel(task.status);
+                  const isReprobe = task.type === 'REPROBE';
+                  // REPROBE 的 current_page/total_pages 承载的是「已探测/待探测部数」，单位为部
                   const progress = task.totalPages > 0 ? Math.round((task.currentPage / task.totalPages) * 100) : 0;
 
                   return (
@@ -306,13 +310,20 @@ export default function TaskListPage() {
                           />
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
-                          {task.currentPage}/{task.totalPages} 页
+                          {task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}
                         </div>
                       </td>
                       <td className="p-3 text-sm">
                         <span className="font-medium text-success">{task.collectedCount}</span>
                         <span className="text-muted-foreground mx-1">/</span>
                         <span className="font-medium text-error">{task.failedCount}</span>
+                        {isReprobe && (
+                          <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
+                            短剧 <span className="text-success">{task.shortDramaCount || 0}</span>
+                            {' · '}
+                            长剧 <span className="text-text">{task.longDramaCount || 0}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-sm text-muted-foreground">
                         {formatTimeAgo(task.createdAt)}

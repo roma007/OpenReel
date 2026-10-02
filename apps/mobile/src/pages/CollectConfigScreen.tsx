@@ -324,7 +324,14 @@ export default function CollectConfigScreen({ navigation }: Props) {
             </View>
             <Switch
               value={localConfig.autoEnabled}
-              onValueChange={(checked) => setLocalConfig({ ...localConfig, autoEnabled: checked })}
+              onValueChange={(checked) =>
+                setLocalConfig({
+                  ...localConfig,
+                  autoEnabled: checked,
+                  // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
+                  autoOnStartup: checked ? localConfig.autoOnStartup : false,
+                })
+              }
               trackColor={{ false: colors.swiftTrack, true: colors.swiftActiveTrack }}
               thumbColor={colors.swiftThumb}
             />
@@ -345,7 +352,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
             />
           </View>
 
-          <View style={styles.switchRow}>
+          <View style={[styles.switchRow, { opacity: localConfig.autoEnabled ? 1 : 0.4 }]}>
             <View style={styles.switchInfo}>
               <Text style={styles.switchTitle}>启动时立即采集</Text>
               <Text style={styles.switchDesc}>应用启动后自动执行一次增量采集</Text>

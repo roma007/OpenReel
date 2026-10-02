@@ -268,10 +268,20 @@ export interface DatabaseProvider {
 
   // —— Reprobe Task DAO ——
   createReprobeTask(task: CollectTask): Promise<void>;
+  /**
+   * 更新探测任务进度。
+   * currentPage/totalPages/collectedCount/failedCount 对 REPROBE 复用为
+   * 「已探测数/待探测总数/判定成功数/探测失败数」，使任务列表的通用进度与
+   * 成功失败列对探测任务也是真值（语义单位为「部」而非「页」）。
+   */
   updateReprobeTaskProgress(taskId: string, updates: {
     probedCount?: number;
     shortDramaCount?: number;
     longDramaCount?: number;
+    currentPage?: number;
+    totalPages?: number;
+    collectedCount?: number;
+    failedCount?: number;
     status?: TaskStatus;
   }): Promise<void>;
   getRunningReprobeTask(): Promise<CollectTask | null>;

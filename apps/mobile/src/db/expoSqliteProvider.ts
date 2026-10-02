@@ -2899,6 +2899,10 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     probedCount?: number;
     shortDramaCount?: number;
     longDramaCount?: number;
+    currentPage?: number;
+    totalPages?: number;
+    collectedCount?: number;
+    failedCount?: number;
     status?: string;
   }): Promise<void> {
     const sqlParts: string[] = [];
@@ -2915,6 +2919,23 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     if (updates.longDramaCount !== undefined) {
       sqlParts.push('long_drama_count = ?');
       params.push(updates.longDramaCount);
+    }
+    // 复用采集列承载探测口径（单位「部」），使任务列表进度条与成功/失败列对 REPROBE 也是真值
+    if (updates.currentPage !== undefined) {
+      sqlParts.push('current_page = ?');
+      params.push(updates.currentPage);
+    }
+    if (updates.totalPages !== undefined) {
+      sqlParts.push('total_pages = ?');
+      params.push(updates.totalPages);
+    }
+    if (updates.collectedCount !== undefined) {
+      sqlParts.push('collected_count = ?');
+      params.push(updates.collectedCount);
+    }
+    if (updates.failedCount !== undefined) {
+      sqlParts.push('failed_count = ?');
+      params.push(updates.failedCount);
     }
     if (updates.status !== undefined) {
       sqlParts.push('status = ?');

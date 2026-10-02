@@ -22,7 +22,7 @@ function getTypeLabel(type: string): string {
     case 'INCREMENTAL': return '增量采集';
     case 'FULL': return '全量采集';
     case 'KEYWORD': return '关键词采集';
-    case 'REPROBE': return '重新探测';
+    case 'REPROBE': return '长短剧探测';
     default: return type;
   }
 }
@@ -279,6 +279,8 @@ export default function TaskListScreen({ navigation }: Props) {
         <View style={styles.taskList}>
           {collectTasks.slice(0, visibleCount).map((task: CollectTask) => {
             const statusStyle = getStatusStyle(task.status);
+            const isReprobe = task.type === 'REPROBE';
+            // REPROBE 的 current_page/total_pages 承载的是「已探测/待探测部数」，单位为部
             const progress = task.totalPages > 0 ? Math.round((task.currentPage / task.totalPages) * 100) : 0;
             return (
               <View key={task.taskId || task.id} style={styles.taskCard}>
@@ -288,20 +290,22 @@ export default function TaskListScreen({ navigation }: Props) {
                   <Text style={styles.taskDate}>{new Date(task.createdAt).toLocaleString()}</Text>
                 </View>
 
-                {(task.status === 'RUNNING' || task.status === 'PENDING') && (
+                {((task.status === 'RUNNING' || task.status === 'PENDING') || isReprobe) && (
                   <View style={styles.taskProgress}>
                     <View style={styles.progressBar}>
                       <View style={[styles.progressFill, { width: `${progress}%` }]} />
                     </View>
-                    <Text style={styles.progressText}>{task.currentPage}/{task.totalPages} 页</Text>
+                    <Text style={styles.progressText}>{task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}</Text>
                   </View>
                 )}
 
 <View style={styles.taskMeta}>
-                  {task.type === 'REPROBE' && (task.shortDramaCount || task.longDramaCount) ? (
+                  {isReprobe ? (
                     <>
                       <Text style={[styles.taskStat, { color: colors.success }]}>短剧: {task.shortDramaCount || 0}</Text>
                       <Text style={[styles.taskStat, { color: colors.textSecondary }]}>长剧: {task.longDramaCount || 0}</Text>
+                      <Text style={styles.taskStat}>成功: {task.collectedCount}</Text>
+                      <Text style={styles.taskStat}>失败: {task.failedCount}</Text>
                     </>
                   ) : null}
                   <View style={styles.taskRight}>

@@ -70,7 +70,6 @@ export function getStoreApiVersion(store: unknown): string | undefined {
 
 export interface ReprobePollState {
   taskId: string;
-  full: boolean;
   status: 'running' | 'done' | 'failed' | 'cancelled';
   progress: {
     total: number;
@@ -247,12 +246,10 @@ hasShortDrama: (type?: string) => Promise<boolean>;
     failed: number;
     failedItems: { id: number; title: string }[];
   }>;
-  getFullReprobeMediaCount: () => Promise<number>;
   startReprobeTask: () => Promise<string>;
-  startFullReprobeTask: () => Promise<string>;
   cancelReprobeTask: (taskId: string) => Promise<void>;
   loadRunningReprobeTask: () => Promise<void>;
-  startReprobePolling: (taskId: string, full: boolean) => Promise<void>;
+  startReprobePolling: (taskId: string) => Promise<void>;
 
   deleteAllMedia: () => Promise<void>;
   deletePlaySourcesBySourceId: (sourceId: string) => Promise<void>;
@@ -1102,26 +1099,6 @@ export function createAppStore(db: DatabaseProvider) {
       }
     },
 
-    startFullReprobeTask: async () => {
-      try {
-        const taskId = await collectorService.startFullReprobeTask();
-        await get().loadRunningReprobeTask();
-        return taskId;
-      } catch (err: any) {
-        console.error('[STORE] 启动全量探测任务失败:', err);
-        throw err;
-      }
-    },
-
-    getFullReprobeMediaCount: async () => {
-      try {
-        return await collectorService.getFullReprobeMediaCount();
-      } catch (err: any) {
-        console.error('[STORE] 获取全量探测数量失败:', err);
-        return 0;
-      }
-    },
-
     cancelReprobeTask: async (taskId: string) => {
       try {
         collectorService.cancelReprobeTask(taskId);
@@ -1152,19 +1129,15 @@ export function createAppStore(db: DatabaseProvider) {
       }
     },
 
-    startReprobePolling: async (taskId: string, full: boolean) => {
+    startReprobePolling: async (taskId: string) => {
       // 同一任务已存在轮询时直接复用，避免重复轮询
       const existing = get().reprobePoll;
       if (existing?.taskId === taskId) return;
 
       let total = 0;
       try {
-        if (full) {
-          total = await get().getFullReprobeMediaCount();
-        } else {
-          await get().loadReprobeMediaList();
-          total = get().reprobeMediaList.length;
-        }
+        await get().loadReprobeMediaList();
+        total = get().reprobeMediaList.length;
       } catch (err: any) {
         console.error('[STORE] 获取探测总数失败:', err);
       }
@@ -1172,7 +1145,6 @@ export function createAppStore(db: DatabaseProvider) {
       set({
         reprobePoll: {
           taskId,
-          full,
           status: 'running',
           progress: { total, processed: 0, longDrama: 0, shortDrama: 0, failed: 0, currentMediaTitle: '' },
           result: null,

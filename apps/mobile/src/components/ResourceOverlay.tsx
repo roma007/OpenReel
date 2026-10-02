@@ -4,9 +4,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useActivityMonitor } from './ActivityMonitor';
 
 // App 内自包含资源监控悬浮层（真机/模拟器通用，不依赖外部服务）：
-// - 数据来自 ActivityMonitor：250ms 调度滞后探针归因忙%、rAF 帧率、沙盒存储占用
+// - 数据来自 ActivityMonitor：原生进程 CPU 差分采样（占整机全部核的百分比）、
+//   rAF 帧率、沙盒存储占用
 // - 按住面板任意位置拖动（松手记忆位置，下次启动恢复）；右上角 x 隐藏（仅本次启动）
-// - 点击面板内容弹出「功能资源占用」明细：各页面/功能的忙%贡献与停留时长
+// - 点击面板内容弹出「功能资源占用」明细：各页面/功能的 CPU%贡献与停留时长
 const POS_KEY = 'resource-overlay-pos';
 const DEFAULT_POS = { top: 42, left: 10 };
 
@@ -104,9 +105,7 @@ export function ResourceOverlay({ routeRef }: Props) {
 
   if (hidden) return null;
   const fps = local.fps;
-  const busy = local.totalBusyPct;
-  const cpu = local.cpuActive ? local.totalCpuPct : null;
-  const showCpu = local.cpuActive;
+  const cpu = local.totalCpuPct;
   const storage = local.storageMB;
   const displayFuncs = local.funcs;
   const sinceLabel = local.since ? local.since.replace('T', ' ').slice(5, 16) : '';
@@ -122,17 +121,8 @@ export function ResourceOverlay({ routeRef }: Props) {
             实时监控
           </Text>
           <Text style={styles.line}>
-            {showCpu ? (
-              <>
-                <Text style={styles.k}>CPU </Text>
-                {cpu != null ? `${cpu.toFixed(1)}%` : '-'}
-              </>
-            ) : (
-              <>
-                <Text style={styles.k}>主线程忙 </Text>
-                {busy != null ? `${busy.toFixed(1)}%` : '-'}
-              </>
-            )}
+            <Text style={styles.k}>CPU </Text>
+            {cpu != null ? `${cpu.toFixed(1)}%` : '-'}
             <Text style={styles.sep}>  </Text>
             <Text style={styles.k}>帧率 </Text>
             {fps.toFixed(1)}
@@ -156,9 +146,7 @@ export function ResourceOverlay({ routeRef }: Props) {
             </View>
             {sinceLabel ? (
               <Text style={styles.detailSince}>
-                {`统计自 ${sinceLabel} · 忙% = 该功能对总忙碌的贡献占比，之和恒 = 总${
-                  showCpu ? 'CPU' : '主线程忙'
-                }`}
+                {`统计自 ${sinceLabel} · CPU% = 该功能对总 CPU 的贡献占比，之和恒 = 总CPU`}
               </Text>
             ) : null}
             <ScrollView style={styles.detailScroll} nestedScrollEnabled>
@@ -171,7 +159,7 @@ export function ResourceOverlay({ routeRef }: Props) {
                       {PAGE_NAMES[f.page] || f.page}
                     </Text>
                     <Text style={styles.funcVal}>
-                      忙 {f.busy_pct != null ? `${f.busy_pct.toFixed(1)}%` : '-'}   停留 {f.seconds}s
+                      CPU {f.cpu_pct != null ? `${f.cpu_pct.toFixed(1)}%` : '-'}   停留 {f.seconds}s
                     </Text>
                   </View>
                 ))

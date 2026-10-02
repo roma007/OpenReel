@@ -445,6 +445,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     const setNext = (next: PlaybackSession['nextEpisode']) => {
       if ((s.nextEpisode === null) !== (next === null) || s.nextEpisode?.id !== next?.id) {
         set({ session: { ...s, nextEpisode: next } });
+        // PIP 数据是打开时的一次性快照：若快照里 nextEpisode 为空（如打开早于剧集列表加载），
+        // 这里补算出的正确值不会自动送达 PIP，需重发 pip://episode 让浮窗能显示「下一集」。
+        if (usePlayerStore.getState().pipActive) {
+          const s2 = get().session;
+          if (s2?.episodeId) {
+            void import('@tauri-apps/api/event')
+              .then(({ emit }) => emit('pip://episode', buildPipPayload(s2, s2.currentTime)))
+              .catch(() => {});
+          }
+        }
       }
     };
     if (!s.media || s.media.type === 'MOVIE') {
@@ -454,6 +464,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     const app = getStore().getState();
     let eps = app.episodes;
     if (s.selectedSourceId) eps = eps.filter((e: any) => e.sourceId === s.selectedSourceId);
+    // 剧集列表尚未加载完成时无法判定「是否最后一集」，此时写入 null 会把
+    // openPlayback 早于 loadEpisodes 完成所产生的竞态固化为「无下一集」。
+    // 保持原值，等 PlayPage 的 [episodes] 依赖重跑本函数再补算。
+    if (eps.length === 0 && app.episodesLoading) return;
     const idx = eps.findIndex((e: any) => e.id === s.episode!.id);
     if (idx < 0 || idx >= eps.length - 1) {
       setNext(null);

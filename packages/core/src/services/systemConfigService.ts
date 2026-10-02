@@ -260,7 +260,10 @@ export class SystemConfigService {
   }
 
   async setCollectConfig(config: Partial<CollectConfig>): Promise<void> {
-    for (const [key, value] of Object.entries(config)) {
+    // 不变式：总开关关闭时，「启动时立即采集」必须同为关闭（重新打开总开关不联动打开，保持原值）
+    const effective: Partial<CollectConfig> =
+      config.autoEnabled === false ? { ...config, autoOnStartup: false } : config;
+    for (const [key, value] of Object.entries(effective)) {
       const fullKey = `collect.${key}`;
       if (key === 'autoEnabled' || key === 'autoOnStartup' || key === 'ignoreSourceSkip') {
         await this.setNumber(fullKey, value ? 1 : 0);
