@@ -10,7 +10,11 @@ import { appendPlayTrace } from '../services/playTrace';
 const VideoCache: any = (() => { try { return require('expo-video-cache'); } catch { return null; } })();
 import { getProvider } from '../init';
 import { useAppStore, getStore } from '../useAppStore';
-import { ArrowLeft, EyeOff, Heart, ThumbsDown, Star, Settings, PictureInPicture2, Maximize, ChevronRight, X, Play } from 'lucide-react-native';
+import { ArrowLeft, Star, Settings, ChevronRight, X, Play } from 'lucide-react-native';
+// 右侧竖排按钮栏图标：改用 MaterialCommunityIcons（该集默认即实心 solid，无 -outline描边变体）。
+// 2026-10-04按用户要求「图标用白色实心」实施：原 lucide 图标为描边风格，
+// 给其加 fill 会因路径开放而畸形（Maximize 4 条开放 path、EyeOff 3 弧+斜线、Cast 3 path+line 等），故换图标集。
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@movie-app/core';
 import { clearCategoryFilterCache } from '../categoryFilterCache';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -49,12 +53,33 @@ const typeScreenMap: Record<string, string> = {
   DOCUMENTARY: 'Documentary',
 };
 
-// 沉浸信息卡布局常量：右侧竖排功能键列宽（toolbarButtonRound 60）、卡片与列间距
+// 沉浸信息卡布局常量：右侧竖排功能键列宽（toolbarButtonRound 60）
 const TOOLBAR_COL_WIDTH = 60;
-const VERTICAL_CARD_RIGHT_GAP = 12;
 // 引导标签让位量：初始时每个按钮行向右多留出该宽度给「图标+文字」标签；
 // 统一固定值（≥最长文字宽+间距），保证所有按钮图标竖排对齐，不随各按钮文字字数参差
 const TOOLBAR_LABEL_EXTRA = 84;
+// 进度条栏几何（styles.progressWrap 的唯一来源，改这里即全链路同步）：
+// bottom + height = 距屏幕底部 102dp，即进度条栏顶边的「距底距离」。
+const PROGRESS_BAR_BOTTOM = 68;
+const PROGRESS_BAR_HEIGHT = 34;
+// 信息卡底边让位量（dp）：信息卡底边退到进度条栏顶边之上 CARD_OVER_PROGRESS_GAP，
+// 使信息卡与进度条栏永不重叠。
+// 实测（emulator-5554，density 420 → scale 2.625，screenH=914.29dp，insets.bottom=24）：
+//   PROGRESS_WRAP y=812.19 h=34.29；原 INFO_CARD bottom_y=814.48 → 重叠 2.29dp。
+//   原值 `insets.bottom + 76` = 100，改后 110 → 信息卡底边 y=804.29，净空 7.9dp。
+// 与进度条栏同为固定值（不掺 insets），两者相对关系在任何设备上都守恒；
+// 底部安全区由进度条栏 bottom=68 让开，信息卡在其上方 42dp，安全区同样不侵。
+const PROGRESS_BAR_CLEAR = PROGRESS_BAR_BOTTOM + PROGRESS_BAR_HEIGHT + 8;
+// 右侧竖排按钮栏垂直锚点（固定值，dp）：锚在进度条栏顶边之上 6dp，保证按钮列不遮挡进度条栏。
+// 原为 `insets.bottom + 76 + verticalCardH + 8`（跟信息卡高度联动），实测底边 y1612、进度条顶 y2132，空 198dp 悬在半空。
+const TOOLBAR_COL_BOTTOM = PROGRESS_BAR_CLEAR - 2;   // 108 = 102 + 6，仍在进度条栏顶边之上
+// 信息卡右侧让位量（dp）：把信息卡右缘退到「收缩态按钮栏」左缘之外，使 60dp 圆形按钮不再压住卡片内容。
+// 组成 = 按钮栏右间距 8 + 圆形按钮宽 TOOLBAR_COL_WIDTH + 安全间隙 8。
+// 实测（emulator-5554，density 420 → scale 2.625，screenW=411.43dp）：
+//   收缩态按钮栏 x=343.62（right=403.43, w=59.81），原信息卡 right=396.57 → 重叠 52.95dp。
+//   取 76 后信息卡 right=335.43 < 343.62，留 8.2dp 间隙，物理上不可能再被压住。
+// 与 TOOLBAR_COL_WIDTH 同源：日后改圆形按钮宽度，信息卡自动跟随，不会再次失配。
+const TOOLBAR_COL_CLEAR = 8 + TOOLBAR_COL_WIDTH + 8;
 
 // 红果式长按手势：热区比例与判定参数（移动端 PlayScreen）
 const LONG_PRESS_MS = 400; // 长按触发时长（ms）
@@ -219,14 +244,24 @@ export default function PlayScreen({ route, navigation }: Props) {
   }, [settingsVisible]);
 
   // 功能: 右侧竖排按钮栏「图标+文字」引导动画——进页显示各按钮名（文字在图标右侧），5 秒后文字淡出、
-  // 图标缓慢右移到当前版纯图标位置（right:8 右缘）；单一 Animated.Value 0→1 驱动，所有按钮统一让位量保证图标竖排对齐
+  // 图标缓慢右移到当前版纯图标位置（right:8 右缘）；所有按钮统一让位量保证图标竖排对齐
+  // 必须用【两个】Animated.Value，二者同起点(0)、同时长、同时启动：
+  //   1) toolbarHintAnim      —— 驱动 6 行的 translateX + 标签 opacity，走 useNativeDriver:true（仅 transform/opacity 在原生白名单）
+  //   2) toolbarHintWidthAnim —— 驱动列容器 width(144→60)，width 不在原生动画白名单，必须 useNativeDriver:false
+  // 为什么不能共用一个值：Animation.js:137 在 useNativeDriver:true 时对 Value 调 __makeNative()，
+  // 而 AnimatedWithChildren.__makeNative() 会【递归把所有子节点（含列的 width 插值）标记为 native】，
+  // 列的 AnimatedProps 随之变 native → __getNativeConfig() → validateStyles() 报
+  // "Style property 'width' is not supported by native animated module"，且 native 节点的 __callListeners 被短路，
+  // JS 侧拿不到值 → width 实际不动画（2026-10-04 该 bug 的直接成因）。用独立的 JS 驱动 Value 可切断这条扩散链。
   const toolbarHintAnim = useRef(new Animated.Value(0)).current;
+  const toolbarHintWidthAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const t = setTimeout(() => {
       Animated.timing(toolbarHintAnim, { toValue: 1, duration: 1200, useNativeDriver: true }).start();
+      Animated.timing(toolbarHintWidthAnim, { toValue: 1, duration: 1200, useNativeDriver: false }).start();
     }, 5000);
     return () => clearTimeout(t);
-  }, [toolbarHintAnim]);
+  }, [toolbarHintAnim, toolbarHintWidthAnim]);
 
   // 自绘全屏（应用内全屏，对齐桌面端全屏浮窗/设置）：appFullscreen 驱动全屏覆盖层渲染与方向锁定
   const [appFullscreen, setAppFullscreen] = useState(false);
@@ -248,7 +283,6 @@ export default function PlayScreen({ route, navigation }: Props) {
 
   // 功能3: 影片信息
   const [media, setMedia] = useState<Media | null>(null);
-  const [verticalCardH, setVerticalCardH] = useState(0);
 
   // 播放中横幅广告（配置驱动，随机出现一次，不打断播放）
   const [activeAd, setActiveAd] = useState<AdFloatItem | null>(null);
@@ -389,20 +423,21 @@ export default function PlayScreen({ route, navigation }: Props) {
     headerRight: { flexDirection: 'row', alignItems: 'center', padding: 4 },
     headerRightText: { fontSize: sf(13), color: '#fff' },
     video: { width: '100%', height: '100%' },
-    // 应用内全屏时隐藏非全屏 VideoView（避免原 native 全屏 view 透出/重复渲染）
-    videoHiddenInFullscreen: { opacity: 0 },
     // 红果式沉浸：播放器区域占满整屏；canPlay 时纯黑（视频 contain 留窄黑边），
     // 加载中/出错时透明以透出外层 BlurredBackground 模糊海报
     videoContainerImm: { width: '100%', flex: 1, backgroundColor: canPlay ? colors.playerBg : 'transparent' },
     // 沉浸态点击视频区 = 播放/暂停（替代已移除的中央圆形按钮，红果式惯例）
     videoTapLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 5 },
-    // 底部悬浮信息卡：红果式全宽卡（左缘右缘各 15），叠加在视频上（非弹窗，不受弹窗不透明度规则限制）。
-    // 全宽确保信息卡左右缘滑动手势均可触发；右侧功能列已上移到信息卡顶部之上，不遮卡
+    // 底部悬浮信息卡：红果式全宽卡，叠加在视频上（非弹窗，不受弹窗不透明度规则限制）。
+    // right 用 TOOLBAR_COL_CLEAR(76) 而非 15：右侧按钮栏收缩到只剩图标时其圆形按钮仍会占住
+    // screenW-8-TOOLBAR_COL_WIDTH 起的 60dp，必须给信息卡让出这段，否则按钮压住卡片右端内容。
     verticalCard: {
       position: 'absolute',
       left: 15,
-      right: 15,
-      bottom: insets.bottom + 76,
+      right: TOOLBAR_COL_CLEAR,
+      // 上移到进度条栏顶边之上（PROGRESS_BAR_CLEAR=110）：原 `insets.bottom + 76`(=100) 实测
+      // 底边 y814.48 压住进度条栏顶边 y812.19，重叠 2.29dp。
+      bottom: PROGRESS_BAR_CLEAR,
       zIndex: 15,
       backgroundColor: 'transparent',
       borderRadius: radius.lg,
@@ -411,7 +446,12 @@ export default function PlayScreen({ route, navigation }: Props) {
       paddingHorizontal: 12,
     },
     // 右侧竖排功能键列（现有 6 键：收藏/不感兴趣/隐藏/语音/画中画/投屏；竖屏视频时另含全屏键）——红果式：悬浮视频右侧、距右缘 8。
-    // bottom 由 JSX 动态计算：竖屏固定于信息卡顶部之上（不遮卡；否则信息卡右缘手势会被整列拦截全部失效），全屏横屏不显示该列
+    // bottom 固定 TOOLBAR_COL_BOTTOM(108)：锚在进度条栏顶边(102)之上 6dp，永不遮挡进度条栏。
+    // 旧副作用「按钮列下段压在信息卡右端、盖住两处『展开』链接」已于 2026-10-04 消除：
+    // 信息卡 right 改为 TOOLBAR_COL_CLEAR(76)，退到本列收缩态左缘(343.62dp)之外 8.2dp。
+    // 【关键】本列宽度必须随提示动画 144→60，否则收缩态列宽仍是 144、列左缘落到 259.43dp，
+    // 会向左多出 84dp 无背景的透明命中区（zIndex 16 > 信息卡 15），把信息卡上位于 dp x 297~320
+    // 的「展开」链接整段盖住、点击被吞。故 width 用独立的 JS 驱动值做插值，见 toolbarHintWidthAnim 注释。
     toolbarVerticalCol: {
       position: 'absolute',
       right: 8,
@@ -419,6 +459,8 @@ export default function PlayScreen({ route, navigation }: Props) {
       flexDirection: 'column' as const,
       alignItems: 'flex-end',
       gap: 12,
+      // 宽度随提示动画缩小：提示显示时容纳图标+标签(=toolbarRow 宽)，提示消失时只容纳图标，
+      // 保证「列左边界 == 按钮左边界」恒成立（否则透明区外伸吃掉卡片上的「展开」）
     },
     // 每个按钮的「图标+文字」行：宽度固定 = 图标 + 统一让位量，右对齐贴 right:8，
     // 动画中整行右移让文字滑出屏外、图标落到右缘；图标仅平移不淡出
@@ -488,9 +530,9 @@ export default function PlayScreen({ route, navigation }: Props) {
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: 68,
+      bottom: PROGRESS_BAR_BOTTOM,
       zIndex: 26,
-      height: 34,
+      height: PROGRESS_BAR_HEIGHT,
       flexDirection: 'row' as const,
       alignItems: 'center',
     },
@@ -555,21 +597,23 @@ export default function PlayScreen({ route, navigation }: Props) {
     slideCardTitle: { fontSize: sf(15), fontWeight: '700', color: '#fff', textAlign: 'center', marginTop: 14 },
     slideCardEp: { fontSize: sf(12), fontWeight: '700', color: '#ff9d2e', marginTop: 6 },
     slideCardHint: { fontSize: sf(12), color: 'rgba(255,255,255,0.6)', marginTop: 10 },
-    // 右侧竖排放大 + 白底圆（悬浮双层圆按钮样式）
+    // 右侧竖排功能键：60×60 透明命中区（只负责点击热区，本身无背景）
     toolbarButtonRound: {
       width: 60,
       height: 60,
-      borderRadius: 30,
       justifyContent: 'center' as const,
       alignItems: 'center' as const,
     },
+    // 图标居中盒：46×46 透明容器，仅用于把 33px 图标居中占位。
+    // 2026-10-04 按用户要求「图标放大、按钮不放大」：图标 22→33（1.5 倍，曾试 44 即 2 倍嫌过大）。
+    // 按钮 60×60 与本盒 46×46 始终未改；33 < 46 故图标不溢出此盒，按钮两侧各留约 13.5dp。
+    // 2026-10-04 按用户要求去掉白色圆底（原 backgroundColor rgba(255,255,255,0.92)），
+    // 改为「裸图标」直接浮在视频画面上；因此图标色必须由深色 #222 同步改为 #fff，否则深色图标压深色视频不可见。
     toolbarIconRound: {
       width: 46,
       height: 46,
-      borderRadius: 23,
       justifyContent: 'center' as const,
       alignItems: 'center' as const,
-      backgroundColor: 'rgba(255,255,255,0.92)',
     },
     loadingOverlay: { ...StyleSheet.absoluteFill, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1 },
     loadingText: { color: colors.textSecondary, fontSize: sf(14), marginTop: 8 },
@@ -1776,9 +1820,7 @@ export default function PlayScreen({ route, navigation }: Props) {
       // bubble=false（视频区/全屏）：capture 抢占；bubble=true（信息卡）：冒泡获取，
       // 卡内 Touchable 控件（类型标签/「展开」）优先拿 responder，空白处才落入手势层
       onStartShouldSetPanResponder: bubble
-        ? () => {
-            // 挡板与 zoneInPoint 同源（信息卡/胶囊不遮手势区：overlay 胶囊在屏顶、不抢卡区触感）：
-            // settings/全屏/非沉浸/无视频/错误态不抢触
+        ? (e) => {
             if (mode !== 'main') return false;
             if (settingsVisibleRef.current) return false;
             if (appFullscreenRef.current) return false;
@@ -2137,7 +2179,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
         }
       } catch {}
-} else if (wasFullscreenRef.current) {
+    } else if (wasFullscreenRef.current) {
     try {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     } catch {}
@@ -2375,14 +2417,24 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
             )}
           </View>
         )}
-{videoUrl && !error && (
+{/* 非全屏 VideoView 必须与全屏 VideoView 互斥挂载（不能改成 opacity:0 隐藏）。
+            原因：expo-video Android 的 VideoView 只在 player prop 被「重新赋值」时才调
+            attachPlayer() → PlayerView.switchTargetView 把解码 surface 从旧 View 切到新 View
+            （node_modules/expo-video/.../VideoView.kt 的 videoPlayer setter + changeVideoView）。
+            全屏层卸载时只会销毁自己的 View，不会把 surface 切回主 VideoView；
+            若主 VideoView 一直挂着（仅隐藏），其 playerView.player 已被 switchTargetView 置空，
+            不会再次收到 set player → surface 永远拿不到 buffer，表现为「退出全屏后有声无画、
+            SurfaceFlinger 图层 geomLayerBounds=[0 0 0 0]」。
+            互斥挂载后：进全屏主 View 卸载、全屏 View 挂载并 attachPlayer；
+            退出全屏全屏 View 卸载、主 View 重新挂载并 attachPlayer，surface 正确回到主 View。 */}
+        {videoUrl && !error && !appFullscreen && (
           <VideoView
             ref={videoRef}
-            style={[styles.video, appFullscreen ? styles.videoHiddenInFullscreen : null]}
+            style={styles.video}
             player={player}
             contentFit={(canPlay && isVerticalVideo) ? 'cover' : 'contain'}
             allowsPictureInPicture={isPictureInPictureSupported()}
-            startsPictureInPictureAutomatically={isActuallyPlaying && !appFullscreen}
+            startsPictureInPictureAutomatically={isActuallyPlaying}
             fullscreenOptions={{ enable: false }}
             nativeControls={false}
           />
@@ -2439,7 +2491,10 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           const epLabelText = vmEpName || (epIdx >= 0 ? `第${epIdx + 1}集` : '');
           return (
             <>
-            <View style={styles.verticalCard} {...cardSwipeResponder.panHandlers} onLayout={(e) => setVerticalCardH(Math.round(e.nativeEvent.layout.height))}>
+            <View
+              style={styles.verticalCard}
+              {...cardSwipeResponder.panHandlers}
+            >
               {/* 信息区：红果式信息卡常驻全量显示（不伸缩） */}
                 <View style={styles.verticalInfoWrap}>
                 <View style={styles.verticalInfo} >
@@ -2505,7 +2560,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
                         <Text style={styles.verticalSectionTag}>简介</Text>
                         <Text style={styles.verticalSectionText} numberOfLines={1}>{media.description}</Text>
                         {plotOverflow && (
-                          <TouchableOpacity onPress={() => setIntroSheetVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ flexShrink: 0 }}>
+                          <TouchableOpacity onPress={() => { setIntroSheetVisible(true); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ flexShrink: 0 }}>
                             <Text style={styles.verticalExpandLink}>展开</Text>
                           </TouchableOpacity>
                         )}
@@ -2525,7 +2580,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
                         <Text style={styles.verticalSectionTag}>导演/演员</Text>
                         <Text style={styles.verticalSectionText} numberOfLines={2}>{vCastText}</Text>
                         {castOverflow && (
-                          <TouchableOpacity onPress={() => setCastSheetVisible(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ flexShrink: 0 }}>
+                          <TouchableOpacity onPress={() => { setCastSheetVisible(true); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ flexShrink: 0 }}>
                             <Text style={styles.verticalExpandLink}>展开</Text>
                           </TouchableOpacity>
                         )}
@@ -2640,19 +2695,30 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
       )}
       </Animated.View>
 
-      {/* 右侧竖排功能键（红果式：悬浮视频右侧、屏高 55% 起、距右缘 8）——置于卡片组之外固定不跟手；
-          进页先显示「图标+按钮名」，5 秒后仅文字淡出、整行缓慢右移让图标落到右缘 */}
+      {/* 右侧竖排功能键（红果式：悬浮视频右侧、距右缘 8）——置于卡片组之外固定不跟手；
+          垂直位置固定锚在进度条栏顶边之上（TOOLBAR_COL_BOTTOM=108），不遮挡进度条栏；
+          进页先显示「图标+按钮名」，5 秒后仅文字淡出、整行缓慢右移让图标落到右缘。
+          列宽同步 144→60 收缩（独立 JS 驱动值），使「列左边界 == 按钮左边界」恒成立，透明区不外伸*/}
       {canPlay && !appFullscreen && (
-        <View style={[styles.toolbarVerticalCol, {
-          bottom: verticalCardH > 0 ? insets.bottom + 76 + verticalCardH + 8 : screenH * 0.12,
-        }]}>
+        <Animated.View
+          style={[
+            styles.toolbarVerticalCol,
+            {
+              bottom: TOOLBAR_COL_BOTTOM,
+              width: toolbarHintWidthAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [TOOLBAR_COL_WIDTH + TOOLBAR_LABEL_EXTRA, TOOLBAR_COL_WIDTH],
+              }),
+            },
+          ]}
+        >
           {!isVerticalVideo && (
             <Animated.View style={[styles.toolbarRow, {
               transform: [{ translateX: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [0, TOOLBAR_LABEL_EXTRA] }) }],
             }]}>
               <TouchableOpacity style={styles.toolbarButtonRound} activeOpacity={0.7} onPress={enterAppFullscreen}>
                 <View style={styles.toolbarIconRound}>
-                  <Maximize size={22} color="#222" />
+                  <MaterialCommunityIcons name="phone-rotate-landscape" size={33} color="#fff" />
                 </View>
               </TouchableOpacity>
               <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>全屏</Animated.Text>
@@ -2663,7 +2729,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           }]}>
             <TouchableOpacity style={styles.toolbarButtonRound} activeOpacity={0.7} onPress={handleFav}>
               <View style={styles.toolbarIconRound}>
-                <Heart size={22} color={isFav ? '#ff9d2e' : '#222'} fill={isFav ? '#ff9d2e' : 'none'} />
+                <MaterialCommunityIcons name="heart" size={33} color={isFav ? '#ff9d2e' : '#fff'} />
               </View>
             </TouchableOpacity>
             <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>收藏</Animated.Text>
@@ -2673,7 +2739,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           }]}>
             <TouchableOpacity style={styles.toolbarButtonRound} activeOpacity={0.7} onPress={handleDislike}>
               <View style={styles.toolbarIconRound}>
-                <ThumbsDown size={22} color={isDisliked ? colors.error : '#222'} />
+                <MaterialCommunityIcons name="thumb-down" size={33} color={isDisliked ? colors.error : '#fff'} />
               </View>
             </TouchableOpacity>
             <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>不感兴趣</Animated.Text>
@@ -2683,7 +2749,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           }]}>
             <TouchableOpacity style={styles.toolbarButtonRound} activeOpacity={0.7} onPress={openHideModal}>
               <View style={styles.toolbarIconRound}>
-                <EyeOff size={22} color="#222" />
+                <MaterialCommunityIcons name="eye-off" size={33} color="#fff" />
               </View>
             </TouchableOpacity>
             <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>隐藏</Animated.Text>
@@ -2694,7 +2760,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
             }]}>
               <TouchableOpacity style={styles.toolbarButtonRound} activeOpacity={0.7} onPress={handlePictureInPicture}>
                 <View style={styles.toolbarIconRound}>
-                  <PictureInPicture2 size={22} color="#222" />
+                  <MaterialCommunityIcons name="picture-in-picture-bottom-right" size={33} color="#fff" />
                 </View>
               </TouchableOpacity>
               <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>画中画</Animated.Text>
@@ -2711,7 +2777,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
             />
             <Animated.Text style={[styles.toolbarLabel, { opacity: toolbarHintAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>投屏</Animated.Text>
           </Animated.View>
-        </View>
+        </Animated.View>
       )}
 
       {isCasting && (
@@ -2750,7 +2816,7 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
             player={player}
             contentFit={isVerticalVideo ? 'cover' : 'contain'}
             allowsPictureInPicture={isPictureInPictureSupported()}
-            startsPictureInPictureAutomatically={isActuallyPlaying && appFullscreen}
+            startsPictureInPictureAutomatically={isActuallyPlaying}
             nativeControls={false}
             onPictureInPictureStart={() => {
               if (appFullscreenRef.current) exitAppFullscreen();
