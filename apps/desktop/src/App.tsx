@@ -35,6 +35,8 @@ import KidLockPage from './pages/KidLockPage';
 import VideoManagementPage from './pages/VideoManagementPage';
 import TestCollectPage from './pages/TestCollectPage';
 import HelpCenterPage from './pages/HelpCenterPage';
+import AboutPage from './pages/AboutPage';
+import LicensePage from './pages/LicensePage';
 import DbToolPage from './pages/DbToolPage';
 
 interface AppProps {
@@ -142,6 +144,8 @@ function MainApp({ isReload }: { isReload: boolean }) {
                       <Route path="/db-tool" element={<DbToolPage />} />
                       <Route path="/test-collect" element={<TestCollectPage />} />
                       <Route path="/help" element={<HelpCenterPage />} />
+                      <Route path="/about" element={<AboutPage />} />
+                      <Route path="/about/license" element={<LicensePage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>
                   </Routes>

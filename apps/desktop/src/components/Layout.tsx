@@ -95,7 +95,7 @@ function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.173');
+  const [appVersion, setAppVersion] = useState('1.0.174');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
@@ -193,9 +193,9 @@ export function Layout() {
               <div className="flex items-center gap-2">
                 <Link to="/help" className="hover:text-text transition-colors">帮助中心</Link>
                 <span className="text-muted-foreground">|</span>
-                <span>关于我们</span>
+                <Link to="/about" className="hover:text-text transition-colors">关于我们</Link>
                 <span className="text-muted-foreground">|</span>
-                <span>版权声明</span>
+                <Link to="/about/license" className="hover:text-text transition-colors">版权声明</Link>
               </div>
             </div>
           </footer>
