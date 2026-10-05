@@ -14,7 +14,9 @@ Cross-platform media aggregator and personal library client · iOS / Android / m
 
 OpenReel is a self-hosted media aggregator and playback client. Plug in the sources you like — it handles scraping, cataloguing, classification and recommendations, then builds a library that belongs to you.
 
-One database across three platforms: browse on the desktop, pick up on your phone.
+The data is entirely yours — it lives only on your own device, and nothing is routed through a server.
+
+Desktop and mobile share the same codebase, but each stores its own data. A large library built on the desktop does not sync itself to your phone — collect once there if you want it there.
 
 ## Features
 
@@ -54,7 +56,7 @@ Desktop and mobile share the entire business layer in `packages/core` (scraping,
 
 ## Data storage
 
-Everything stays on your device, in a local SQLite file. Nothing is uploaded. Uninstalling removes the data; upgrading over an existing install keeps it.
+Everything stays on your device, in a local SQLite file. Nothing is uploaded or shared. Uninstalling removes the data; upgrading over an existing install keeps it. For cross-device behaviour see "What it is" above.
 
 ## Installation
 
