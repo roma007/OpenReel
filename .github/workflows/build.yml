@@ -176,9 +176,78 @@ jobs:
             apps/desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: warn
 
+  build-mobile-android:
+    name: Build Mobile APK
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Verify app identifiers unchanged
+        shell: bash
+        run: |
+          set -e
+          # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
+          android_pkg=$(node -p "require('./apps/mobile/app.json').expo.android.package")
+          [ "$android_pkg" = "com.movie.app" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
+          echo "Identifiers OK (android=$android_pkg)"
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 版本取自 node_modules/react-native/gradle/libs.versions.toml（compileSdk/targetSdk/buildTools/ndk）
+      # 与本机实测一致；CMake 3.22.1 为本机唯一可用版本，与 .cxx/compile_commands.json 记录一致。
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1'
+
+      # postinstall 会执行 apply-native-patches.mjs，为 expo-video 注入 maxRequestsPerHost，
+      # 必须先 pnpm install 才能拿到带补丁的原生源码，故放在 SDK 安装之后。
+      - name: Install frontend dependencies
+        shell: bash
+        run: |
+          set -e
+          for i in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              exit 0
+            fi
+            echo "pnpm install failed (attempt $i/3), cleaning store and retrying..."
+            rm -rf node_modules
+            pnpm store prune || true
+          done
+          exit 1
+
+      - name: Build release APK
+        run: |
+          cd apps/mobile/android
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenReel-Mobile-Android
+          path: apps/mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build]
+    # 必须包含两个 Android job：此前只 needs [build]，实测 v1.0.173 的 create-release
+    # 06:55:49 跑完，而 Build Android 06:57:41 才结束，APK 尚未上传，Release 里被静默漏掉。
+    needs: [build, build-android, build-mobile-android]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -187,10 +256,17 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # 按扩展名白名单取件：此前用 artifacts/**/*，会把 macOS bundle 里 OpenReel.app
+      # 目录内部的 Info.plist / icon.icns / *.applescript 等中间产物全部展开成 Release 资产。
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.apk
+            artifacts/**/*.aab
           name: OpenReel ${{ github.ref_name }}
           body: "See the assets below to download and install."
           draft: false
