@@ -234,8 +234,8 @@ try handler.perform([req])
 > 「提交」的完整语义 = **本地 commit + 双端推送**。只 commit 不推送视为未完成。任何 AI 助手处理需求时必须遵守。
 
 1. 每次提交后**必须**同时 push 到两个远程，缺一不可：
-   - `origin`（gitee，`git@gitee.com:roma007007/movie-app.git`）
-   - `github`（github，`git@github.com:roma007/movie-app.git`）
+   - `origin`（gitee，`git@gitee.com:roma007007/openreel.git`）
+   - `github`（github，`git@github.com:roma007/openreel.git`）
 2. 推送后**必须核实**两端 remote 已同步（`git status` 无 ahead）且远端确实是目标提交。
 3. **推送到 `github` 的 `master`（或 `v*` tag）会自动触发 GitHub Actions「Build Release」构建桌面安装包**（macos aarch64/x86_64 + windows 三平台），并 `contents: write` 发布 release 产物。此机制由 `.github/workflows/build.yml` 提供，AI 无需手动造包；但推送后**须核实 Actions 工作流已触发并正常启动**。
 4. 若某次只 commit 未双推（如会话中断），下次会话先补齐双端推送，再继续新工作。
