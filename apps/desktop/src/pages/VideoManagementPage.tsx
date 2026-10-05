@@ -10,8 +10,8 @@ import { useAppStore, getProvider } from '../useAppStore';
 import { openMediaPlay } from '../utils/openMediaPlay';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useToast } from '@/components/Layout';
-import type { ShortDramaConfig } from '@movie-app/core';
-import { UNCATEGORIZED_GENRE } from '@movie-app/core';
+import type { ShortDramaConfig } from '@openreel/core';
+import { UNCATEGORIZED_GENRE } from '@openreel/core';
 import { useBackgroundStore } from '../themes/backgroundStore';
 
 interface MediaStats {

@@ -13,8 +13,8 @@ import { radius } from '../themes/radiusTokens';
 import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import type { ShortDramaConfig } from '@movie-app/core';
-import { UNCATEGORIZED_GENRE } from '@movie-app/core';
+import type { ShortDramaConfig } from '@openreel/core';
+import { UNCATEGORIZED_GENRE } from '@openreel/core';
 
 interface Props {
   navigation: any;

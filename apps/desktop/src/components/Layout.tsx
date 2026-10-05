@@ -95,7 +95,7 @@ function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.165');
+  const [appVersion, setAppVersion] = useState('1.0.166');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
@@ -159,7 +159,7 @@ export function Layout() {
         <aside className="w-56 shrink-0 flex flex-col bg-[var(--color-sidebar-alpha)] backdrop-blur-md">
           <div className="flex items-center gap-2 px-5 h-14">
             <Film className="size-5 text-muted-foreground" />
-            <span className="font-semibold tracking-tight text-lg">Movie App</span>
+            <span className="font-semibold tracking-tight text-lg">OpenReel</span>
           </div>
           <nav className="flex-1 py-3">
             {navItems.map(({ to, label, icon: Icon }) => (

@@ -1,6 +1,6 @@
 {
-  "name": "@movie-app/mobile",
-  "version": "1.0.165",
+  "name": "@openreel/mobile",
+  "version": "1.0.166",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
-    "@movie-app/core": "workspace:*",
+    "@openreel/core": "workspace:*",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-community/slider": "5.2.0",
     "@react-navigation/native": "^7.0.0",

@@ -1,5 +1,5 @@
 import { TauriSqlProvider, type MigrationProgress } from './db/tauriSqlProvider';
-import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState, type HttpClient } from '@movie-app/core';
+import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState, type HttpClient } from '@openreel/core';
 
 let _provider: TauriSqlProvider | null = null;
 let _store: AppStore | null = null;

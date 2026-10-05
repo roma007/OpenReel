@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SystemConfigService, type Episode, type Media, type PlaySource, type WatchHistory } from '@movie-app/core';
+import { SystemConfigService, type Episode, type Media, type PlaySource, type WatchHistory } from '@openreel/core';
 import { getProvider, getStore } from '../init';
 import { prefetchManager } from '../components/player/PrefetchManager';
 

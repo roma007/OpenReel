@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
 import { ExternalLink, Maximize2, Shrink, X } from 'lucide-react';
-import type { PlaySource } from '@movie-app/core';
+import type { PlaySource } from '@openreel/core';
 import { VideoPlayer } from '../components/player/VideoPlayer';
 import { PlayerOverlays } from '../components/player/PlayerOverlays';
 import { ThemeProvider } from '../themes/ThemeProvider';

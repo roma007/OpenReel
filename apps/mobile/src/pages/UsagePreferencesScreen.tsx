@@ -9,8 +9,8 @@ import { useThemeStore } from '../themes/store';
 import { useScaledFontSize } from '../themes/useScaledFontSize';
 import { hexToRgba } from '../themes/colorUtils';
 import BlurredBackground from '../components/BlurredBackground';
-import { SystemConfigService } from '@movie-app/core';
-import type { UserUsageType } from '@movie-app/core';
+import { SystemConfigService } from '@openreel/core';
+import type { UserUsageType } from '@openreel/core';
 import { radius } from '../themes/radiusTokens';
 
 interface Props {

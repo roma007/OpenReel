@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { KidLockService } from '@movie-app/core';
+import { KidLockService } from '@openreel/core';
 import { getProvider } from '../useAppStore';
 
 export function getKidLockService(): KidLockService {

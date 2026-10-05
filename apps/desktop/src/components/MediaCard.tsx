@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Media, MediaNavState } from '@movie-app/core';
+import type { Media, MediaNavState } from '@openreel/core';
 import { openMediaPlay } from '../utils/openMediaPlay';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

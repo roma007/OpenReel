@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import type { Media, PaginatedResponse } from '@movie-app/core';
+import type { Media, PaginatedResponse } from '@openreel/core';
 import { useAppStore } from '../useAppStore';
 import { getProvider, getStore } from '../init';
 import { openMediaPlay } from '../utils/openMediaPlay';

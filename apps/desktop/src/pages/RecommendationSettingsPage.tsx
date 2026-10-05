@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, RefreshCw, Sparkles, RotateCcw, ThumbsDown, ThumbsUp, Search, Eye, X, Plus, Ban } from 'lucide-react';
-import type { RecommendationOverview, DislikedMediaItem, TagBlacklistItem } from '@movie-app/core';
+import type { RecommendationOverview, DislikedMediaItem, TagBlacklistItem } from '@openreel/core';
 
 const TAG_TYPE_LABEL: Record<TagBlacklistItem['tagType'], string> = {
   genre: '类型',

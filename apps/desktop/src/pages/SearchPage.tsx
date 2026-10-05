@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Media, PaginatedResponse } from '@movie-app/core';
+import type { Media, PaginatedResponse } from '@openreel/core';
 import { getProvider, getStore } from '../init';
 import { useBackgroundStore } from '../themes/backgroundStore';
 import { MediaGrid } from '@/components/MediaCard';

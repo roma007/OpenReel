@@ -15,7 +15,7 @@ import { ArrowLeft, Star, Settings, ChevronRight, X, Play } from 'lucide-react-n
 // 2026-10-04按用户要求「图标用白色实心」实施：原 lucide 图标为描边风格，
 // 给其加 fill 会因路径开放而畸形（Maximize 4 条开放 path、EyeOff 3 弧+斜线、Cast 3 path+line 等），故换图标集。
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@movie-app/core';
+import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@openreel/core';
 import { clearCategoryFilterCache } from '../categoryFilterCache';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,7 +29,7 @@ import { useCastManager } from '../hooks/useCastManager';
 import { useCastStore } from '../stores/castStore';
 import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
-import type { PlaySource, VideoSource, Episode, Media } from '@movie-app/core';
+import type { PlaySource, VideoSource, Episode, Media } from '@openreel/core';
 import type { PlayContext } from '../utils/openMediaPlay';
 import { radius } from '../themes/radiusTokens';
 import { SegmentProgress } from '../components/SegmentProgress';

@@ -21,7 +21,7 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@movie-app/core':
+      '@openreel/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@radix-ui/react-dialog':
@@ -115,7 +115,7 @@ importers:
       '@expo/vector-icons':
         specifier: ^15.1.1
         version: 15.1.1(expo-font@57.0.1(expo@57.0.7)(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)
-      '@movie-app/core':
+      '@openreel/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@react-native-async-storage/async-storage':

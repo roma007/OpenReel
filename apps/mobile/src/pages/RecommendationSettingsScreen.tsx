@@ -9,7 +9,7 @@ import { hexToRgba } from '../themes/colorUtils';
 import { radius } from '../themes/radiusTokens';
 import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
-import type { RecommendationOverview, DislikedMediaItem, TagBlacklistItem } from '@movie-app/core';
+import type { RecommendationOverview, DislikedMediaItem, TagBlacklistItem } from '@openreel/core';
 import { getProvider } from '../init';
 import { openMediaPlay } from '../utils/openMediaPlay';
 

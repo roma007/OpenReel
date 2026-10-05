@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Linking, Animated, Easing, Dimensions, Platform, BackHandler, Alert } from 'react-native';
-import { getSplashStore, BUILTIN_AD_FLOAT_CONFIG, filterAdsByOrientation, type AdFloatItem } from '@movie-app/core';
+import { getSplashStore, BUILTIN_AD_FLOAT_CONFIG, filterAdsByOrientation, type AdFloatItem } from '@openreel/core';
 import type { MigrationProgress, MigrationDiskError } from '../db/expoSqliteProvider';
 
 interface SplashOverlayProps {
@@ -133,7 +133,7 @@ export function SplashOverlay({ ready, migrationProgress, diskBlocked }: SplashO
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.logoText}>MovieApp</Text>
+          <Text style={styles.logoText}>OpenReel</Text>
         </Animated.View>
       )}
 
@@ -171,7 +171,7 @@ export function SplashOverlay({ ready, migrationProgress, diskBlocked }: SplashO
               style={styles.logo}
               resizeMode="contain"
             />
-            <Text style={styles.logoText}>MovieApp</Text>
+            <Text style={styles.logoText}>OpenReel</Text>
             <Text style={styles.migrateDesc}>
               {stageLabel
                 ? `正在升级数据库（${progress}%）：${stageLabel}`

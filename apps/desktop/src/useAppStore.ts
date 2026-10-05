@@ -1,5 +1,5 @@
 import { getStore } from './init';
-import type { AppState } from '@movie-app/core';
+import type { AppState } from '@openreel/core';
 
 /**
  * Zustand store hook（桌面端）。

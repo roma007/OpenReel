@@ -8,7 +8,7 @@ import { currentMonitor } from '@tauri-apps/api/window';
 import { emit, listen } from '@tauri-apps/api/event';
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
 import { Loader2 } from 'lucide-react';
-import { SystemConfigService, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@movie-app/core';
+import { SystemConfigService, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@openreel/core';
 import { VideoPlayer } from './VideoPlayer';
 import { PlayerOverlays } from './PlayerOverlays';
 import { AdFloatOverlay } from './AdFloatOverlay';

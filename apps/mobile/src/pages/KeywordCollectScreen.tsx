@@ -11,7 +11,7 @@ import PosterImage from '../components/PosterImage';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { ArrowLeft, Check } from 'lucide-react-native';
-import type { CollectPreviewItem } from '@movie-app/core';
+import type { CollectPreviewItem } from '@openreel/core';
 
 interface Props {
   navigation: any;

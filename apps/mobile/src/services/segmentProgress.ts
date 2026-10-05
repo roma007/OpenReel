@@ -1,5 +1,5 @@
 import { File, Paths } from 'expo-file-system';
-import { VideoDurationService } from '@movie-app/core';
+import { VideoDurationService } from '@openreel/core';
 
 /** 分片加载状态（与原生桥文件 segment_progress.json 的 state 字段同语义：0=loading 1=done 2=error）。 */
 export interface NativeSegmentState {

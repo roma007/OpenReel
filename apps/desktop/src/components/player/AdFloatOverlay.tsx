@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AdFloatItem } from '@movie-app/core';
+import type { AdFloatItem } from '@openreel/core';
 
 interface AdBannerProps {
   ad: AdFloatItem;

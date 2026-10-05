@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { PosterImage } from '@/components/PosterImage';
 import { Search, Loader2, Plus } from 'lucide-react';
-import type { HiddenCollectItem } from '@movie-app/core';
+import type { HiddenCollectItem } from '@openreel/core';
 
 const MAX_DISPLAY_TITLES = 8;
 

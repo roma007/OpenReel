@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getSplashStore, BUILTIN_AD_FLOAT_CONFIG, filterAdsByOrientation, type AdFloatItem } from '@movie-app/core';
+import { getSplashStore, BUILTIN_AD_FLOAT_CONFIG, filterAdsByOrientation, type AdFloatItem } from '@openreel/core';
 
 /** 按窗口宽高比判定当前屏幕方向（宽≥高=横屏）。 */
 function isLandscapeWindow(): boolean {
@@ -121,7 +121,7 @@ export function SplashOverlay({ ready }: SplashOverlayProps) {
           draggable={false}
           className="h-28 w-28 rounded-2xl object-cover shadow-2xl"
         />
-        <div className="mt-4 text-lg font-bold tracking-wide text-white/90">MovieApp</div>
+        <div className="mt-4 text-lg font-bold tracking-wide text-white/90">OpenReel</div>
       </div>
 
       {/* 全屏广告 layer */}

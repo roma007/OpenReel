@@ -11,7 +11,7 @@ import { radius } from '../themes/radiusTokens';
 import BlurredBackground from '../components/BlurredBackground';
 import Spinner from '../components/Spinner';
 import { Button } from '../components/ui/Button';
-import type { CollectTask, FailedItem } from '@movie-app/core';
+import type { CollectTask, FailedItem } from '@openreel/core';
 
 interface Props {
   navigation: any;

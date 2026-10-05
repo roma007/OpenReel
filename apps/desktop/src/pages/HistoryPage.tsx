@@ -6,7 +6,7 @@ import { getProvider } from '../init';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Trash2, Play, ArrowLeft } from 'lucide-react';
-import type { Media } from '@movie-app/core';
+import type { Media } from '@openreel/core';
 import { useBackgroundStore } from '../themes/backgroundStore';
 import { PosterImage } from '@/components/PosterImage';
 

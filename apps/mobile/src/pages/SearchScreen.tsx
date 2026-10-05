@@ -12,7 +12,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { ArrowLeft } from 'lucide-react-native';
 import { openMediaPlay } from '../utils/openMediaPlay';
-import type { Media, PaginatedMeta } from '@movie-app/core';
+import type { Media, PaginatedMeta } from '@openreel/core';
 
 const PAGE_SIZE = 20;
 

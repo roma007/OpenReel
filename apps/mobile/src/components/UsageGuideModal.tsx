@@ -7,7 +7,7 @@ import { radius } from '../themes/radiusTokens';
 import { hexToRgba } from '../themes/colorUtils';
 import { Button } from './ui/Button';
 import { useAppStore } from '../useAppStore';
-import type { UserUsageType } from '@movie-app/core';
+import type { UserUsageType } from '@openreel/core';
 import { Search, Film, Tv, Check } from 'lucide-react-native';
 
 const OPTIONS: { type: UserUsageType; label: string; desc: string; icon: any }[] = [

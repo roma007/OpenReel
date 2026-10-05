@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Media, Episode, UserUsageType, WatchHistory } from '@movie-app/core';
-import { getSplashStore } from '@movie-app/core';
+import type { Media, Episode, UserUsageType, WatchHistory } from '@openreel/core';
+import { getSplashStore } from '@openreel/core';
 import { useAppStore, getProvider } from '../useAppStore';
 import { openMediaPlay } from '../utils/openMediaPlay';
 import { useBackgroundStore } from '../themes/backgroundStore';

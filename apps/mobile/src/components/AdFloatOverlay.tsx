@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking, type ImageSourcePropType } from 'react-native';
 import { Image } from 'expo-image';
-import type { AdFloatItem } from '@movie-app/core';
+import type { AdFloatItem } from '@openreel/core';
 
 interface AdFloatOverlayProps {
   ad: AdFloatItem;

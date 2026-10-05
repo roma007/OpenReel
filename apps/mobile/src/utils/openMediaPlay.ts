@@ -1,6 +1,6 @@
 import { getProvider } from '../init';
-import { resolveDefaultPlayTarget } from '@movie-app/core';
-import type { Media } from '@movie-app/core';
+import { resolveDefaultPlayTarget } from '@openreel/core';
+import type { Media } from '@openreel/core';
 
 /**
  * 播放来源上下文：决定播放页上下滑切换的行为。

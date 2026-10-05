@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../useAppStore';
 import { useToast } from './Layout';
-import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@movie-app/core';
-import type { ParsedImportSource } from '@movie-app/core';
+import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
+import type { ParsedImportSource } from '@openreel/core';
 
 interface Props {
   open: boolean;

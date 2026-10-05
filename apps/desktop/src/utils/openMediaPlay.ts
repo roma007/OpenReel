@@ -1,6 +1,6 @@
 import { getProvider } from '../init';
-import { resolveDefaultPlayTarget } from '@movie-app/core';
-import type { Media, MediaNavState } from '@movie-app/core';
+import { resolveDefaultPlayTarget } from '@openreel/core';
+import type { Media, MediaNavState } from '@openreel/core';
 
 /**
  * 点击卡片后直接进入播放页：解析默认播放目标（续播/首集 + 首个线路）。

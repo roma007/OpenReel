@@ -1,19 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Movie App",
-  "version": "1.0.165",
+  "productName": "OpenReel",
+  "version": "1.0.166",
   "identifier": "com.movie.app.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "pnpm --filter @movie-app/desktop dev",
-    "beforeBuildCommand": "pnpm --filter @movie-app/desktop build"
+    "beforeDevCommand": "pnpm --filter @openreel/desktop dev",
+    "beforeBuildCommand": "pnpm --filter @openreel/desktop build"
   },
   "app": {
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Movie App",
+        "title": "OpenReel",
         "width": 1200,
         "height": 800,
         "minWidth": 900,

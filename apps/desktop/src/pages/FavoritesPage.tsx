@@ -6,7 +6,7 @@ import { MediaGrid } from '@/components/MediaCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
-import type { Media } from '@movie-app/core';
+import type { Media } from '@openreel/core';
 import { useBackgroundStore } from '../themes/backgroundStore';
 
 export default function FavoritesPage() {

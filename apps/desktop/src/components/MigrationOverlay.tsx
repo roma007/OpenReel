@@ -42,7 +42,7 @@ export function MigrationOverlay({ migrating = false, migrationProgress, diskBlo
             draggable={false}
             className="h-28 w-28 rounded-2xl object-cover shadow-2xl"
           />
-          <div className="mt-4 text-lg font-bold tracking-wide text-white/90">MovieApp</div>
+          <div className="mt-4 text-lg font-bold tracking-wide text-white/90">OpenReel</div>
           <div className="mt-6 max-w-md text-center text-sm text-white/80">
             {stageLabel
               ? `正在升级数据库（${progress}%）：${stageLabel}`

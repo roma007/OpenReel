@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { useAppStore, getProvider } from '../useAppStore';
-import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@movie-app/core';
-import type { VideoSource, CollectTask, ImportSourceItem, ParsedImportSource } from '@movie-app/core';
+import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
+import type { VideoSource, CollectTask, ImportSourceItem, ParsedImportSource } from '@openreel/core';
 import Toast, { showToast } from '../components/Toast';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';

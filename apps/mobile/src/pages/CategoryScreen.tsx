@@ -10,7 +10,7 @@ import CategoryHeader from '../components/CategoryHeader';
 import FilterDropdown from '../components/FilterDropdown';
 import BlurredBackground from '../components/BlurredBackground';
 import { getFilterCache, setFilterCache, getShortDramaCache, setShortDramaCache } from '../categoryFilterCache';
-import type { Media, PaginatedMeta } from '@movie-app/core';
+import type { Media, PaginatedMeta } from '@openreel/core';
 
 const PAGE_SIZE = 20;
 

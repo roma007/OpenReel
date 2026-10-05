@@ -7,7 +7,7 @@ import { hexToRgba } from '../themes/colorUtils';
 import { radius } from '../themes/radiusTokens';
 import PosterImage from './PosterImage';
 import { X, Star } from 'lucide-react-native';
-import type { Media } from '@movie-app/core';
+import type { Media } from '@openreel/core';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - 30 - 10) / 2;

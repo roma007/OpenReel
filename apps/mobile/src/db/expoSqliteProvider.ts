@@ -26,8 +26,8 @@ import {
   resolveCollectTaskCutoff,
   expandSubTypes,
   extractFirstSubtypes,
-} from '@movie-app/core';
-import type { DatabaseProvider } from '@movie-app/core';
+} from '@openreel/core';
+import type { DatabaseProvider } from '@openreel/core';
 import type {
   Media,
   Episode,
@@ -38,7 +38,7 @@ import type {
   PaginatedResponse,
   ListParams,
   CollectTask,
-} from '@movie-app/core';
+} from '@openreel/core';
 
 interface Migration {
   version: number;

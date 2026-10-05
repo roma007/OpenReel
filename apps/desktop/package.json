@@ -1,6 +1,6 @@
 {
-  "name": "@movie-app/desktop",
-  "version": "1.0.165",
+  "name": "@openreel/desktop",
+  "version": "1.0.166",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@movie-app/core": "workspace:*",
+    "@openreel/core": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-label": "^2.1.11",
     "@radix-ui/react-scroll-area": "^1.2.14",

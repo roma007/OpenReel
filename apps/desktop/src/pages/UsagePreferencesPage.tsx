@@ -7,8 +7,8 @@ import { ArrowLeft, Clock, Home, Waypoints, Video } from 'lucide-react';
 import { useAppStore } from '../useAppStore';
 import { useThemeStore } from '../themes/store';
 import { getProvider } from '../init';
-import { SystemConfigService } from '@movie-app/core';
-import type { UserUsageType } from '@movie-app/core';
+import { SystemConfigService } from '@openreel/core';
+import type { UserUsageType } from '@openreel/core';
 
 const USAGE_OPTIONS: { type: UserUsageType; label: string; desc: string }[] = [
   { type: 'SEARCH_FIRST', label: '搜索优先', desc: '即时搜索采集想看的' },

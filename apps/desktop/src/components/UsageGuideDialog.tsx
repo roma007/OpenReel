@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Search, Film, Tv } from 'lucide-react';
 import { useAppStore } from '../useAppStore';
-import type { UserUsageType } from '@movie-app/core';
+import type { UserUsageType } from '@openreel/core';
 
 const STORAGE_KEY = 'movie_app_usage_guide_seen';
 

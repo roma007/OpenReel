@@ -19,7 +19,7 @@ import {
   RefreshCcw,
   ListX,
 } from 'lucide-react';
-import type { CollectTask, FailedItem } from '@movie-app/core';
+import type { CollectTask, FailedItem } from '@openreel/core';
 
 function getStatusIcon(status: string) {
   switch (status) {

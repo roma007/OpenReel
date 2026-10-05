@@ -1,6 +1,6 @@
 import { ExpoSqliteProvider, type MigrationProgress } from './db/expoSqliteProvider';
 import { DevSettings } from 'react-native';
-import { createAppStore, CollectorService, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState } from '@movie-app/core';
+import { createAppStore, CollectorService, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState } from '@openreel/core';
 
 /**
  * 单例容器挂在 globalThis 上，保证 RN Fast Refresh（模块重执行）后单例不丢失。

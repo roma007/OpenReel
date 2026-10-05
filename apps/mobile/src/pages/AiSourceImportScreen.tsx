@@ -9,8 +9,8 @@ import { useScaledFontSize } from '../themes/useScaledFontSize';
 import { hexToRgba } from '../themes/colorUtils';
 import { radius } from '../themes/radiusTokens';
 import { Button } from '../components/ui/Button';
-import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@movie-app/core';
-import type { ParsedImportSource } from '@movie-app/core';
+import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
+import type { ParsedImportSource } from '@openreel/core';
 import { Search, CheckCircle2, XCircle, AlertTriangle, HelpCircle, ClipboardPaste, Save, PartyPopper, Frown } from 'lucide-react-native';
 
 type Step = 'prompt' | 'paste' | 'preview';

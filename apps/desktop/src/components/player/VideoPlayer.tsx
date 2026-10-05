@@ -17,7 +17,7 @@ import {
   DefaultMenuCheckbox,
 } from '@vidstack/react/player/layouts/default';
 import HLS from 'hls.js';
-import type { PlaySource } from '@movie-app/core';
+import type { PlaySource } from '@openreel/core';
 import { TauriLoader } from './TauriLoader';
 import { prefetchManager } from './PrefetchManager';
 import { SegmentProgress } from './SegmentProgress';
