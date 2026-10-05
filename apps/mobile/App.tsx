@@ -59,6 +59,8 @@ import UsagePreferencesScreen from './src/pages/UsagePreferencesScreen';
 import RecommendationSettingsScreen from './src/pages/RecommendationSettingsScreen';
 import TaskListScreen from './src/pages/TaskListScreen';
 import HelpCenterScreen from './src/pages/HelpCenterScreen';
+import AboutScreen from './src/pages/AboutScreen';
+import LicenseScreen from './src/pages/LicenseScreen';
 import CollectGuideScreen from './src/pages/CollectGuideScreen';
 import VideoManagementScreen from './src/pages/VideoManagementScreen';
 import TestCollectScreen from './src/pages/TestCollectScreen';
@@ -104,6 +106,8 @@ function RootNavigator() {
         <Stack.Screen name="RecommendationSettings" component={RecommendationSettingsScreen} />
         <Stack.Screen name="TaskList" component={TaskListScreen} />
         <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
+        <Stack.Screen name="About" component={AboutScreen} />
+        <Stack.Screen name="License" component={LicenseScreen} />
         <Stack.Screen name="CollectGuide" component={CollectGuideScreen} />
         <Stack.Screen name="VideoManagement" component={VideoManagementScreen} />
         <Stack.Screen name="TestCollect" component={TestCollectScreen} />

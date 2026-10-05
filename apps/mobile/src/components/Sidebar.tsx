@@ -165,6 +165,12 @@ export default function Sidebar() {
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('HelpCenter')}>
               <Text style={styles.menuText}>帮助中心</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('About')}>
+              <Text style={styles.menuText}>关于我们</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('License')}>
+              <Text style={styles.menuText}>版权声明</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('TestCollect')}>
               <Text style={styles.menuText}>测试采集</Text>
             </TouchableOpacity>
