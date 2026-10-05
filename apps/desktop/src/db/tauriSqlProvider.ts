@@ -3,9 +3,6 @@ import {
   SCHEMA_SQL,
   DROP_SYNC_REMNANTS_SQL,
   FAVORITE_UNIQUE_MIGRATE_SQL,
-  INSERT_DEFAULT_SOURCE_SQL,
-  COUNT_VIDEO_SOURCE_SQL,
-  defaultSources,
   splitSqlStatements,
   MEDIA_FILE_EXTENSIONS,
   UNCATEGORIZED_GENRE,
@@ -273,13 +270,10 @@ export class TauriSqlProvider implements DatabaseProvider {
     // 5. 执行完整 schema（幂等，全部 IF NOT EXISTS）
     await this.initSchema();
 
-    // 6. 插入默认视频源
-    await this.insertDefaultSources();
-
-    // 7. 将历史内置 HTTP 源升级为 HTTPS（iOS ATS 会拦截明文 http）
+    // 6. 将历史内置 HTTP 源升级为 HTTPS（iOS ATS 会拦截明文 http）
     await this.upgradeSourceUrlsToHttps();
 
-    // 8. 清理历史超大 failed_items blob（早期版本逐页累积无上限）：仅清理已结束
+    // 7. 清理历史超大 failed_items blob（早期版本逐页累积无上限）：仅清理已结束
     //    状态（COMPLETED/FAILED/ABANDONED）的 >128KB 失败明细，绝不动 RUNNING/PENDING
     //    未完成任务（其续采依赖 currentPage/failed_items 等）。
     try {
@@ -290,7 +284,7 @@ export class TauriSqlProvider implements DatabaseProvider {
       console.error('[DB] 清理超大 failed_items 失败:', err);
     }
 
-    // 9. 收束 WAL 文件（异常退出可能残留几百 MB WAL，冷启动慢）：非阻塞，失败不阻断启动
+    // 8. 收束 WAL 文件（异常退出可能残留几百 MB WAL，冷启动慢）：非阻塞，失败不阻断启动
     try {
       await this.db!.execute('PRAGMA wal_checkpoint(TRUNCATE);');
     } catch (err) {
@@ -1074,22 +1068,6 @@ export class TauriSqlProvider implements DatabaseProvider {
     END;`);
 
     await this.db!.execute(`INSERT INTO media_fts(media_fts) VALUES('rebuild')`);
-  }
-
-  private async insertDefaultSources(): Promise<void> {
-    const rows = await this.db!.select<{ count: number }[]>(COUNT_VIDEO_SOURCE_SQL);
-    if ((rows[0]?.count ?? 0) === 0) {
-      const now = new Date().toISOString();
-      for (const source of defaultSources) {
-        await this.db!.execute(INSERT_DEFAULT_SOURCE_SQL, [
-          `source_${source.code}`,
-          source.code,
-          source.name,
-          source.baseUrl,
-          now,
-        ]);
-      }
-    }
   }
 
   /**

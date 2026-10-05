@@ -334,12 +334,6 @@ export const SCHEMA_SQL = `
 `;
 
 /**
- * 插入默认视频源（两端共享逻辑，调用方需自行执行 SQL）
- */
-export const INSERT_DEFAULT_SOURCE_SQL = `INSERT INTO video_source (id, code, name, base_url, type, is_enabled, created_at) VALUES (?, ?, ?, ?, 'CMS', 1, ?)`;
-export const COUNT_VIDEO_SOURCE_SQL = 'SELECT COUNT(*) as count FROM video_source';
-
-/**
  * 根因修复「收藏重复」的已有库升级 SQL（幂等）：
  * 1. 清理历史重复行：每个 media_id 至多保留一行（保留 created_at 最大、同 created_at 取 id 最大，
  *    近似最近一次收藏）；无重复行时 DELETE 影响 0 行。

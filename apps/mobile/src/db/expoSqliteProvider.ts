@@ -9,9 +9,6 @@ import {
   SCHEMA_SQL,
   DROP_SYNC_REMNANTS_SQL,
   FAVORITE_UNIQUE_MIGRATE_SQL,
-  INSERT_DEFAULT_SOURCE_SQL,
-  COUNT_VIDEO_SOURCE_SQL,
-  defaultSources,
   splitSqlStatements,
   MEDIA_FILE_EXTENSIONS,
   UNCATEGORIZED_GENRE,
@@ -770,9 +767,6 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     this.kidModeActive = kidModeRow?.value === '1';
     mark('kid_mode');
 
-    await this.insertDefaultSources();
-    mark('insert_default_sources');
-
     // 独立读连接：WAL 下与写连接并发，采集大量写库时 UI 查询不再排队阻塞。
     // 读连接必须在前台就绪，否则读方法拿到 null。
     this.readDb = this.wrapWithRetry(await SQLite.openDatabaseAsync('movieapp.db'));
@@ -1358,22 +1352,6 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     }
     if (fixed > 0) {
       console.log(`Fixed ${fixed} media records with comma-separated genre in first element`);
-    }
-  }
-
-  private async insertDefaultSources(): Promise<void> {
-    const result = await this.db!.getFirstAsync<{ count: number }>(COUNT_VIDEO_SOURCE_SQL);
-    if (result && result.count === 0) {
-      const now = new Date().toISOString();
-      for (const source of defaultSources) {
-        await this.db!.runAsync(INSERT_DEFAULT_SOURCE_SQL, [
-          `source_${source.code}`,
-          source.code,
-          source.name,
-          source.baseUrl,
-          now,
-        ]);
-      }
     }
   }
 

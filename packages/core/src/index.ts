@@ -13,12 +13,10 @@ export {
   refineTypeByEpisodes,
 } from './utils/typeMapper';
 export {
-  defaultSources,
   MEDIA_FILE_EXTENSIONS,
   isPlayableMediaUrl,
   AI_SOURCE_PROMPT,
   AI_SOURCE_IMPORT_SAMPLE,
-  type DefaultSourceConfig,
 } from './utils/constants';
 export { getHttpClient, setHttpClient, type HttpClient } from './utils/httpClient';
 export { isChildSafe } from './utils/kidSafe';
@@ -46,7 +44,7 @@ export { RecommendationService, type RecommendationOverview, type DislikedMediaI
 export { resolveDefaultPlayTarget, type DefaultPlayTarget } from './services/playbackTarget';
 
 // 数据库抽象层
-export { PRAGMA_SQL, SCHEMA_SQL, DROP_SYNC_REMNANTS_SQL, FAVORITE_UNIQUE_MIGRATE_SQL, INSERT_DEFAULT_SOURCE_SQL, COUNT_VIDEO_SOURCE_SQL, splitSqlStatements } from './db/schema';
+export { PRAGMA_SQL, SCHEMA_SQL, DROP_SYNC_REMNANTS_SQL, FAVORITE_UNIQUE_MIGRATE_SQL, splitSqlStatements } from './db/schema';
 export { type DatabaseProvider, UNCATEGORIZED_GENRE, mediaMatchesFilters, resolveCollectTaskCutoff } from './db/provider';
 export {
   rowToMedia,
