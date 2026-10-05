@@ -45,8 +45,8 @@ const entries = [
   },
   {
     path: 'apps/desktop/src/pages/SettingsPage.tsx',
-    pattern: /Movie App · 版本 \d+\.\d+\.\d+/,
-    replacement: `Movie App · 版本 ${newVersion}`,
+    pattern: /OpenReel · 版本 \d+\.\d+\.\d+/,
+    replacement: `OpenReel · 版本 ${newVersion}`,
   },
   {
     path: 'apps/desktop/src/components/Layout.tsx',
