@@ -115,4 +115,4 @@ openreel/
 
 ## License
 
-保留所有权利。
+[MIT](LICENSE) · Copyright © 2026 roma
