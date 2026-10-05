@@ -80,12 +80,12 @@ jobs:
           exit 1
 
       - name: Build Tauri app
-        run: pnpm --filter @movie-app/desktop tauri build --target ${{ matrix.target }}
+        run: pnpm --filter @openreel/desktop tauri build --target ${{ matrix.target }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Movie-App-${{ matrix.target }}
+          name: OpenReel-${{ matrix.target }}
           path: apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/
           if-no-files-found: warn
 
@@ -159,18 +159,18 @@ jobs:
       - name: Initialize Android project
         run: |
           if [ ! -d "apps/desktop/src-tauri/gen/android" ]; then
-            pnpm --filter @movie-app/desktop tauri android init --ci
+            pnpm --filter @openreel/desktop tauri android init --ci
           else
             echo "Android project already initialized"
           fi
 
       - name: Build Android APK
-        run: pnpm --filter @movie-app/desktop tauri android build
+        run: pnpm --filter @openreel/desktop tauri android build
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Movie-App-Android
+          name: OpenReel-Android
           path: |
             apps/desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             apps/desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
@@ -191,7 +191,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          name: Movie App ${{ github.ref_name }}
+          name: OpenReel ${{ github.ref_name }}
           body: "See the assets below to download and install."
           draft: false
           prerelease: false
