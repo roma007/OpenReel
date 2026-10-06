@@ -98,6 +98,31 @@ const entries = [
     pattern: /"version": "\d+\.\d+\.\d+"/,
     replacement: `"version": "${newVersion}"`,
   },
+  {
+    path: 'packages/expo-db/package.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'packages/expo-ui/package.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'apps/tv/package.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'apps/tv/app.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'apps/tv/android/app/build.gradle',
+    pattern: /versionCode \d+\n(\s*)versionName "\d+\.\d+\.\d+"/,
+    replacement: `versionCode ${androidVersionCode}\n$1versionName "${newVersion}"`,
+  },
 ];
 
 const changedFiles = [];

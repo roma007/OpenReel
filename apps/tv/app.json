@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "OpenReel TV",
+    "slug": "openreel-tv",
+    "version": "1.0.177",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f0f0f"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.movie.app.tv",
+      "screenOrientation": "landscape",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE"
+      ],
+      "banner": "./assets/banner.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f0f0f"
+      }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-image",
+      "expo-video",
+      "expo-status-bar",
+      "./plugins/withTvLeanback.js"
+    ]
+  }
+}
