@@ -55,6 +55,14 @@ class MainApplication : Application(), ReactApplication {
       ReactNativeFeatureFlags.override(
         object : ReactNativeFeatureFlagsOverrides_RNOSS_Canary_Android() {
           override fun enableImperativeFocus(): Boolean = true
+
+          // 播放页「左/右键快进快退」必需：RN 0.86 默认关闭 enableKeyEvents，
+          // 关闭时 ReactRootView.dispatchJSKeyEvent 直接 return，JS 的 View.onKeyDown 永不触发。
+          // 开启后，聚焦视图收到按键会派发 topKeyDown → JS `onKeyDown`（nativeEvent.code = ArrowLeft/ArrowRight/Enter）。
+          // 注意：该派发**不消费**按键，原生 FocusFinder 仍会移动焦点，
+          // 故播放页用一个「播放区」作为默认焦点（左右无相邻可聚焦元素，焦点不动），
+          // 控制条按钮改用上/下键进入。
+          override fun enableKeyEvents(): Boolean = true
         },
       )
     } catch (e: Throwable) {

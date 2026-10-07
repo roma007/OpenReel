@@ -1,28 +1,29 @@
 /**
- * TV 焦点系统：注册表 + 空间方向几何兜底。
+ * TV 焦点注册表。
  *
  * 依据：tvhome-tv 实测 `leanback_only=true`（无触摸），故 DPAD 是唯一输入。
- * RN 自带 `focusable` / `nextFocusUp|Down|Left|Right` 为第一优先路径；
- * 但横向长列表中「焦点移出可视区」时 RN 无法给出行外目标，本模块负责：
- *   1. 记录每个可聚焦元素当前屏幕矩形（measure + 焦点变化时刷新）
- *   2. DPAD 事件到来时，按几何最近邻（加权距离 + 方向锥角过滤）选出目标
- *   3. 目标优先取「同行且在目标方向上最靠边」的元素，实现纵向列表行切换
+ * 方向键目标搜索完全交给 Android 原生 FocusFinder（RN `focusable` 已实现）；
+ * 本工程为标准 react-native（无 TVEventHandler），JS 层拿不到方向键事件，
+ * 故不做「按方向几何选目标」的兜底（原 `resolveDirection` 方案已删除）。
+ *
+ * 本模块只做两件事：维护「谁可聚焦 / 谁当前持有焦点」的注册表；在焦点丢失
+ * （页面切换、视图重建、原生在目标方向找不到候选人）时，供 TVFocusBridge 恢复焦点。
  *
  * 明确不做：不伪造任何焦点状态；焦点真实来自 RN 的 onFocus/onBlur 回调。
  */
 
-export type FocusDir = 'up' | 'down' | 'left' | 'right';
+/** 原生可聚焦节点的最小能力集（focus 用于补焦点，measureInWindow 用于滚动跟随） */
+export interface FocusNodeHandle {
+  focus?: () => void;
+  measureInWindow?: (cb: (x: number, y: number, width: number, height: number) => void) => void;
+}
 
 export interface FocusEntry {
   id: string;
-  /** measured in window coords (dp) */
-  rect: { x: number; y: number; width: number; height: number };
-  /** 所属横向行 id：同一行内做左右移动，不跳出该行 */
-  rowId?: string;
   disabled?: boolean;
   onFocus?: () => void;
-  /** 取原生节点（用于 requestInitialFocus / 焦点恢复时主动 .focus()） */
-  getNode?: () => { focus?: () => void } | null;
+  /** 取原生节点（用于 requestInitialFocus / 焦点恢复时主动 .focus()，以及滚动跟随测量） */
+  getNode?: () => FocusNodeHandle | null;
 }
 
 interface RegistryEntry extends FocusEntry {
@@ -30,14 +31,6 @@ interface RegistryEntry extends FocusEntry {
 }
 
 type Listener = () => void;
-
-/** 方向向量 */
-const DIR_VEC: Record<FocusDir, [number, number]> = {
-  up: [0, -1],
-  down: [0, 1],
-  left: [-1, 0],
-  right: [1, 0],
-};
 
 class FocusRegistry {
   private entries = new Map<string, RegistryEntry>();
@@ -74,22 +67,6 @@ class FocusRegistry {
     this.entries.delete(id);
     if (this.focusedId === id) this.focusedId = null;
     this.emit();
-  }
-
-  /** 更新矩形（由 onLayout / measure 回调写入） */
-  updateRect(id: string, rect: FocusEntry['rect']) {
-    const e = this.entries.get(id);
-    if (!e) return;
-    // 容差 0.5dp：亚像素抖动不应触发无谓重排
-    if (
-      Math.abs(e.rect.x - rect.x) < 0.5 &&
-      Math.abs(e.rect.y - rect.y) < 0.5 &&
-      Math.abs(e.rect.width - rect.width) < 0.5 &&
-      Math.abs(e.rect.height - rect.height) < 0.5
-    ) {
-      return;
-    }
-    e.rect = rect;
   }
 
   setDisabled(id: string, disabled: boolean) {
@@ -193,60 +170,6 @@ class FocusRegistry {
     if (this.scopes.length > 0) this.scopes.pop();
   }
 
-  private center(e: RegistryEntry) {
-    return {
-      x: e.rect.x + e.rect.width / 2,
-      y: e.rect.y + e.rect.height / 2,
-    };
-  }
-
-  /**
-   * 空间最近邻选焦点。
-   * 规则：
-   *  - 只考虑目标方向锥角内的元素（方向点积 > 0，支持斜向容差）
-   *  - 同行（rowId 相同）时优先同行元素，实现左右移动不跳行
-   *  - 排序：同行优先 → 轴向距离小 → 交叉轴偏移小
-   */
-  resolveDirection(fromId: string, dir: FocusDir): string | null {
-    const from = this.entries.get(fromId);
-    if (!from) return null;
-    const fc = this.center(from);
-    const [vx, vy] = DIR_VEC[dir];
-
-    const candidates = Array.from(this.entries.values()).filter((e) => {
-      if (e.id === fromId || e.disabled) return false;
-      const c = this.center(e);
-      const dx = c.x - fc.x;
-      const dy = c.y - fc.y;
-      // 必须在目标方向上（点积为正）；留 0.25 容差允许斜向元素
-      const dot = dx * vx + dy * vy;
-      if (dot <= 0) return false;
-      // 交叉轴偏移不能超过主轴距离（避免横向移动跳到很远的行）
-      const cross = Math.abs(vx === 0 ? dx : dy);
-      const main = Math.abs(vx === 0 ? dy : dx);
-      if (main <= 0.5) return false;
-      if (cross > main * 2.5) return false;
-      return true;
-    });
-
-    if (candidates.length === 0) return null;
-
-    const scored = candidates.map((e) => {
-      const c = this.center(e);
-      const dx = c.x - fc.x;
-      const dy = c.y - fc.y;
-      const main = Math.abs(vx === 0 ? dy : dx);
-      const cross = Math.abs(vx === 0 ? dx : dy);
-      const sameRow = !!from.rowId && e.rowId === from.rowId;
-      // 权重：主轴 1.0，交叉轴 1.6（惩罚斜向），同行额外 +6 奖励
-      const score = main + cross * 1.6 - (sameRow ? 6 : 0);
-      return { id: e.id, score };
-    });
-
-    scored.sort((a, b) => a.score - b.score);
-    return scored[0].id;
-  }
-
   /** 兜底：当前无焦点时给出可恢复的目标 */
   recoverFocus(): string | null {
     if (this.focusedId && this.entries.get(this.focusedId)) return this.focusedId;
@@ -265,6 +188,11 @@ class FocusRegistry {
   /** 该 id 当前是否仍注册（用于焦点恢复判断） */
   has(id: string): boolean {
     return this.entries.has(id);
+  }
+
+  /** 取某 id 的原生节点（滚动跟随用；不存在返回 null） */
+  node(id: string): FocusNodeHandle | null {
+    return this.entries.get(id)?.getNode?.() ?? null;
   }
 
   /**

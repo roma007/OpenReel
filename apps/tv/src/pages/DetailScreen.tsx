@@ -100,14 +100,10 @@ export function DetailScreen() {
     const p = route.params || {};
     switch (p.from) {
       case 'category':
-        nav.navigate('Category', {
-          type: p.type,
-          title: p.title,
-          page: p.page,
-          sort: p.sort,
-          subType: p.subType,
-          year: p.year,
-        });
+        // 回已挂载的分类页：用 pop（与遥控 BACK 同路径），分类页参数/筛选/滚动位置天然保留。
+        // 不可用 navigate('Category', { title: p.title, ... }) —— Detail 的 title 是「视频名」，
+        // 回填会覆盖分类页标题（实测返回后标题变成视频名）。
+        nav.goBack();
         break;
       case 'search':
         nav.navigate('Search', { keyword: p.searchKeyword, page: p.page });
@@ -277,7 +273,6 @@ export function DetailScreen() {
                 <TVFocusable
                   key={ep.id}
                   id={`ep:${ep.id}`}
-                  rowId="episodes"
                   onPress={() => {
                     setSelectedEpId(ep.id);
                     play(ep.id);

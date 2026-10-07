@@ -52,7 +52,6 @@ export function TVNavBar({
           <TVFocusable
             key={it.key}
             id={`nav:${it.key}`}
-            rowId="navbar"
             onPress={it.onPress}
             focusStyle={styles.focusedItem}
             testID={`tv-nav-${it.key}`}
@@ -76,7 +75,6 @@ export function TVNavBar({
       {onSearch ? (
         <TVFocusable
           id="nav:search"
-          rowId="navbar"
           onPress={onSearch}
           focusStyle={styles.focusedSearch}
           testID="tv-nav-search"

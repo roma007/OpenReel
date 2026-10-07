@@ -2,6 +2,7 @@ package com.movie.app.tv
 
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -38,6 +39,19 @@ class MainActivity : ReactActivity() {
               mainComponentName,
               fabricEnabled
           ){})
+  }
+
+  /**
+   * 菜单键转发：RN JS 侧拿不到 KEYCODE_MENU（无 keyCode 映射，JS 收到 "Unidentified"），
+   * 故在 Activity 层拦截，经 ReactContext.emitDeviceEvent 发到 JS 的 DeviceEventEmitter('tvMenuKey')，
+   * 由播放页据此唤出功能面板。仅在 ACTION_UP 触发一次（避免长按重复）。返回 super 不消费按键。
+   */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.keyCode == KeyEvent.KEYCODE_MENU && event.action == KeyEvent.ACTION_UP) {
+      val reactContext = (application as? MainApplication)?.reactHost?.currentReactContext
+      reactContext?.emitDeviceEvent("tvMenuKey", null)
+    }
+    return super.dispatchKeyEvent(event)
   }
 
   /**

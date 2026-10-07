@@ -14,7 +14,11 @@ import { focusRegistry } from './registry';
  *  - **不接管方向键**：DPAD 目标搜索交给 Android 原生 FocusFinder（RN 已实现），
  *    本模块只在「当前没有有效焦点」时补一次焦点，避免两套搜索互相打架。
  *  - 补焦点的时机：registry 变化（元素注册/注销/焦点变化）、页面切换完成、
- *    应用从后台回前台。
+ *    应用从后台回前台，以及**焦点看门狗**兜底（见下）。
+ *  - 焦点看门狗：原生 FocusFinder 在「目标方向上没有候选元素」时会静默丢弃焦点，
+ *    此时没有任何 registry / 导航 / 前后台事件可触发补焦点。实测长时间乱序操作后
+ *    会出现「连续按方向键都无焦点环、且不自愈」。故周期性检测「当前无有效焦点」，
+ *    一旦发现就按 recoverFocus 规则（当前 → pending → lastFocusedId → 首元素）补回。
  */
 export function TVFocusBridge() {
   const navRef = useNavigationContainerRef();
@@ -117,10 +121,17 @@ export function TVFocusBridge() {
       if (s === 'active') schedule();
     });
 
+    // 焦点看门狗：详见文件头「焦点看门狗」说明。
+    // 只在「当前无有效焦点」时触发，避免与原生 FocusFinder 争抢方向键。
+    const watchdog = setInterval(() => {
+      if (!focusRegistry.getFocusedId()) schedule();
+    }, 600);
+
     return () => {
       unsubscribe();
       unsubState();
       appSub.remove();
+      clearInterval(watchdog);
       if (raf) cancelAnimationFrame(raf);
       if (timer) clearTimeout(timer);
       stopRetry();

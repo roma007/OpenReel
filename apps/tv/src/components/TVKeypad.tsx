@@ -37,7 +37,7 @@ const SYMBOLS: Record<TVKeypadMode, string[]> = {
  * 当唯一输入通道等于赌设备。故数字/字母/URL 符号全部用可聚焦按键，任何 ATV 必然可用；
  * 同时保留「系统键盘」按钮作为设备有 IME 时的补充通道。
  *
- * 焦点：每个键都是 TVFocusable，同一行共享 rowId（左右不跳行）；打开时 pushScope 开启
+ * 焦点：每个键都是 TVFocusable，方向键导航交给原生 FocusFinder；打开时 pushScope 开启
  * 焦点监狱，方向键不会跳出键盘落到下层页面；Android BACK 优先关键盘而非退出页面。
  * 不透明度：面板底色为不透明 colors.background（AGENTS 弹窗不透明度规则）。
  */
@@ -206,7 +206,6 @@ export function TVKeypad({
                 <TVFocusable
                   key={`${ri}-${ki}`}
                   id={`${KEYPAD_SCOPE}${mode}:${ri}:${ki}`}
-                  rowId={`${KEYPAD_SCOPE}${mode}:${ri}`}
                   onPress={() => pressKey(k)}
                   style={[styles.key, { backgroundColor: keyBg(k, colors.surface, colors.surfaceElevated, colors.buttonPrimaryBg) }]}
                   focusColor={colors.borderHighlight}
@@ -232,7 +231,6 @@ export function TVKeypad({
           <View style={styles.keyRow}>
             <TVFocusable
               id={`${KEYPAD_SCOPE}action:cancel`}
-              rowId={`${KEYPAD_SCOPE}action`}
               onPress={onCancel}
               style={[styles.key, styles.keyWide, { backgroundColor: colors.surfaceElevated }]}
               focusColor={colors.borderHighlight}
@@ -244,7 +242,6 @@ export function TVKeypad({
             </TVFocusable>
             <TVFocusable
               id={`${KEYPAD_SCOPE}action:ime`}
-              rowId={`${KEYPAD_SCOPE}action`}
               onPress={openIme}
               style={[styles.key, styles.keyWide, { backgroundColor: colors.surfaceElevated }]}
               focusColor={colors.borderHighlight}
@@ -256,7 +253,6 @@ export function TVKeypad({
             </TVFocusable>
             <TVFocusable
               id={`${KEYPAD_SCOPE}action:ok`}
-              rowId={`${KEYPAD_SCOPE}action`}
               onPress={() => onSubmit(value)}
               style={[styles.key, styles.keyWide, { backgroundColor: colors.buttonPrimaryBg }]}
               focusColor={colors.borderHighlight}

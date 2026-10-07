@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { ScrollView, View, StyleSheet, Text } from 'react-native';
 import { useThemeColors, useScaledFontSize, radius } from '@openreel/expo-ui';
 import { TVFocusable } from './TVFocusable';
@@ -8,7 +8,7 @@ import { TVFocusable } from './TVFocusable';
  *
  * 解决两件手机端不存在的问题：
  *  1. 焦点移出可视区 → 用 scrollTo 保证焦点目标始终可见（onFocus 回调内驱动）
- *  2. 焦点移到行首/行尾 → 由 focusRegistry 的行内几何兜底交给上下相邻行（rowId 机制）
+ *  2. 尺寸/空态提示（上下行切换本身交给原生 FocusFinder / TVFocusBridge 恢复）
  */
 export interface TVRowProps {
   /** 行 id（同一行共享，供上下切换时对齐列） */
@@ -66,9 +66,10 @@ export function TVRow({
     scrollRef.current.scrollTo({ x: target, animated: true });
   }, []);
 
-  useEffect(() => {
-    offsetsRef.current.clear();
-  }, [rowId, data.length]);
+  // 说明：不在 data.length 变化时清空 offsetsRef。
+  // onLayout 的 x 是「相对 ScrollView 内容容器」的恒定偏移，同一 index 的偏移只由
+  // 其前面的项决定；追加/删除尾部项不影响前面项的 x，重排时 key 变化会重新挂载并
+  // 重新 onLayout。若在此清空，未重排的项不会再次 onLayout，反而导致 ensureVisible 失准。
 
   if (data.length === 0) {
     return (
@@ -85,7 +86,6 @@ export function TVRow({
         onTitlePress ? (
           <TVFocusable
             id={`${rowId}:title`}
-            rowId={rowId}
             onPress={onTitlePress}
             style={styles.titleWrap}
             testID={`tv-row-${rowId}-title`}
@@ -110,7 +110,8 @@ export function TVRow({
           <TVFocusable
             key={`${rowId}-${keyExtractor(item, index)}`}
             id={`${rowId}:${keyExtractor(item, index)}`}
-            rowId={rowId}
+            // onLayout 必须挂在 Pressable（内容容器直接子节点）上，layout.x 才是相对内容的真实偏移
+            onLayout={(e) => onItemLayout(index, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
             onFocus={() => {
               ensureVisible(index);
               onFocusIndexChange?.(index);
@@ -119,10 +120,7 @@ export function TVRow({
             style={{ width: itemWidth, marginRight: 16 }}
             testID={`tv-row-${rowId}-${index}`}
           >
-            <View
-              onLayout={(e) => onItemLayout(index, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
-              style={{ width: itemWidth, height: itemHeight }}
-            >
+            <View style={{ width: itemWidth, height: itemHeight }}>
               {renderItem(item, index)}
             </View>
           </TVFocusable>

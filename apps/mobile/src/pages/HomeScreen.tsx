@@ -298,8 +298,19 @@ export default function HomeScreen() {
     loadVideoSources().then(() => setSourcesChecked(true));
   }, []);
 
+  // 添加视频源引导弹窗一次性防重入：loadVideoSources 一次加载会两次 set videoSources
+  //（第 1 次数据、第 2 次补 mediaCount），effect 会连弹两个相同 Alert（iOS 每个 Alert
+  // 独立 UIWindow，视觉上叠成一个，需点两次按钮才消失）。以「一轮空源状态只弹一次」
+  // 为界：有源时复位标记，冷启动内存标记自然复位（未配源时下次打开仍会弹）。
+  const sourceGuideShownRef = useRef(false);
+
   useEffect(() => {
-    if (sourcesChecked && videoSources.length === 0) {
+    if (videoSources.length > 0) {
+      sourceGuideShownRef.current = false;
+      return;
+    }
+    if (sourcesChecked && !sourceGuideShownRef.current) {
+      sourceGuideShownRef.current = true;
       Alert.alert(
         '添加视频源',
         '还没有视频源，使用 AI 智能导入可以快速添加',

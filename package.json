@@ -1,6 +1,6 @@
 {
   "name": "openreel-monorepo",
-  "version": "1.0.177",
+  "version": "1.0.178",
   "private": true,
   "scripts": {
     "mobile": "pnpm --filter @openreel/mobile start",
