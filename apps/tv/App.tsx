@@ -11,6 +11,8 @@ import { initApp } from './src/init';
 import { writePrefetchConcurrency } from './src/services/cache';
 import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
+import BlurredBackground from './src/components/BlurredBackground';
+import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import HomeScreen from './src/pages/HomeScreen';
 import CategoryScreen from './src/pages/CategoryScreen';
 import SearchScreen from './src/pages/SearchScreen';
@@ -18,7 +20,7 @@ import DetailScreen from './src/pages/DetailScreen';
 import PlayScreen from './src/pages/PlayScreen';
 import FavoritesScreen from './src/pages/FavoritesScreen';
 import HistoryScreen from './src/pages/HistoryScreen';
-import CollectScreen from './src/pages/CollectScreen';
+import KeywordCollectScreen from './src/pages/KeywordCollectScreen';
 import TaskListScreen from './src/pages/TaskListScreen';
 import CollectConfigScreen from './src/pages/CollectConfigScreen';
 import SourceManagerScreen from './src/pages/SourceManagerScreen';
@@ -44,6 +46,8 @@ function RootNavigator() {
         screenOptions={{
           headerShown: false,
           animation: 'fade',
+          // 透明底：让根部 BlurredBackground 背景图层透出（页面自身不再铺不透明底色）
+          contentStyle: { backgroundColor: 'transparent' },
           // TV 端手势/触摸不可靠，动画保持最短，避免遥控操作时等待
           animationDuration: 120,
         }}
@@ -55,7 +59,7 @@ function RootNavigator() {
         <Stack.Screen name="Play" component={PlayScreen} options={{ animation: 'fade' }} />
         <Stack.Screen name="Favorites" component={FavoritesScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
-        <Stack.Screen name="Collect" component={CollectScreen} />
+        <Stack.Screen name="KeywordCollect" component={KeywordCollectScreen} />
         <Stack.Screen name="TaskList" component={TaskListScreen} />
         <Stack.Screen name="CollectConfig" component={CollectConfigScreen} />
         <Stack.Screen name="SourceManager" component={SourceManagerScreen} />
@@ -87,6 +91,7 @@ export default function App() {
   const initFontSizeScale = useThemeStore((s) => s.initFontSizeScale);
   const themeName = useThemeStore((s) => s.currentTheme);
   const colorScheme = useColorScheme();
+  const bgImageUrl = useBackgroundImageStore((s) => s.imageUrl);
 
   useEffect(() => {
     Promise.all([initApp({ onMigrationProgress: setMigrationProgress }), initTheme(), initColorMode(), initFontSizeScale()])
@@ -109,17 +114,19 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      {ready ? (
-        <NavigationContainer theme={navTheme} documentTitle={{ enabled: false }}>
-          <RootNavigator />
-        </NavigationContainer>
-      ) : (
-        <TVStartupOverlay
-          ready={ready}
-          migrationProgress={migrationProgress}
-          diskBlocked={diskBlocked}
-        />
-      )}
+      <BlurredBackground imageUrl={bgImageUrl}>
+        {ready ? (
+          <NavigationContainer theme={navTheme} documentTitle={{ enabled: false }}>
+            <RootNavigator />
+          </NavigationContainer>
+        ) : (
+          <TVStartupOverlay
+            ready={ready}
+            migrationProgress={migrationProgress}
+            diskBlocked={diskBlocked}
+          />
+        )}
+      </BlurredBackground>
     </SafeAreaProvider>
   );
 }

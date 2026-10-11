@@ -160,7 +160,7 @@ export function CollectConfigScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader
         title="采集配置"
         backId="cfg-back"

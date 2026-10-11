@@ -195,7 +195,7 @@ export function TaskListScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader
         title="任务列表"
         backId="task-back"

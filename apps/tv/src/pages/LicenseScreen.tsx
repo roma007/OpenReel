@@ -14,7 +14,7 @@ export function LicenseScreen() {
   const scale = useScaledFontSize();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="版权声明" backId="license-back" />
       <ScrollView
         style={styles.scroll}

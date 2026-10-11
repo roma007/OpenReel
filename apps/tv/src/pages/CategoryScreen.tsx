@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { StyleSheet, Text, View } from 'react-native';
+import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Media } from '@openreel/core';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
@@ -11,7 +11,9 @@ import { TVScrollContainer } from '../focus/TVScrollContainer';
 import { focusRegistry } from '../focus/registry';
 import { TVButton } from '../components/TVButton';
 import MediaCard from '../components/MediaCard';
-import { TV_LAYOUT, tv } from '../theme/tokens';
+import { TVNavBar } from '../components/TVNavBar';
+import { useBackgroundImageStore } from '../stores/backgroundImageStore';
+import { TV_GRID_CARD, TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
 
 /**
@@ -34,14 +36,11 @@ const SORTS: Array<{ key: string; label: string }> = [
   { key: 'year', label: '年份' },
 ];
 
-/** 分类页网格：1080p 横屏 6 列，卡片沿用 2:3 海报比例（由可用宽度反算） */
-const GRID_COLUMNS = 6;
-const GRID_GAP = tv(16);
-const GRID_CARD_WIDTH = Math.floor(
-  (Dimensions.get('window').width - TV_LAYOUT.paddingX * 2 - GRID_GAP * (GRID_COLUMNS - 1)) /
-    GRID_COLUMNS,
-);
-const GRID_CARD_HEIGHT = Math.round(GRID_CARD_WIDTH * 1.5);
+/** 分类页网格：6 列，卡片沿用 2:3 海报比例（尺寸与首页行内海报共享 TV_GRID_CARD） */
+const GRID_COLUMNS = TV_GRID_CARD.columns ?? 6;
+const GRID_GAP = TV_GRID_CARD.gap;
+const GRID_CARD_WIDTH = TV_GRID_CARD.width;
+const GRID_CARD_HEIGHT = TV_GRID_CARD.height;
 
 export function CategoryScreen() {
   const nav = useNavigation<Nav>();
@@ -77,6 +76,15 @@ export function CategoryScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const hasMore = items.length < total;
+
+  // 背景图：聚焦时用列表第一条海报，失焦清空回落到默认背景图（对齐移动端 bgImageUrl）
+  const setBackgroundImage = useBackgroundImageStore((s) => s.setImageUrl);
+  useFocusEffect(
+    useCallback(() => {
+      setBackgroundImage(items[0]?.posterUrl ?? null);
+      return () => setBackgroundImage(null);
+    }, [items, setBackgroundImage]),
+  );
 
   /**
    * 替换式加载前 N 页（首次进入 / 筛选变更 / 从详情返回）。
@@ -150,6 +158,16 @@ export function CategoryScreen() {
   useEffect(() => {
     loadFilters();
   }, [loadFilters]);
+
+  // 顶部导航栏可在各大分类间直接切换：类型变化时清空上一个分类的子类型/年份筛选，回到第 1 页
+  const prevTypeRef = useRef(initialType);
+  useEffect(() => {
+    if (prevTypeRef.current === initialType) return;
+    prevTypeRef.current = initialType;
+    setSubType(undefined);
+    setYear(undefined);
+    setPage(1);
+  }, [initialType]);
 
   useEffect(() => {
     const target = restorePageRef.current;
@@ -239,10 +257,22 @@ export function CategoryScreen() {
     [initialTitle, total, colors, scale],
   );
 
+  const navItems = [
+    { key: 'home', label: '首页', onPress: () => nav.navigate('Home') },
+    { key: 'movie', label: '电影', onPress: () => nav.navigate('Category', { type: 'MOVIE', title: '电影' }) },
+    { key: 'tv', label: '电视剧', onPress: () => nav.navigate('Category', { type: 'TV', title: '电视剧' }) },
+    { key: 'anime', label: '动漫', onPress: () => nav.navigate('Category', { type: 'ANIME', title: '动漫' }) },
+    { key: 'variety', label: '综艺', onPress: () => nav.navigate('Category', { type: 'VARIETY', title: '综艺' }) },
+    { key: 'doc', label: '纪录片', onPress: () => nav.navigate('Category', { type: 'DOCUMENTARY', title: '纪录片' }) },
+    { key: 'settings', label: '设置', onPress: () => nav.navigate('Settings') },
+  ];
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
+      {/* 与首页一致的顶部导航栏：可直达各分类 / 返回首页 */}
+      <TVNavBar items={navItems} title="OpenReel TV" onSearch={() => nav.navigate('Search', {})} />
+
       <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
-        <TVButton id="cat-back" label="返回" onPress={() => nav.goBack()} testID="tv-category-back" />
         {header}
       </View>
 

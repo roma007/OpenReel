@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Media } from '@openreel/core';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
@@ -12,6 +12,7 @@ import { TVButton } from '../components/TVButton';
 import { TVTextInput } from '../components/TVTextInput';
 import { focusRegistry } from '../focus/registry';
 import MediaCard from '../components/MediaCard';
+import { useBackgroundImageStore } from '../stores/backgroundImageStore';
 import { TV_CARD, TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -45,6 +46,15 @@ export function SearchScreen() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
+
+  // 背景图：聚焦时用搜索结果第一条海报，失焦清空回落到默认背景图（对齐移动端 bgImageUrl）
+  const setBackgroundImage = useBackgroundImageStore((s) => s.setImageUrl);
+  useFocusEffect(
+    useCallback(() => {
+      setBackgroundImage(items[0]?.posterUrl ?? null);
+      return () => setBackgroundImage(null);
+    }, [items, setBackgroundImage]),
+  );
 
   // 最近搜索：TV 端用 AsyncStorage 单独存一份（与手机端不共享，各自设备各自历史）
   useEffect(() => {
@@ -126,7 +136,7 @@ export function SearchScreen() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
         <TVButton id="search-back" label="返回" onPress={() => nav.goBack()} testID="tv-search-back" />
 

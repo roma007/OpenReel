@@ -37,8 +37,8 @@ export function TVNavBar({
       style={[
         styles.bar,
         {
-          backgroundColor: colors.background,
-          borderBottomColor: colors.border,
+          // 透明底：让根部 BlurredBackground 背景图层透出
+          backgroundColor: 'transparent',
           paddingHorizontal: TV_LAYOUT.paddingX,
           height: TV_LAYOUT.navBarHeight,
         },
@@ -92,7 +92,6 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
   },
   brand: {
     fontWeight: '800',

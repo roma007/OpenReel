@@ -75,7 +75,7 @@ export function UsagePreferencesScreen() {
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="使用偏好" backId="usage-back" />
       <ScrollView
         style={styles.scroll}

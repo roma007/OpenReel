@@ -111,7 +111,7 @@ export function HelpCenterScreen() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="帮助中心" backId="help-back" />
       <ScrollView
         style={styles.scroll}

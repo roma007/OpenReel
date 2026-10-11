@@ -280,7 +280,7 @@ export function SourceManagerScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="视频源管理" backId="src-back" />
 
       <ScrollView
@@ -301,7 +301,7 @@ export function SourceManagerScreen() {
             id="src-keyword"
             label="搜索采集"
             variant="primary"
-            onPress={() => nav.navigate('Collect')}
+            onPress={() => nav.navigate('KeywordCollect')}
             testID="tv-src-keyword"
           />
           <TVButton

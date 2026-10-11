@@ -31,7 +31,8 @@ export type RootStackParamList = {
   };
   Favorites: MediaNavState;
   History: { page?: number } & MediaNavState;
-  Collect: undefined;
+  /** 关键词搜索采集（预览选择式，对齐桌面 KeywordCollectDialog / 移动 KeywordCollectScreen） */
+  KeywordCollect: { keyword?: string; relaxYear?: boolean };
   CollectConfig: undefined;
   TaskList: undefined;
   SourceManager: undefined;

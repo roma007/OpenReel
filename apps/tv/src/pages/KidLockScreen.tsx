@@ -132,7 +132,7 @@ export function KidLockScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="儿童锁" backId="kid-back" />
       <ScrollView
         style={styles.scroll}

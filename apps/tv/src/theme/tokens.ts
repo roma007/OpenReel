@@ -57,6 +57,22 @@ export const TV_CARD_LARGE = {
   gap: tv(24),
 } as const;
 
+/**
+ * 分类页网格卡片尺寸（6 列，2:3 海报），由可用宽度反算。
+ * 首页行内海报与分类页保持同尺寸，故抽此共享 token。
+ */
+const GRID_COLUMNS = 6;
+const GRID_GAP = tv(16);
+const GRID_CARD_WIDTH = Math.floor(
+  (width - TV_LAYOUT.paddingX * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS,
+);
+export const TV_GRID_CARD = {
+  columns: GRID_COLUMNS,
+  width: GRID_CARD_WIDTH,
+  height: Math.round(GRID_CARD_WIDTH * 1.5),
+  gap: GRID_GAP,
+} as const;
+
 /** 剧集格（详情页选集，4:3 缩略） */
 export const TV_EPISODE = {
   width: tv(230),

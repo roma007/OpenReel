@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Episode, Media, PlaySource, WatchHistory } from '@openreel/core';
 import { resolveDefaultPlayTarget } from '@openreel/core';
@@ -10,6 +10,7 @@ import { useAppStore, getProvider, getStore } from '../useAppStore';
 import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
 import { TVButton } from '../components/TVButton';
+import { useBackgroundImageStore } from '../stores/backgroundImageStore';
 import { TV_EPISODE, TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -81,6 +82,15 @@ export function DetailScreen() {
     load();
   }, [load]);
 
+  // 背景图：聚焦时用当前影片海报，失焦清空回落到默认背景图（页面有视频图即用它）
+  const setBackgroundImage = useBackgroundImageStore((s) => s.setImageUrl);
+  useFocusEffect(
+    useCallback(() => {
+      setBackgroundImage(media?.posterUrl ?? null);
+      return () => setBackgroundImage(null);
+    }, [media, setBackgroundImage]),
+  );
+
   // 切换剧集时更新其播放线路（线路与集强相关，不能沿用上一集）
   useEffect(() => {
     if (selectedEpId == null) return;
@@ -147,7 +157,7 @@ export function DetailScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <View style={[styles.center, { backgroundColor: 'transparent' }]}>
         <Text style={{ color: colors.mutedForeground, fontSize: scale(19) }}>正在加载…</Text>
       </View>
     );
@@ -155,7 +165,7 @@ export function DetailScreen() {
 
   if (error || !media) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <View style={[styles.center, { backgroundColor: 'transparent' }]}>
         <Text style={{ color: colors.error, fontSize: scale(20) }}>{error || '影片不存在'}</Text>
         <View style={{ marginTop: tv(20) }}>
           <TVButton id="detail-error-back" label="返回" onPress={goBack} />
@@ -165,7 +175,7 @@ export function DetailScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
         <TVButton id="detail-back" label="返回" onPress={goBack} testID="tv-detail-back" />
         <Text

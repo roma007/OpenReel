@@ -1,7 +1,8 @@
 import React from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 import type { Media } from '@openreel/core';
-import { useThemeColors, radius, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, radius, useScaledFontSize, useThemeStore } from '@openreel/expo-ui';
+import { hexToRgba } from '@openreel/expo-ui';
 import PosterImage from './PosterImage';
 
 /**
@@ -25,6 +26,7 @@ export function MediaCard({
 }: MediaCardProps) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const posterHeight = Math.round(height * 0.76);
 
   return (
@@ -35,7 +37,7 @@ export function MediaCard({
           {
             width,
             height: posterHeight,
-            backgroundColor: colors.surface,
+            backgroundColor: hexToRgba(colors.surface, cardOpacity / 100),
             borderRadius: radius.sm,
           },
         ]}

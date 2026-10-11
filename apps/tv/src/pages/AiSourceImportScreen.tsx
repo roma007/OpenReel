@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Clipboard, Text, View, StyleSheet, ScrollView } from 'react-native';
+import { Text, View, StyleSheet, ScrollView } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
 import {
@@ -71,7 +72,7 @@ export function AiSourceImportScreen() {
   const copyPrompt = useCallback(async () => {
     try {
       await Clipboard.setString(AI_SOURCE_PROMPT);
-      setMessage('提示词已复制到剪贴板：把它发给 AI 助手，再把 AI 返回的结果复制回来');
+      setMessage('提示词已复制到剪贴板');
     } catch (e) {
       setMessage(`复制失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -121,7 +122,6 @@ export function AiSourceImportScreen() {
     try {
       const r = await batchImportSources(validItems);
       setResult({ imported: r.imported, skipped: r.skipped });
-      setMessage(r.imported > 0 ? `成功导入 ${r.imported} 个视频源` : `导入失败，${r.skipped} 个被跳过`);
     } catch (e) {
       setMessage(`导入失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -130,7 +130,7 @@ export function AiSourceImportScreen() {
   }, [batchImportSources, preview]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader
         title="添加视频源（AI 导入）"
         backId="ai-back"
@@ -163,6 +163,19 @@ export function AiSourceImportScreen() {
           </View>
         ))}
       </View>
+
+      {message ? (
+        <Text
+          style={{
+            color: colors.warning,
+            fontSize: scale(16),
+            paddingHorizontal: TV_LAYOUT.paddingX,
+            paddingBottom: tv(8),
+          }}
+        >
+          {message}
+        </Text>
+      ) : null}
 
       <ScrollView
         style={styles.scroll}
@@ -215,18 +228,19 @@ export function AiSourceImportScreen() {
             <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text
                 style={{
-                  color: result.imported > 0 ? colors.success : colors.error,
+                  color: result.imported > 0 ? colors.success : colors.mutedForeground,
                   fontSize: scale(22),
                   fontWeight: '700',
                 }}
               >
-                {result.imported > 0 ? `成功导入 ${result.imported} 个视频源` : '导入失败'}
+                {result.imported > 0
+                  ? result.skipped > 0
+                    ? `成功导入 ${result.imported} 个，跳过 ${result.skipped} 个`
+                    : `成功导入 ${result.imported} 个视频源`
+                  : result.skipped > 0
+                    ? `未导入任何新视频源（跳过 ${result.skipped} 个）`
+                    : '未导入任何视频源'}
               </Text>
-              {result.skipped > 0 ? (
-                <Text style={{ color: colors.mutedForeground, fontSize: scale(17), marginTop: tv(6) }}>
-                  {result.skipped} 个被跳过
-                </Text>
-              ) : null}
             </View>
           ) : (
             <>
@@ -264,9 +278,6 @@ export function AiSourceImportScreen() {
           )
         ) : null}
 
-        {message ? (
-          <Text style={{ color: colors.warning, fontSize: scale(16), marginTop: tv(12) }}>{message}</Text>
-        ) : null}
       </ScrollView>
 
       <View style={[styles.footer, { paddingHorizontal: TV_LAYOUT.paddingX }]}>

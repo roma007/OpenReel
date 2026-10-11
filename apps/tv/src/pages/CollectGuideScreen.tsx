@@ -82,7 +82,7 @@ export function CollectGuideScreen() {
     ));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="采集教程" backId="guide-back" />
       <ScrollView
         style={styles.scroll}

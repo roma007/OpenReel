@@ -7,6 +7,7 @@ import { tv } from '../theme/tokens';
 export interface TVSelectOption<T> {
   value: T;
   label: string;
+  style?: any;
 }
 
 /**
@@ -55,11 +56,14 @@ export function TVSelectRow<T extends string | number | boolean>({
             testID={`${id}-${o.value}`}
           >
             <Text
-              style={{
-                color: o.value === value ? colors.buttonPrimaryText : colors.foreground,
-                fontSize: scale(16),
-                fontWeight: '600',
-              }}
+              style={[
+                {
+                  color: o.value === value ? colors.buttonPrimaryText : colors.foreground,
+                  fontSize: scale(16),
+                  fontWeight: '600',
+                },
+                o.style,
+              ]}
             >
               {o.label}
             </Text>

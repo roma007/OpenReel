@@ -59,7 +59,7 @@ export function HistoryScreen() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
         <TVButton id="hist-back" label="返回" onPress={() => nav.goBack()} testID="tv-history-back" />
         <Text style={[styles.topTitle, { color: colors.foreground, fontSize: scale(23) }]}>

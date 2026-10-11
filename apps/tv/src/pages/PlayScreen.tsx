@@ -8,13 +8,14 @@ import {
   ScrollView,
   DeviceEventEmitter,
 } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { VideoView, createVideoPlayer } from 'expo-video';
 import type { Episode, Media, PlaySource, VideoSource } from '@openreel/core';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
 
 import { useAppStore, getProvider } from '../useAppStore';
+import { useBackgroundImageStore } from '../stores/backgroundImageStore';
 import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
 import { TVButton } from '../components/TVButton';
@@ -81,6 +82,15 @@ export function PlayScreen() {
   const initedRef = useRef<number | null>(null);
   const curEpRef = useRef<number | null>(currentEpId);
   curEpRef.current = currentEpId;
+
+  // 背景图：聚焦时用当前播放影片海报，失焦清空回落到默认背景图（对齐移动端 PlayScreen bgImageUrl）
+  const setBackgroundImage = useBackgroundImageStore((s) => s.setImageUrl);
+  useFocusEffect(
+    useCallback(() => {
+      setBackgroundImage(media?.posterUrl ?? null);
+      return () => setBackgroundImage(null);
+    }, [media, setBackgroundImage]),
+  );
 
   // 进度落库参数用 ref 持有，保证卸载 cleanup 能读到最新值
   const saveRef = useRef<{
@@ -493,7 +503,7 @@ export function PlayScreen() {
 
   if (error) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.playerBg }]}>
+      <View style={[styles.center, { backgroundColor: 'transparent' }]}>
         <Text style={{ color: colors.error, fontSize: scale(20) }}>{error}</Text>
         <View style={{ marginTop: tv(20) }}>
           <TVButton id="play-error-back" label="返回" onPress={() => nav.goBack()} />
@@ -503,7 +513,7 @@ export function PlayScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.playerBg }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       {player ? (
         <VideoView
           player={player}

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Clipboard, Linking, Text, View, StyleSheet, ScrollView } from 'react-native';
+import { Linking, Text, View, StyleSheet, ScrollView } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
 
@@ -27,7 +28,7 @@ export function AboutScreen() {
   const [copyNote, setCopyNote] = React.useState<string | null>(null);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="关于我们" backId="about-back" />
       <ScrollView
         style={styles.scroll}

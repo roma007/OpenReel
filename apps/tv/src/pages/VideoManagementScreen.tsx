@@ -95,7 +95,7 @@ export function VideoManagementScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="视频与缓存" backId="vm-back" />
       <ScrollView
         style={styles.scroll}

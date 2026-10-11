@@ -12,7 +12,7 @@ import type { RootStackParamList } from '../navigation/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const ENTRIES: Array<{ key: string; label: string; route: keyof RootStackParamList; desc: string }> = [
-  { key: 'appearance', label: '外观与主题', route: 'AppearanceSettings', desc: '主题色、字号、图片质量' },
+  { key: 'appearance', label: '外观与主题', route: 'AppearanceSettings', desc: '配色模式、字号、背景图设置、卡片透明度' },
   { key: 'usage', label: '使用偏好', route: 'UsagePreferences', desc: '播放行为与默认设置' },
   { key: 'recommend', label: '推荐偏好', route: 'RecommendationSettings', desc: '推荐依据与不感兴趣内容' },
   { key: 'video', label: '视频与缓存', route: 'VideoManagement', desc: '缓存占用、清理缓存、删除影片' },
@@ -37,7 +37,7 @@ export function SettingsScreen() {
   }, []);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
         <TVFocusable
           id="settings-back"
