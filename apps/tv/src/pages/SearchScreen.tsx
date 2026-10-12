@@ -146,7 +146,7 @@ export function SearchScreen() {
             containerStyle={styles.inputContainer}
             value={keyword}
             mode="text"
-            placeholder="输入片名搜索"
+            placeholder="输入片名或首字母搜索"
             hint="按 OK 打开电视键盘输入；也可用下方最近搜索"
             onChangeText={setKeyword}
             testID="tv-search-input"

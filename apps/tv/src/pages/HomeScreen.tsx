@@ -4,7 +4,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Media, Episode, WatchHistory } from '@openreel/core';
 import { useThemeColors, useScaledFontSize, radius, useThemeStore } from '@openreel/expo-ui';
-import { Sparkles, Film, Tv, Clock, Heart, Check } from 'lucide-react-native';
+import { Film, Tv, Clock, Heart } from 'lucide-react-native';
 
 import { useAppStore, getProvider, getStore } from '../useAppStore';
 import { TVFocusable } from '../focus/TVFocusable';
@@ -14,7 +14,6 @@ import { useBackgroundImageStore } from '../stores/backgroundImageStore';
 import MediaCard from '../components/MediaCard';
 import PosterImage from '../components/PosterImage';
 import { TVButton } from '../components/TVButton';
-import { TVTextInput } from '../components/TVTextInput';
 import { TVNavBar } from '../components/TVNavBar';
 import { TV_GRID_CARD, TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
@@ -23,14 +22,14 @@ import { hexToRgba } from '@openreel/expo-ui';
 /**
  * TV 首页。
  *
- * 结构：顶部导航条（分类入口 + 我的/设置）+ 使用偏好五张卡（对齐桌面/移动：
- * 快速搜索采集 / 追新电影 / 我的追剧 / 观看历史 / 我的收藏）+ 内容行（继续观看）。
+ * 结构：顶部导航条（分类入口 + 我的/设置）+ 使用偏好卡片（对齐桌面/移动：
+ * 追新电影 / 我的追剧 / 观看历史 / 我的收藏）+ 内容行（继续观看）。
  * 数据全部来自本地 SQLite，不请求网络。
  *
  * 遥控焦点：页面数据就绪后把初始焦点给「继续观看」首项（若有），否则给第一行首项 /
  * 空态按钮，保证方向键按下时一定有确定去处（不留焦点黑洞）。
  *
- * 数据刷新：loadHome 在挂载与每次首页获得焦点（采集/AI 导入/搜索采集返回）时执行，
+ * 数据刷新：loadHome 在挂载与每次首页获得焦点（采集/AI 导入返回）时执行，
  * 采集入库后回首页立即可见（焦点已在的元素不重置，静默换数据）。
  */
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -64,13 +63,13 @@ export function HomeScreen() {
   const [rows, setRows] = useState<Record<string, Media[]>>({});
   const [historyMedia, setHistoryMedia] = useState<Media[]>([]);
   const [ready, setReady] = useState(false);
+  // 「还没有影片数据」空态判定依据：media 表真实计数。
+  // null = 未知/取数失败（不误报空态，降级为不显示）。
+  const [mediaTotal, setMediaTotal] = useState<number | null>(null);
 
   // —— 使用偏好卡片数据 ——
   const [latestMedia, setLatestMedia] = useState<Media[]>([]);
   const [favMediaList, setFavMediaList] = useState<Media[]>([]);
-  const [quickKeyword, setQuickKeyword] = useState('');
-  const [relaxYear, setRelaxYear] = useState(false);
-  const [quickHint, setQuickHint] = useState<string | null>(null);
   // 我的追剧卡：剧集进度明细（对齐移动端 HomeScreen 同名 maps）
   const [episodeMap, setEpisodeMap] = useState<Record<string, Episode>>({});
   const [watchedHistoryMap, setWatchedHistoryMap] = useState<Record<string, WatchHistory[]>>({});
@@ -107,6 +106,14 @@ export function HomeScreen() {
       history.slice(0, 10).map((h) => provider.getMediaById(h.mediaId).catch(() => null)),
     );
     setHistoryMedia(hist.filter(Boolean) as Media[]);
+
+    // 空态判定：取 media 表真实计数（pageSize=1 只取 meta.total，与「可浏览内容」语义一致）。
+    try {
+      const r = await provider.listMedia({ page: 1, pageSize: 1 });
+      setMediaTotal(r.meta.total);
+    } catch {
+      setMediaTotal(null);
+    }
 
     setReady(true);
   }, [loadWatchHistory, loadFavorites]);
@@ -216,22 +223,6 @@ export function HomeScreen() {
     };
   }, [historyMedia]);
 
-  // —— 快速搜索采集：带关键词与「不限年份」进预览选择页 ——
-  const handleQuickPreview = useCallback(() => {
-    const kw = quickKeyword.trim();
-    if (!kw) {
-      setQuickHint('请输入关键词后再搜索采集');
-      return;
-    }
-    // 无视频源时引导去添加源（对齐桌面「暂无视频源→打开 AI 导入」语义）
-    if (videoSources.length === 0) {
-      nav.navigate('AiSourceImport');
-      return;
-    }
-    setQuickHint(null);
-    nav.navigate('KeywordCollect', { keyword: kw, relaxYear });
-  }, [quickKeyword, relaxYear, videoSources.length, nav]);
-
   // —— 增量采集（追新/追剧卡共用）：对齐桌面 handleCollectLatest ——
   const handleCollectLatest = useCallback(async () => {
     if (videoSources.length === 0) {
@@ -260,7 +251,7 @@ export function HomeScreen() {
   ];
 
   // 空库判定用真实 media 表计数，不依赖任何一行的分页结果
-  const empty = ready && Object.values(rows).every((r) => r.length === 0) && historyMedia.length === 0;
+  const empty = ready && mediaTotal === 0 && historyMedia.length === 0;
   // 视频源状态直接订阅 store；useFocusEffect 保证每次首页获得焦点（含从采集/AI导入返回）都重新从本地 DB 加载，
   // 避免导入/删除视频源返回首页后空态引导判断用到过期数据
   const [sourcesChecked, setSourcesChecked] = useState(false);
@@ -297,13 +288,12 @@ export function HomeScreen() {
   //  - 改用真实 id 后实证：目标 `row-movie:7466 has=true` 但该行在五张卡之后
   //    （屏幕深处 y≈2000），原生 View.focus() 对屏幕外视图静默失败，重试 6 次后放弃
   //    → 仍 0 持焦。故初始焦点改为「首屏可见的卡片区域第一可聚焦元素」（按卡片渲染
-  //    顺序探测）；引导态首屏只有引导盒，给 empty-go-ai。空库态空态盒在收藏卡下方
-  //    （屏幕外），同样给卡片首元素而非空态盒按钮。
+  //    顺序探测）；引导态首屏只有引导盒，给 empty-go-ai。空库态空态盒已上移到内容区首块。
   //  - 依赖只含 ready / showSourceGuide：不含 rows 静默刷新、不含 userUsageTypes
   //    （usage 回焦重读会换数组引用，若在 deps 里，回首页会把用户焦点抢回首卡）。
   //    candidates 不做门控判断，直接按「卡片渲染顺序」探测注册表真实存在性，
-  //    运行时渲染了哪张卡就自然命中哪张（2026-10-09 实证：开启三项偏好后
-  //    home-quick-input / home-new-collect 依次注册成功）。
+  //    运行时渲染了哪张卡就自然命中哪张（2026-10-09 实证：开启偏好后
+  //    home-new-collect 等依次注册成功）。
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => {
@@ -312,7 +302,6 @@ export function HomeScreen() {
         target = 'empty-go-ai';
       } else {
         const candidates = [
-          'home-quick-input', // 快速搜索采集卡
           'home-new-collect', // 追新电影卡（增量采集按钮）
           'home-tv-collect', // 我的追剧卡（增量采集按钮）
           'home-hist-more', // 观看历史卡（无门控恒渲染，兜底必中）
@@ -337,69 +326,9 @@ export function HomeScreen() {
     { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border },
   ];
   const cardTitleStyle = [styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }];
-  const cardDescStyle = [styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(16) }];
   const emptyCardTextStyle = [styles.emptyCardText, { color: colors.mutedForeground, fontSize: scale(16) }];
   const iconColor = colors.mutedForeground;
   const iconSize = tv(20);
-
-  const renderSearchFirstCard = () => (
-    <View style={cardHeaderStyle}>
-      <View style={styles.cardTitleRow}>
-        <Sparkles size={iconSize} color={iconColor} />
-        <Text style={cardTitleStyle}>快速搜索采集</Text>
-      </View>
-      <Text style={cardDescStyle}>输入关键词搜索并一键采集你想看的视频</Text>
-      <View style={styles.quickRow}>
-        <TVTextInput
-          id="home-quick-input"
-          value={quickKeyword}
-          onChangeText={(v) => {
-            setQuickKeyword(v);
-            if (quickHint) setQuickHint(null);
-          }}
-          placeholder="输入电影/电视剧名称..."
-          mode="text"
-          containerStyle={{ flex: 1, marginBottom: 0 }}
-          testID="tv-home-quick-input"
-        />
-        <TVFocusable
-          id="home-quick-relax"
-          onPress={() => setRelaxYear((v) => !v)}
-          style={[
-            styles.chip,
-            {
-              backgroundColor: relaxYear ? colors.buttonPrimaryBg : hexToRgba(colors.surfaceElevated, cardOpacity / 100),
-              borderColor: relaxYear ? colors.buttonPrimaryBg : colors.border,
-            },
-          ]}
-          testID="tv-home-quick-relax"
-        >
-          <Text
-            style={{
-              color: relaxYear ? colors.buttonPrimaryText : colors.foreground,
-              fontSize: scale(16),
-              fontWeight: '600',
-            }}
-          >
-            不限年份
-          </Text>
-          {relaxYear ? (
-            <Check size={tv(16)} color={colors.buttonPrimaryText} style={{ marginLeft: tv(6) }} />
-          ) : null}
-        </TVFocusable>
-        <TVButton
-          id="home-quick-go"
-          label="搜索采集"
-          variant="primary"
-          onPress={handleQuickPreview}
-          testID="tv-home-quick-go"
-        />
-      </View>
-      {quickHint ? (
-        <Text style={[styles.cardHint, { color: colors.error, fontSize: scale(15) }]}>{quickHint}</Text>
-      ) : null}
-    </View>
-  );
 
   const renderNewMoviesCard = () => (
     <View style={cardHeaderStyle}>
@@ -685,15 +614,8 @@ export function HomeScreen() {
           </View>
         ) : (
           <>
-            {userUsageTypes.includes('SEARCH_FIRST') && renderSearchFirstCard()}
-            {userUsageTypes.includes('NEW_MOVIES') && renderNewMoviesCard()}
-            {userUsageTypes.includes('TV_SERIES') && renderTvSeriesCard()}
-            {renderHistoryCard()}
-            {renderFavoritesCard()}
             {empty ? (
-              <View
-            style={[styles.emptyBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
-          >
+              <View style={[styles.emptyBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
                 <Text style={[styles.emptyTitle, { color: colors.foreground, fontSize: scale(22) }]}>
                   还没有影片数据
                 </Text>
@@ -711,7 +633,12 @@ export function HomeScreen() {
                   </Text>
                 </TVFocusable>
               </View>
-            ) : (
+            ) : null}
+            {userUsageTypes.includes('NEW_MOVIES') && renderNewMoviesCard()}
+            {userUsageTypes.includes('TV_SERIES') && renderTvSeriesCard()}
+            {renderHistoryCard()}
+            {renderFavoritesCard()}
+            {!empty ? (
               <>
                 {historyMedia.length > 0 ? (
                   <TVRow
@@ -745,7 +672,7 @@ export function HomeScreen() {
                   />
                 ))}
               </>
-            )}
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -779,27 +706,13 @@ const styles = StyleSheet.create({
     gap: tv(8),
   },
   cardTitle: { fontWeight: '700' },
-  cardDesc: { marginBottom: tv(12) },
-  cardHint: { marginTop: tv(8), fontWeight: '600' },
-  quickRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: tv(16),
-    paddingVertical: tv(11),
-    borderRadius: tv(10),
-    borderWidth: 1,
-    marginRight: tv(14),
-  },
   emptyCardText: {
     textAlign: 'center',
     paddingVertical: tv(16),
   },
   emptyBox: {
     marginTop: tv(40),
+    marginBottom: tv(16),
     padding: tv(32),
     borderRadius: tv(12),
     borderWidth: 1,

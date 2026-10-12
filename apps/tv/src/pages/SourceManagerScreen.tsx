@@ -32,7 +32,7 @@ function formatCheckTime(timestamp: string | null | undefined): string {
  *  - 手机端「手动添加 / 编辑」用 Modal + 软键盘；TV 改为**页内展开表单** + 应用内键盘，
  *    避免模态层与焦点桥互相干扰（键盘自身才是模态层）。
  *  - 删除类操作改两次确认（3 秒窗口），无触摸确认按钮。
- *  - 顶部操作行三个入口（手动添加 / AI 导入 / 搜索采集）均为可聚焦行。
+ *  - 顶部操作行入口（手动添加 / AI 导入）均为可聚焦行。
  */
 export function SourceManagerScreen() {
   const colors = useThemeColors();
@@ -296,13 +296,6 @@ export function SourceManagerScreen() {
             variant="primary"
             onPress={() => nav.navigate('AiSourceImport')}
             testID="tv-src-ai"
-          />
-          <TVButton
-            id="src-keyword"
-            label="搜索采集"
-            variant="primary"
-            onPress={() => nav.navigate('KeywordCollect')}
-            testID="tv-src-keyword"
           />
           <TVButton
             id="src-tasks"

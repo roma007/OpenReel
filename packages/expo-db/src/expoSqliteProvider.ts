@@ -49,6 +49,18 @@ export interface MigrationProgress {
   label: string;
 }
 
+/**
+ * TV 端首字母索引的「首字母串计算器」。
+ *
+ * 由 TV 端传入（apps/tv/src/services/initials.ts 的 initialsOfMedia），
+ * 对 title/alias/original_title 算首字母串；手机端/桌面端不调用，开关恒 false。
+ */
+export type InitialsComputer = (media: {
+  title?: string | null;
+  alias?: string | null;
+  originalTitle?: string | null;
+}) => string;
+
 /** 磁盘空间不足导致无法升级（结构化数据供 UI 引导页展示）。 */
 export class MigrationDiskError extends Error {
   readonly need: number;
@@ -675,6 +687,13 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   /** 儿童模式开关缓存（启动时由 system_config 初始化，setKidModeActive 同步更新）。 */
   private kidModeActive = false;
+
+  /**
+   * TV 端首字母索引开关（仅 TV 调 enableInitialsSearch 后为 true，手机端恒 false）。
+   * 打开后：upsertMedia 即时建索引、searchMedia 对纯字母数字关键词走联合检索。
+   */
+  private initialsEnabled = false;
+  private initialsComputer: InitialsComputer | null = null;
 
   /** 推荐排序「候选∩筛选」视图缓存：同筛选键 120s 内复用，翻页只需对有序候选切片（毫秒级）。 */
   private recommendViewCache: { key: string; view: number[]; at: number } | null = null;
@@ -1624,6 +1643,27 @@ export class ExpoSqliteProvider implements DatabaseProvider {
         media.createdAt || now, now,
       ]
     );
+
+    // TV 端首字母索引：开关打开时即时为新/更新片建索引（采集新增片无需等回填）。
+    // 失败不影响主数据写入（索引可后续回填补齐）。
+    if (this.initialsEnabled && this.initialsComputer) {
+      try {
+        const row = await this.db!.getFirstAsync<{ id: number }>(
+          'SELECT id FROM media WHERE fingerprint = ?',
+          [media.fingerprint]
+        );
+        if (row) {
+          const initials = this.initialsComputer({
+            title: media.title,
+            alias: media.alias,
+            originalTitle: media.originalTitle,
+          });
+          if (initials) await this.writeInitialsRow(row.id, initials, now);
+        }
+      } catch {
+        // 忽略：索引失败不阻断采集入库
+      }
+    }
   }
 
   async updateMediaStatusAndEpisodes(
@@ -1679,6 +1719,182 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync('UPDATE media SET view_count = view_count + 1 WHERE id = ?', [id]);
   }
 
+  // —— TV 端首字母索引（仅 TV 调用；手机端开关恒 false，行为与数据库零变化）——
+
+  /**
+   * 首字母串 → bigram token 串（FTS5 ascii tokenizer 以空白分 token）。
+   * 例：'LSTY' → 'LS ST TY'；检索时同样用它对关键词生成 bigram AND 表达式。
+   */
+  private static initialsTokens(initials: string): string {
+    const s = (initials || '').toUpperCase();
+    if (s.length < 2) return s;
+    const grams: string[] = [];
+    for (let i = 0; i < s.length - 1; i++) grams.push(s.slice(i, i + 2));
+    return grams.join(' ');
+  }
+
+  /**
+   * 关键词 → FTS5 MATCH 表达式：每个 bigram 作为独立短语、空格分隔（FTS5 默认 AND）。
+   * 例：'LST' → '"LS" "ST"'。关键词已限定为纯字母数字，无需再转义。
+   */
+  private static initialsMatchExpr(keyword: string): string {
+    const s = (keyword || '').toUpperCase();
+    const grams: string[] = [];
+    for (let i = 0; i < s.length - 1; i++) grams.push(`"${s.slice(i, i + 2)}"`);
+    return grams.join(' ');
+  }
+
+  /** 写入/更新一部影片的首字母索引行（显式 rowid = media.id，O(1) 替换）。 */
+  private async writeInitialsRow(mediaId: number, initials: string, mediaUpdatedAt: string): Promise<void> {
+    await this.db!.runAsync(
+      `INSERT OR REPLACE INTO tv_media_initials_fts(rowid, tokens, initials, src_updated_at)
+       VALUES (?, ?, ?, ?)`,
+      [mediaId, ExpoSqliteProvider.initialsTokens(initials), initials.toUpperCase(), mediaUpdatedAt]
+    );
+  }
+
+  /**
+   * 打开 TV 端首字母索引：置开关 + 建私有 FTS 表（不改共享 schema.ts，不触发三路径规则）。
+   * 建表失败时静默降级为「不启用」，不影响任何原有功能。
+   */
+  async enableInitialsSearch(compute: InitialsComputer): Promise<void> {
+    this.initialsComputer = compute;
+    try {
+      await this.db!.execAsync(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS tv_media_initials_fts USING fts5(
+          tokens,
+          initials UNINDEXED,
+          src_updated_at UNINDEXED,
+          tokenize='ascii'
+        );
+      `);
+      this.initialsEnabled = true;
+    } catch (err) {
+      this.initialsEnabled = false;
+      console.warn('[DB] 首字母索引建表失败，已降级为不启用:', err);
+    }
+  }
+
+  /**
+   * 存量回填：仅对「首字母缺失 或 src_updated_at ≠ media.updated_at」的行重算（幂等可续跑）。
+   * 返回本次处理条数；返回 0 表示已无待处理行。
+   */
+  async backfillInitials(): Promise<number> {
+    if (!this.initialsEnabled || !this.initialsComputer || !this.db) return 0;
+    const rows = await this.db.getAllAsync<{
+      id: number;
+      title: string;
+      alias: string | null;
+      original_title: string | null;
+      updated_at: string;
+    }>(
+      `SELECT m.id, m.title, m.alias, m.original_title, m.updated_at
+       FROM media m
+       LEFT JOIN tv_media_initials_fts f ON f.rowid = m.id
+       WHERE f.rowid IS NULL OR f.src_updated_at IS NULL OR f.src_updated_at != m.updated_at`
+    );
+    for (const row of rows) {
+      try {
+        const initials = this.initialsComputer({
+          title: row.title,
+          alias: row.alias,
+          originalTitle: row.original_title,
+        });
+        if (initials) await this.writeInitialsRow(row.id, initials, row.updated_at);
+      } catch {
+        // 单行失败不中断回填
+      }
+    }
+    return rows.length;
+  }
+
+  /**
+   * 首字母联合检索：原匹配分支 UNION 首字母 bigram FTS（粗筛）+ initials LIKE（精筛）去假阳性。
+   * 仅当开关打开且关键词为纯字母/数字（长度 ≥2）时由 searchMedia 转入。
+   */
+  private async searchMediaWithInitials(
+    keyword: string,
+    params: {
+      page?: number;
+      pageSize?: number;
+      type?: string;
+      year?: number;
+      area?: string;
+      genre?: string;
+    } = {}
+  ): Promise<PaginatedResponse<Media>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 20;
+    const offset = (page - 1) * pageSize;
+    const trimmed = keyword.trim();
+    const kwUpper = trimmed.toUpperCase();
+
+    // 原匹配分支（与 searchMedia 完全同语义，命中 id 集）
+    const useFts = trimmed.length >= 3 && !/\s/.test(trimmed);
+    let innerSql: string;
+    const innerParams: any[] = [];
+    if (useFts) {
+      const ftsQuery = `"${trimmed.replace(/"/g, '""')}"`;
+      innerSql =
+        'SELECT m.id FROM media_fts f JOIN media m ON m.rowid = f.rowid WHERE media_fts MATCH ? AND (m.hidden IS NULL OR m.hidden = 0)';
+      innerParams.push(ftsQuery);
+    } else {
+      const like = `%${trimmed}%`;
+      innerSql =
+        'SELECT m.id FROM media m WHERE (m.hidden IS NULL OR m.hidden = 0) AND (m.title LIKE ? OR m.alias LIKE ? OR m.original_title LIKE ? OR m.director LIKE ? OR m.cast LIKE ?)';
+      innerParams.push(like, like, like, like, like);
+    }
+
+    // bigram AND 粗筛（'LST' → 'LS ST'）+ initials LIKE 精筛（消除 bigram 假阳性）
+    const ftsMatch = ExpoSqliteProvider.initialsMatchExpr(kwUpper);
+
+    const baseSql = `
+      WITH ids AS (
+        ${innerSql}
+        UNION
+        SELECT rowid FROM tv_media_initials_fts
+         WHERE tv_media_initials_fts MATCH ?
+           AND rowid IN (SELECT rowid FROM tv_media_initials_fts WHERE initials LIKE ?)
+      )
+      SELECT m.* FROM ids JOIN media m ON m.id = ids.id WHERE 1=1`;
+    const baseParams: any[] = [...innerParams, ftsMatch, `%${kwUpper}%`];
+
+    let where = '';
+    if (this.kidModeActive) where += ' AND m.kid_safe = 1';
+    if (params.type) {
+      where += ' AND m.type = ?';
+      baseParams.push(params.type);
+    }
+    if (params.year) {
+      where += ' AND m.year = ?';
+      baseParams.push(params.year);
+    }
+    if (params.area) {
+      where += ' AND m.area = ?';
+      baseParams.push(params.area);
+    }
+    if (params.genre) {
+      where += ' AND m.genre LIKE ?';
+      baseParams.push(`%${params.genre}%`);
+    }
+
+    const countResult = await this.db!.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM (${baseSql}${where})`,
+      baseParams
+    );
+    const total = countResult?.count || 0;
+    const totalPages = Math.ceil(total / pageSize);
+
+    const rows = await this.db!.getAllAsync<any>(
+      `${baseSql}${where}
+       ORDER BY m.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      [...baseParams, pageSize, offset]
+    );
+
+    return { items: rows.map(rowToMedia), meta: { page, pageSize, total, totalPages } };
+  }
+
   async searchMedia(
     keyword: string,
     params: {
@@ -1695,6 +1911,11 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     const offset = (page - 1) * pageSize;
 
     const trimmed = keyword.trim();
+    // TV 端首字母检索：仅当开关打开且关键词为纯字母/数字（长度 ≥2）时走联合 id 集；
+    // 否则（含中文/空格/单字符/开关关闭）完全走原逻辑，不改变手机端/桌面端行为。
+    if (this.initialsEnabled && /^[A-Za-z0-9]{2,}$/.test(trimmed)) {
+      return this.searchMediaWithInitials(trimmed, params);
+    }
     // ≥3 字符且不含内部空格才走 trigram FTS 子串索引（JOIN 形态保证 FTS 驱动，避免本就慢的全表扫）；
     // 含空格/单双字关键词 trigram 不建索引或分词与 LIKE 不一致，退回原 LIKE 语义，结果与旧版一致。
     const useFts = trimmed.length >= 3 && !/\s/.test(trimmed);
@@ -1995,6 +2216,9 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync('DELETE FROM media');
     await this.db!.runAsync('DELETE FROM favorite');
     await this.db!.runAsync('DELETE FROM watch_history');
+    if (this.initialsEnabled) {
+      await this.db!.runAsync('DELETE FROM tv_media_initials_fts');
+    }
   }
 
   async deletePlaySourcesBySourceId(sourceId: string): Promise<void> {
@@ -2025,6 +2249,9 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync('DELETE FROM favorite WHERE media_id = ?', [mediaId]);
     await this.db!.runAsync('DELETE FROM watch_history WHERE media_id = ?', [mediaId]);
     await this.db!.runAsync('DELETE FROM media WHERE id = ?', [mediaId]);
+    if (this.initialsEnabled) {
+      await this.db!.runAsync('DELETE FROM tv_media_initials_fts WHERE rowid = ?', [mediaId]);
+    }
   }
 
   async deleteMediaWithoutPlaySource(): Promise<number> {

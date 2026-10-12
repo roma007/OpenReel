@@ -20,7 +20,6 @@ import DetailScreen from './src/pages/DetailScreen';
 import PlayScreen from './src/pages/PlayScreen';
 import FavoritesScreen from './src/pages/FavoritesScreen';
 import HistoryScreen from './src/pages/HistoryScreen';
-import KeywordCollectScreen from './src/pages/KeywordCollectScreen';
 import TaskListScreen from './src/pages/TaskListScreen';
 import CollectConfigScreen from './src/pages/CollectConfigScreen';
 import SourceManagerScreen from './src/pages/SourceManagerScreen';
@@ -59,7 +58,6 @@ function RootNavigator() {
         <Stack.Screen name="Play" component={PlayScreen} options={{ animation: 'fade' }} />
         <Stack.Screen name="Favorites" component={FavoritesScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
-        <Stack.Screen name="KeywordCollect" component={KeywordCollectScreen} />
         <Stack.Screen name="TaskList" component={TaskListScreen} />
         <Stack.Screen name="CollectConfig" component={CollectConfigScreen} />
         <Stack.Screen name="SourceManager" component={SourceManagerScreen} />

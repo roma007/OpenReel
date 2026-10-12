@@ -29,11 +29,17 @@ export function HistoryScreen() {
   const [items, setItems] = useState<Media[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const clearHistory = useAppStore((s) => s.clearHistory);
+
+  const load = useCallback(async (targetPage?: number) => {
+    const p = targetPage ?? page;
     setLoading(true);
     const provider = getProvider();
-    const hist = await provider.getAllWatchHistory(page, PAGE_SIZE);
+    const hist = await provider.getAllWatchHistory(p, PAGE_SIZE);
     // watch_history 是「影片 × 剧集」粒度（id = wh_<mediaId>_<episodeId>），同一部影片看过多集会
     // 产生多行；此处按 mediaId 去重只留最近一条，否则 TVRow 会拿到重复 key，
     // React 直接抛 "Encountered two children with the same key"（2026-10-05 实测）。
@@ -49,6 +55,36 @@ export function HistoryScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 两次确认的 3 秒窗口（对齐 VideoManagementScreen 危险操作交互）
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => setPending(false), 3000);
+    return () => clearTimeout(t);
+  }, [pending]);
+
+  // 清除所有观看历史：第一次按进入确认态，3 秒内再按才真正执行。
+  const handleClear = useCallback(async () => {
+    if (busy) return;
+    if (!pending) {
+      setPending(true);
+      setMessage('再按一次「确认清除」以清空全部观看历史（3秒内有效）');
+      return;
+    }
+    setPending(false);
+    setBusy(true);
+    setMessage('正在清除…');
+    try {
+      await clearHistory();
+      setPage(1);
+      await load(1);
+      setMessage('已清除全部观看历史');
+    } catch (e) {
+      setMessage(`清除失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, pending, clearHistory, load]);
 
   useEffect(() => {
     if (loading) return;
@@ -68,7 +104,28 @@ export function HistoryScreen() {
         <Text style={[styles.count, { color: colors.mutedForeground, fontSize: scale(16) }]}>
           {total}
         </Text>
+        <View style={{ flex: 1 }} />
+        {total > 0 ? (
+          <TVButton
+            id="hist-clear"
+            label={pending ? '确认清除？' : '清除全部历史'}
+            variant="danger"
+            disabled={busy}
+            onPress={handleClear}
+            testID="tv-history-clear"
+          />
+        ) : null}
       </View>
+      {message ? (
+        <Text
+          style={[
+            styles.message,
+            { color: pending ? colors.error : colors.mutedForeground, fontSize: scale(16) },
+          ]}
+        >
+          {message}
+        </Text>
+      ) : null}
 
       <ScrollView
         style={styles.scroll}
@@ -134,6 +191,7 @@ const styles = StyleSheet.create({
   topTitle: { marginLeft: tv(18), fontWeight: '700' },
   count: { marginLeft: tv(12) },
   scroll: { flex: 1 },
+  message: { paddingTop: tv(10), paddingHorizontal: TV_LAYOUT.paddingX },
   status: { paddingVertical: tv(40), textAlign: 'center' },
   pager: {
     flexDirection: 'row',

@@ -1,8 +1,8 @@
 import React from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 import type { Media } from '@openreel/core';
-import { useThemeColors, radius, useScaledFontSize, useThemeStore } from '@openreel/expo-ui';
-import { hexToRgba } from '@openreel/expo-ui';
+import { radius, useScaledFontSize } from '@openreel/expo-ui';
+import { Star } from 'lucide-react-native';
 import PosterImage from './PosterImage';
 
 /**
@@ -24,90 +24,182 @@ export function MediaCard({
   showYear = true,
   showRating = true,
 }: MediaCardProps) {
-  const colors = useThemeColors();
-  const scale = useScaledFontSize();
-  const cardOpacity = useThemeStore((s) => s.cardOpacity);
+  const s = useScaledFontSize();
   const posterHeight = Math.round(height * 0.76);
 
   return (
-    <View style={{ width }}>
+    <View
+      style={[
+        styles.card,
+        {
+          width,
+          backgroundColor: '#ffffff',
+        },
+      ]}
+    >
       <View
         style={[
-          styles.posterWrap,
+          styles.posterContainer,
           {
             width,
             height: posterHeight,
-            backgroundColor: hexToRgba(colors.surface, cardOpacity / 100),
-            borderRadius: radius.sm,
+            backgroundColor: '#ffffff',
           },
         ]}
       >
-        <PosterImage
-          uri={media.posterUrl}
-          style={{ width: '100%', height: '100%', borderRadius: radius.sm }}
-        />
-        {showRating && media.rating != null && media.rating > 0 ? (
-          <View style={[styles.ratingBadge, { backgroundColor: colors.background }]}>
-            <Text style={[styles.ratingText, { color: colors.foreground, fontSize: scale(13) }]}>
+        {media.posterUrl ? (
+          <PosterImage
+            uri={media.posterUrl}
+            style={styles.poster}
+          />
+        ) : (
+          <View style={[styles.placeholder, styles.poster]}>
+            <Text style={[styles.placeholderText, { color: '#9ca3af', fontSize: s(28) }]}>
+              {media.title?.[0] || '?'}
+            </Text>
+          </View>
+        )}
+
+        {showRating && media.rating != null && media.rating > 0 && (
+          <View style={styles.ratingBadgeContainer}>
+            <Star size={11} color="#f59e0b" fill="#f59e0b" />
+            <Text style={[styles.ratingBadgeText, { color: '#f59e0b', fontSize: s(11) }]}>
               {media.rating.toFixed(1)}
             </Text>
           </View>
-        ) : null}
-        {media.totalEpisodes && media.totalEpisodes > 1 ? (
-          <View style={[styles.epBadge, { backgroundColor: colors.background }]}>
-            <Text style={[styles.epText, { color: colors.foreground, fontSize: scale(12) }]}>
-              {media.currentEpisodes ?? 0}/{media.totalEpisodes}
-            </Text>
+        )}
+
+        {(media.status === 'ONGOING' || media.status === 'PUBLISHED') && media.type !== 'VARIETY' && media.currentEpisodes && (
+          <View style={styles.badgeContainer}>
+            <View style={[styles.badge, styles.badgePrimary]}>
+              <Text style={[styles.badgeText, { fontSize: s(11) }]}>更新至第{media.currentEpisodes}集</Text>
+            </View>
           </View>
-        ) : null}
+        )}
+
+        {(media.status === 'ONGOING' || media.status === 'PUBLISHED') && media.type === 'VARIETY' && media.remarks && (
+          <View style={styles.badgeContainer}>
+            <View style={[styles.badge, styles.badgePrimary]}>
+              <Text style={[styles.badgeText, { fontSize: s(11) }]}>{media.remarks}</Text>
+            </View>
+          </View>
+        )}
+
+        {media.status === 'COMPLETED' && media.type !== 'VARIETY' && media.totalEpisodes != null && (
+          <View style={styles.badgeContainer}>
+            <View style={[styles.badge, styles.badgeMuted]}>
+              <Text style={[styles.badgeText, { fontSize: s(11) }]}>完结 全{media.totalEpisodes}集</Text>
+            </View>
+          </View>
+        )}
+
+        {media.status === 'COMPLETED' && media.type !== 'VARIETY' && media.totalEpisodes == null && (
+          <View style={styles.badgeContainer}>
+            <View style={[styles.badge, styles.badgeMuted]}>
+              <Text style={[styles.badgeText, { fontSize: s(11) }]}>已完结</Text>
+            </View>
+          </View>
+        )}
+
+        {media.status === 'COMPLETED' && media.type === 'VARIETY' && media.remarks && (
+          <View style={styles.badgeContainer}>
+            <View style={[styles.badge, styles.badgeMuted]}>
+              <Text style={[styles.badgeText, { fontSize: s(11) }]}>{media.remarks}</Text>
+            </View>
+          </View>
+        )}
       </View>
-      <Text
-        numberOfLines={1}
-        style={[styles.title, { color: colors.foreground, fontSize: scale(15) }]}
-      >
+
+      <Text style={[styles.title, { color: '#111827', fontSize: s(14), lineHeight: s(18) }]} numberOfLines={1}>
         {media.title}
       </Text>
-      {showYear ? (
-        <Text style={[styles.sub, { color: colors.mutedForeground, fontSize: scale(13) }]}>
-          {[media.year, media.genres?.[0]].filter(Boolean).join(' · ')}
+
+      {media.actors.length > 0 && (
+        <Text style={[styles.actors, { color: '#6b7280', fontSize: s(12) }]} numberOfLines={1}>
+          {media.actors.slice(0, 2).join(' / ')}
         </Text>
-      ) : null}
+      )}
+
+      {showYear && (
+        <Text style={[styles.year, { color: '#6b7280', fontSize: s(12) }]}>
+          {media.year} · {media.area || '未知'}
+        </Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  posterWrap: {
+  card: {
+    marginBottom: 14,
+    borderRadius: radius.md,
     overflow: 'hidden',
   },
+  posterContainer: {
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  poster: {
+    width: '100%',
+    height: '100%',
+    borderRadius: radius.md,
+  },
+  placeholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontWeight: 'bold',
+  },
   title: {
+    marginTop: 6,
+    paddingHorizontal: 8,
     fontWeight: '600',
-    marginTop: 8,
   },
-  sub: {
+  actors: {
     marginTop: 2,
+    paddingHorizontal: 8,
   },
-  ratingBadge: {
+  year: {
+    marginTop: 2,
+    paddingHorizontal: 8,
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+  },
+  badgePrimary: {
+    backgroundColor: 'rgba(115, 115, 115, 0.8)',
+  },
+  badgeMuted: {
+    backgroundColor: 'rgba(115, 115, 115, 0.8)',
+  },
+  badgeText: {
+    color: '#ffffff',
+  },
+  ratingBadgeContainer: {
     position: 'absolute',
     top: 6,
-    left: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  ratingText: {
-    fontWeight: '700',
-  },
-  epBadge: {
-    position: 'absolute',
-    bottom: 6,
     right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    overflow: 'hidden',
   },
-  epText: {
-    fontWeight: '600',
+  ratingBadgeText: {
+    fontWeight: 'bold',
+    marginLeft: 2,
   },
 });
 

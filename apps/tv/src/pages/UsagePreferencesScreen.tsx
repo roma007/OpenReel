@@ -12,7 +12,6 @@ import { writePrefetchConcurrency } from '../services/cache';
 import { tv } from '../theme/tokens';
 
 const USAGE_OPTIONS: Array<{ type: UserUsageType; label: string }> = [
-  { type: 'SEARCH_FIRST', label: '搜索优先' },
   { type: 'NEW_MOVIES', label: '追新电影' },
   { type: 'TV_SERIES', label: '追剧/综艺' },
 ];

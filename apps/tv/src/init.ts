@@ -8,6 +8,7 @@ import {
   type AppStore,
   type AppState,
 } from '@openreel/core';
+import { initialsOfMedia } from './services/initials';
 
 /**
  * TV 端单例容器。
@@ -42,6 +43,23 @@ export async function initApp(options?: {
     const provider = new ExpoSqliteProvider(options);
     await provider.init();
     s.provider = provider;
+
+    // TV 端首字母搜索索引（拼音/首字母）：建表 + 启动后 5s 后台回填存量。
+    // 建表/回填失败仅记录日志，不影响应用启动与原有搜索路径。
+    try {
+      await provider.enableInitialsSearch(initialsOfMedia);
+      setTimeout(() => {
+        provider
+          .backfillInitials()
+          .then((n) => {
+            if (n > 0) console.log(`[TV] 首字母索引回填完成（${n} 条）`);
+          })
+          .catch((err) => console.error('[TV] 首字母索引回填失败:', err));
+      }, 5000);
+    } catch (err) {
+      console.error('[TV] 首字母搜索索引初始化失败:', err);
+    }
+
     const store = createAppStore(provider);
     const collector = new CollectorService(provider);
     s.store = store;
