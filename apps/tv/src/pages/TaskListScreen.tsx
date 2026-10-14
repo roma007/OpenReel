@@ -239,17 +239,15 @@ export function TaskListScreen() {
           return (
             <View
               key={task.taskId || String(task.id)}
-              style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
+              style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
             >
-              <Text style={[styles.source, { color: colors.foreground, fontSize: scale(19) }]} numberOfLines={1}>
-                {task.sourceName || task.sourceCode}
-              </Text>
-              <View style={styles.metaRow}>
-                <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>{typeLabel(task.type)}</Text>
-                <Text style={[styles.badge, { borderColor: st.color }]}>
-                  <Text style={{ color: st.color, fontSize: scale(14), fontWeight: '600' }}>{st.label}</Text>
+              {/* 头部行：源名 + 类型 + 日期（右对齐）——排列对齐移动端 taskHeader */}
+              <View style={styles.headerRow}>
+                <Text style={[styles.source, { color: colors.foreground, fontSize: scale(19) }]} numberOfLines={1}>
+                  {task.sourceName || task.sourceCode}
                 </Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: scale(14) }}>
+                <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>{typeLabel(task.type)}</Text>
+                <Text style={[styles.date, { color: colors.mutedForeground, fontSize: scale(14) }]}>
                   {new Date(task.createdAt).toLocaleString()}
                 </Text>
               </View>
@@ -261,79 +259,98 @@ export function TaskListScreen() {
                       style={[styles.progressFill, { width: `${Math.min(100, progress)}%`, backgroundColor: st.color }]}
                     />
                   </View>
-                  <Text style={{ color: colors.mutedForeground, fontSize: scale(14), marginTop: tv(4) }}>
-                    {task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}（{progress}%）
+                  {/* 进度文字右对齐、去百分比——排列与文案对齐移动端 progressText */}
+                  <Text style={[styles.progressText, { color: colors.mutedForeground, fontSize: scale(14) }]}>
+                    {task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}
                   </Text>
                 </View>
               )}
 
+              {/* 统计 + 状态徽章 + 操作按钮 同一行、按钮靠右——排列对齐移动端 taskMeta/taskRight */}
               <View style={styles.metaRow}>
                 {isReprobe ? (
                   <>
-                    <Text style={{ color: colors.success, fontSize: scale(15) }}>短剧 {task.shortDramaCount || 0}</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>长剧 {task.longDramaCount || 0}</Text>
+                    <Text style={{ color: colors.success, fontSize: scale(15) }}>短剧: {task.shortDramaCount || 0}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>长剧: {task.longDramaCount || 0}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>成功: {task.collectedCount}</Text>
+                    <Text style={{ color: task.failedCount > 0 ? colors.error : colors.textSecondary, fontSize: scale(15) }}>
+                      失败: {task.failedCount}
+                    </Text>
                   </>
                 ) : null}
-                <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>成功 {task.collectedCount}</Text>
-                <Text style={{ color: task.failedCount > 0 ? colors.error : colors.textSecondary, fontSize: scale(15) }}>
-                  失败 {task.failedCount}
-                </Text>
-              </View>
-
-              <View style={styles.btnRow}>
-                {canRetry ? (
-                  <TVButton
-                    id={`task-retry:${task.taskId}`}
-                    label={busy ? '重试中…' : `重试失败项(${failedItems.length})`}
-                    disabled={busy}
-                    onPress={() => pressRetry(task)}
-                    testID={`tv-task-retry-${task.taskId}`}
-                  />
-                ) : null}
-                {canResume ? (
-                  <TVButton
-                    id={`task-resume:${task.taskId}`}
-                    label={busy ? '续采中…' : '继续'}
-                    disabled={busy}
-                    onPress={() => pressResume(task)}
-                    testID={`tv-task-resume-${task.taskId}`}
-                  />
-                ) : null}
-                <TVButton
-                  id={`task-delete:${task.taskId}`}
-                  label={pendingDelete === task.taskId ? '确认删除？' : '删除'}
-                  variant="danger"
-                  disabled={busy}
-                  onPress={() => pressDelete(task)}
-                  testID={`tv-task-delete-${task.taskId}`}
-                />
-              </View>
-
-              {(task.type === 'INCREMENTAL' || task.type === 'FULL') && failedItems.length > 0 ? (
-                <>
-                  <TVFocusable
-                    id={`task-failed-toggle:${task.taskId}`}
-                    onPress={() => setExpanded(expanded === task.taskId ? null : task.taskId)}
-                    style={styles.failedToggle}
-                    testID={`tv-task-failed-toggle-${task.taskId}`}
-                  >
-                    <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>
-                      {expanded === task.taskId ? '▾ 收起失败明细' : `▸ 查看失败明细（${failedItems.length} 条）`}
-                    </Text>
-                  </TVFocusable>
-                  {expanded === task.taskId ? (
-                    <View style={[styles.failedList, { borderColor: colors.border }]}>
-                      {failedItems.map((fi, idx) => (
-                        <View key={`${fi.vodId}-${idx}`} style={styles.failedItem}>
-                          <Text style={{ color: colors.foreground, fontSize: scale(15) }}>
-                            {idx + 1}. {fi.title}
-                          </Text>
-                          <Text style={{ color: colors.error, fontSize: scale(14) }}>{fi.error}</Text>
-                        </View>
-                      ))}
-                    </View>
+                <View style={styles.rightGroup}>
+                  <Text style={[styles.badge, { borderColor: st.color }]}>
+                    <Text style={{ color: st.color, fontSize: scale(14), fontWeight: '600' }}>{st.label}</Text>
+                  </Text>
+                  {canRetry ? (
+                    <TVButton
+                      id={`task-retry:${task.taskId}`}
+                      label={busy ? '重试中…' : `重试失败项(${failedItems.length})`}
+                      disabled={busy}
+                      onPress={() => pressRetry(task)}
+                      testID={`tv-task-retry-${task.taskId}`}
+                    />
                   ) : null}
-                </>
+                  {canResume ? (
+                    <TVButton
+                      id={`task-resume:${task.taskId}`}
+                      label={busy ? '续采中…' : '继续'}
+                      disabled={busy}
+                      onPress={() => pressResume(task)}
+                      testID={`tv-task-resume-${task.taskId}`}
+                    />
+                  ) : null}
+                  <TVButton
+                    id={`task-delete:${task.taskId}`}
+                    label={pendingDelete === task.taskId ? '确认删除？' : '删除'}
+                    variant="danger"
+                    disabled={busy}
+                    onPress={() => pressDelete(task)}
+                    testID={`tv-task-delete-${task.taskId}`}
+                  />
+                </View>
+              </View>
+
+              {/* 失败明细区：仅 INCREMENTAL/FULL；统计「有失败才显示」规则照搬移动端 failedRow */}
+              {task.type === 'INCREMENTAL' || task.type === 'FULL' ? (
+                <View style={[styles.failedRow, { borderTopColor: colors.border }]}>
+                  {failedItems.length > 0 ? (
+                    <>
+                      <View style={styles.metaRow}>
+                        <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>
+                          成功: {task.collectedCount}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>
+                          失败: {task.failedCount}
+                        </Text>
+                        <TVFocusable
+                          id={`task-failed-toggle:${task.taskId}`}
+                          onPress={() => setExpanded(expanded === task.taskId ? null : task.taskId)}
+                          style={styles.failedToggle}
+                          testID={`tv-task-failed-toggle-${task.taskId}`}
+                        >
+                          <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>
+                            {expanded === task.taskId ? '▾ 收起失败明细' : `▸ 查看失败明细（${failedItems.length} 条）`}
+                          </Text>
+                        </TVFocusable>
+                      </View>
+                      {expanded === task.taskId ? (
+                        <View style={styles.failedList}>
+                          {failedItems.map((fi, idx) => (
+                            <View key={`${fi.vodId}-${idx}`} style={styles.failedItem}>
+                              <Text style={{ color: colors.foreground, fontSize: scale(15) }}>
+                                {idx + 1}. {fi.title}
+                              </Text>
+                              <Text style={{ color: colors.error, fontSize: scale(14) }}>{fi.error}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : task.failedItems ? (
+                    <Text style={{ color: colors.success, fontSize: scale(15) }}>本次无失败条目</Text>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           );
@@ -364,16 +381,23 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
   content: { paddingTop: tv(16), paddingBottom: tv(44) },
-  card: { padding: tv(18), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(14) },
-  source: { fontWeight: '700' },
+  card: { padding: tv(18), borderRadius: tv(10), marginBottom: tv(14) },
+  // 头部行：源名 + 类型 + 日期（日期靠右）——对齐移动端 taskHeader
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: tv(10), marginBottom: tv(8) },
+  source: { fontWeight: '700', flexShrink: 1 },
+  date: { marginLeft: 'auto' },
   metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: tv(8) },
-  badge: { borderWidth: 1, borderRadius: tv(6), paddingHorizontal: tv(8), paddingVertical: tv(2), marginRight: tv(12) },
+  // 状态徽章 + 操作按钮靠右成组——对齐移动端 taskRight
+  rightGroup: { flexDirection: 'row', alignItems: 'center', gap: tv(8), marginLeft: 'auto' },
+  badge: { borderWidth: 1, borderRadius: tv(6), paddingHorizontal: tv(8), paddingVertical: tv(2) },
   progressWrap: { marginTop: tv(10) },
   progressBar: { height: tv(6), borderRadius: tv(3), overflow: 'hidden' },
   progressFill: { height: '100%' },
-  btnRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: tv(12) },
-  failedToggle: { paddingVertical: tv(8) },
-  failedList: { borderTopWidth: 1, paddingTop: tv(8), maxHeight: tv(220) },
+  progressText: { marginTop: tv(4), textAlign: 'right' },
+  // 失败明细区（对齐移动端 failedRow）：顶部分隔线 + 统计/开关同行
+  failedRow: { marginTop: tv(10), borderTopWidth: 1, paddingTop: tv(8) },
+  failedToggle: { paddingVertical: tv(8), marginLeft: 'auto' },
+  failedList: { marginTop: tv(6), maxHeight: tv(220) },
   failedItem: { paddingVertical: tv(4) },
 });
 

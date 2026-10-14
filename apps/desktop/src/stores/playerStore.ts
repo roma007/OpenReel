@@ -71,7 +71,9 @@ export function buildPipPayload(
   session: NonNullable<ReturnType<typeof usePlayerStore.getState>['session']>,
   currentTime: number,
   anim?: PipAnim,
+  videoMeta?: { videoWidth?: number; videoHeight?: number; videoRatio?: number },
 ): Record<string, unknown> {
+  const r = videoMeta?.videoRatio;
   return {
     episodeId: session.episodeId,
     title: session.media?.title ?? '',
@@ -85,6 +87,9 @@ export function buildPipPayload(
     outroThresholdMinutes: session.outroThresholdMinutes,
     showNextEpisodeOverlay: session.showNextEpisodeOverlay,
     ...(anim ? { anim } : {}),
+    ...(videoMeta?.videoWidth !== undefined ? { videoWidth: videoMeta.videoWidth } : {}),
+    ...(videoMeta?.videoHeight !== undefined ? { videoHeight: videoMeta.videoHeight } : {}),
+    ...(r !== undefined && Number.isFinite(r) && r > 0 ? { videoRatio: r } : {}),
   };
 }
 

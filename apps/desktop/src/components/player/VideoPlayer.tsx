@@ -82,6 +82,7 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   onSourceChange?: (source: PlaySource) => void;
   onVolumeChange?: (volume: number, muted: boolean) => void;
+  onLoadedMetadata?: () => void;
 }
 
 export function VideoPlayer({
@@ -100,6 +101,7 @@ export function VideoPlayer({
   onEnded,
   onSourceChange,
   onVolumeChange,
+  onLoadedMetadata,
 }: VideoPlayerProps) {
   const playerContainerRef = useRef<HTMLDivElement>(null);
 
@@ -554,6 +556,7 @@ export function VideoPlayer({
         keyShortcuts={KEY_SHORTCUTS}
         className="w-full h-full"
         onProviderChange={handleProviderChange}
+        onLoadedMetadata={onLoadedMetadata}
         onVolumeChange={(event) => {
           onVolumeChangeRef.current?.(event.volume, event.muted);
         }}
@@ -622,7 +625,7 @@ export function VideoPlayer({
         }}
         onEnded={() => onEndedRef.current?.()}
       >
-        <MediaProvider />
+        <MediaProvider onLoadedMetadata={onLoadedMetadata} />
         <DefaultVideoLayout
           icons={defaultLayoutIcons}
           colorScheme="dark"

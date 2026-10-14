@@ -323,7 +323,7 @@ export function HomeScreen() {
 
   const cardHeaderStyle = [
     styles.card,
-    { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border },
+    { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) },
   ];
   const cardTitleStyle = [styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }];
   const emptyCardTextStyle = [styles.emptyCardText, { color: colors.mutedForeground, fontSize: scale(16) }];
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
   status: { paddingVertical: tv(40), textAlign: 'center' },
   card: {
     borderRadius: tv(12),
-    borderWidth: 1,
+    // 区块大卡外框去边框：与移动端 usageCard（无边框）保持一致
     padding: tv(20),
     marginBottom: tv(16),
   },

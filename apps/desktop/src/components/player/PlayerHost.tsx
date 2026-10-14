@@ -26,6 +26,23 @@ interface PipGeometry {
   h: number;
 }
 
+function computeVideoRatio(vw?: number, vh?: number): number | undefined {
+  if (typeof vw === 'number' && typeof vh === 'number' && Number.isFinite(vw) && Number.isFinite(vh) && vw > 0 && vh > 0) {
+    return vw / vh;
+  }
+  return undefined;
+}
+
+function getVideoMetaFromElement(video: HTMLVideoElement | null | undefined): { videoWidth?: number; videoHeight?: number; videoRatio?: number } {
+  if (!video) return {};
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (vw > 0 && vh > 0) {
+    return { videoWidth: vw, videoHeight: vh, videoRatio: vw / vh };
+  }
+  return {};
+}
+
 function readPipGeometry(): PipGeometry {
   let geo: PipGeometry = { w: 400, h: Math.round((400 * 9) / 16) + 36 };
   try {
@@ -80,6 +97,7 @@ export function PlayerHost() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<MediaPlayerInstance>(null);
+  const videoMetaRef = useRef<{ videoWidth?: number; videoHeight?: number; videoRatio?: number }>({});
   // 事件监听 effect 内读取主窗口当前路由（渲染期同步，避免给该 effect 加会变的依赖导致重复注册）
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
@@ -97,10 +115,22 @@ export function PlayerHost() {
   const adSchedulerRef = useRef<AdFloatScheduler | null>(null);
   const lastAdShownRef = useRef<AdFloatItem | null>(null);
 
+  const getVideoMeta = useCallback(() => {
+    const v = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null | undefined;
+    const m = getVideoMetaFromElement(v);
+    if (m.videoRatio !== undefined) videoMetaRef.current = m;
+    else {
+      const cur = videoMetaRef.current;
+      if (cur.videoRatio !== undefined) m.videoRatio = cur.videoRatio;
+    }
+    return m;
+  }, []);
+
   useEffect(() => {
     adSchedulerRef.current = new AdFloatScheduler(BUILTIN_AD_FLOAT_CONFIG);
     lastAdShownRef.current = null;
     setActiveAd(null);
+    videoMetaRef.current = {};
   }, [session?.episodeId]);
 
   useEffect(() => {
@@ -417,7 +447,7 @@ export function PlayerHost() {
     } catch {}
     const freshSession = usePlayerStore.getState().session ?? session;
     const payload: Record<string, unknown> = {
-      ...buildPipPayload(freshSession, currentTime, anim),
+      ...buildPipPayload(freshSession, currentTime, anim, getVideoMeta()),
       openSeq: nextOpenSeq(),
     };
     writePipPayload(payload);
@@ -553,6 +583,11 @@ export function PlayerHost() {
             muted={muted}
             onVolumeChange={setVolume}
             onTimeUpdate={handlePlayerTimeUpdate}
+            onLoadedMetadata={() => {
+              const v = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null | undefined;
+              const m = getVideoMetaFromElement(v);
+              if (m.videoRatio !== undefined) videoMetaRef.current = m;
+            }}
             onSourceChange={handleSourceChange}
             overlays={
               <>

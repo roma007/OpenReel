@@ -17,7 +17,6 @@ const ENTRIES: Array<{ key: string; label: string; route: keyof RootStackParamLi
   { key: 'recommend', label: '推荐偏好', route: 'RecommendationSettings', desc: '推荐依据与不感兴趣内容' },
   { key: 'video', label: '视频与缓存', route: 'VideoManagement', desc: '缓存占用、清理缓存、删除影片' },
   { key: 'sources', label: '视频源管理', route: 'SourceManager', desc: '增删改查采集源' },
-  { key: 'ai', label: 'AI 导入片单', route: 'AiSourceImport', desc: '用 AI 生成片单文本导入' },
   { key: 'collectcfg', label: '采集配置', route: 'CollectConfig', desc: '采集范围与并发参数' },
   { key: 'kidlock', label: '儿童锁', route: 'KidLock', desc: '儿童模式与密码' },
   { key: 'help', label: '帮助中心', route: 'HelpCenter', desc: '常见问题与使用说明' },

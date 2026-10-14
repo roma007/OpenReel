@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenReel",
     "slug": "openreel",
-    "version": "1.0.181",
+    "version": "1.0.182",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

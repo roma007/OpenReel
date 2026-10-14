@@ -47,6 +47,9 @@ export interface PipPayload {
   showNextEpisodeOverlay: boolean;
   anim?: PipAnim;
   openSeq?: number;
+  videoWidth?: number;
+  videoHeight?: number;
+  videoRatio?: number;
 }
 
 /** 读取主窗口写入的弹出过渡帧（读后即删，避免残留）。 */
@@ -122,6 +125,17 @@ function PipRoot() {
   const [data, setData] = useState<PipPayload | null>(initialData);
   const [playSourceId, setPlaySourceId] = useState<number | null>(initialData?.playSourceId ?? null);
   const playerRef = useRef<MediaPlayerInstance>(null);
+  const [videoRatio, setVideoRatio] = useState<number>(() => {
+    const r = initialData?.videoRatio;
+    if (typeof r === 'number' && Number.isFinite(r) && r > 0) return r;
+    const vw = initialData?.videoWidth;
+    const vh = initialData?.videoHeight;
+    if (typeof vw === 'number' && typeof vh === 'number' && vw > 0 && vh > 0) return vw / vh;
+    return 16 / 9;
+  });
+  const lastAppliedRectRef = useRef<{ w: number; h: number; x: number; y: number } | null>(null);
+  const applyingCorrectionRef = useRef(false);
+  const videoRatioRef = useRef(videoRatio);
   const lastTimeEmitRef = useRef(0);
   const lastNextEmitRef = useRef<{ id: string; at: number }>({ id: '', at: 0 });
   const lastCloseEmitRef = useRef(0);
@@ -157,6 +171,10 @@ function PipRoot() {
   const skipDismissedRef = useRef(false);
   const skipEligibleRef = useRef((initialData?.currentTime ?? 0) < 2 * 60);
   const lastTimeRef = useRef(initialData?.currentTime ?? 0);
+
+  useEffect(() => {
+    videoRatioRef.current = videoRatio;
+  }, [videoRatio]);
 
   useEffect(() => {
     // 原生层给 pip 窗口套大圆角 + 贴合阴影（消除无边框窗口的矩形边界亮线）。
@@ -236,6 +254,19 @@ function PipRoot() {
       restoreRectRef.current = null;
       skipEligibleRef.current = (payload.currentTime ?? 0) < 2 * 60;
       lastTimeRef.current = payload.currentTime ?? 0;
+      const r = payload.videoRatio;
+      if (typeof r === 'number' && Number.isFinite(r) && r > 0) {
+        setVideoRatio(r);
+        videoRatioRef.current = r;
+      } else {
+        const vw = payload.videoWidth;
+        const vh = payload.videoHeight;
+        if (typeof vw === 'number' && typeof vh === 'number' && vw > 0 && vh > 0) {
+          const rr = vw / vh;
+          setVideoRatio(rr);
+          videoRatioRef.current = rr;
+        }
+      }
       const frame = readBootFrame();
       setBootFrame(frame);
       const a = payload.anim;
@@ -284,6 +315,20 @@ function PipRoot() {
     listen<PipPayload>('pip://episode', (e) => {
       setData(e.payload);
       setPlaySourceId(e.payload.playSourceId ?? null);
+      const p = e.payload;
+      const r = p.videoRatio;
+      if (typeof r === 'number' && Number.isFinite(r) && r > 0) {
+        setVideoRatio(r);
+        videoRatioRef.current = r;
+      } else {
+        const vw = p.videoWidth;
+        const vh = p.videoHeight;
+        if (typeof vw === 'number' && typeof vh === 'number' && vw > 0 && vh > 0) {
+          const rr = vw / vh;
+          setVideoRatio(rr);
+          videoRatioRef.current = rr;
+        }
+      }
     }).then((f) => {
       const prev = un;
       un = () => {
@@ -405,6 +450,75 @@ function PipRoot() {
       if (timer) clearTimeout(timer);
       un1?.();
       un2?.();
+    };
+  }, [win]);
+
+  useEffect(() => {
+    let unMoved: (() => void) | undefined;
+    let unResized: (() => void) | undefined;
+    const clampAndCorrect = async () => {
+      if (dockedRef.current || Date.now() < suppressGeoUntilRef.current) return;
+      if (applyingCorrectionRef.current) return;
+      applyingCorrectionRef.current = true;
+      try {
+        const [pos, size, sf] = await Promise.all([
+          win.outerPosition(),
+          win.innerSize(),
+          win.scaleFactor(),
+        ]);
+        const w = size.width / sf;
+        const h = size.height / sf;
+        const r = videoRatioRef.current;
+        if (r > 0) {
+          const hFromW = Math.round(w / r + HEADER_H);
+          const wFromH = Math.round((h - HEADER_H) * r);
+          let nw = w;
+          let nh = h;
+          let nx = pos.x / sf;
+          let ny = pos.y / sf;
+          const last = lastAppliedRectRef.current;
+          if (last) {
+            const dw = Math.abs(w - last.w);
+            const dh = Math.abs(h - last.h);
+            if (dw > dh && Math.abs(hFromW - h) > 1) {
+              nh = hFromW;
+              nw = w;
+            } else if (dh >= dw && Math.abs(wFromH - w) > 1) {
+              nw = wFromH;
+              nh = h;
+            }
+          } else if (Math.abs(hFromW - h) > 1) {
+            nh = hFromW;
+            nw = w;
+          } else if (Math.abs(wFromH - w) > 1) {
+            nw = wFromH;
+            nh = h;
+          }
+          if (nw !== w || nh !== h) {
+            const m = await findMonitorRect(nx + nw / 2, ny + nh / 2);
+            const cw = Math.min(nw, m.w);
+            const ch = Math.min(nh, m.h);
+            nx = Math.min(Math.max(nx, m.x), m.x + m.w - cw);
+            ny = Math.min(Math.max(ny, m.y), m.y + m.h - ch);
+            await Promise.all([
+              win.setSize(new LogicalSize(cw, ch)),
+              win.setPosition(new LogicalPosition(nx, ny)),
+            ]);
+            lastAppliedRectRef.current = { w: cw, h: ch, x: nx, y: ny };
+            return;
+          }
+        }
+        lastAppliedRectRef.current = { w, h, x: pos.x / sf, y: pos.y / sf };
+      } catch {}
+      finally {
+        applyingCorrectionRef.current = false;
+      }
+    };
+    win.onMoved(() => { void clampAndCorrect(); }).then((f) => (unMoved = f));
+    win.onResized(() => { void clampAndCorrect(); }).then((f) => (unResized = f));
+    return () => {
+      unMoved?.();
+      unResized?.();
     };
   }, [win]);
 
@@ -814,12 +928,22 @@ function PipRoot() {
       >
         <div
           className="max-h-full max-w-full"
-          style={{ width: `min(100%, calc((100vh - ${HEADER_H}px) * 16 / 9))` }}
+          style={{ width: `min(100%, calc((100vh - ${HEADER_H}px) * ${videoRatio}))` }}
         >
           <VideoPlayer
             playerRef={playerRef}
             key={`${data.episodeId}:${data.playSourceId}`}
             keyTarget="document"
+            onLoadedMetadata={() => {
+              const v = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null | undefined;
+              if (v && v.videoWidth > 0 && v.videoHeight > 0) {
+                const r = v.videoWidth / v.videoHeight;
+                if (Number.isFinite(r) && r > 0) {
+                  setVideoRatio(r);
+                  videoRatioRef.current = r;
+                }
+              }
+            }}
             onSpaceToggle={() => {
               const p = playerRef.current;
               if (p) (p.paused ? void p.play().catch(() => {}) : p.pause());

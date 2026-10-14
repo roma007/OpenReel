@@ -276,7 +276,7 @@ export function CategoryScreen() {
       {/* 与首页一致的顶部导航栏：可直达各分类 / 返回首页 */}
       <TVNavBar items={navItems} title="OpenReel TV" onSearch={() => nav.navigate('Search', {})} />
 
-      <View style={[styles.topBar, { borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX }]}>
+      <View style={[styles.topBar, { paddingHorizontal: TV_LAYOUT.paddingX }]}>
         {header}
       </View>
 
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: tv(14),
-    borderBottomWidth: 1,
+    // 分类页标题栏底边线已去除（需求：分类名下方横贯左右的线去掉）
   },
   headerRow: {
     flexDirection: 'row',
