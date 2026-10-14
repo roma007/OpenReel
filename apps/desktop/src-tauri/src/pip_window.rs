@@ -26,11 +26,13 @@ pub fn apply_pip_style(window: &tauri::WebviewWindow) -> Result<(), String> {
 
     unsafe {
         // 1) 标题栏形态：让系统把它当透明标题栏窗口（阴影贴合圆角的关键）。
+        //    注意：这里**不能**带 NSWindowStyleMask::Resizable —— pip 窗口的缩放由 JS 主导
+        //    （PipWindow 的 pointer 拖动），系统缩放必须保持关闭；带 Resizable 会让窗口
+        //    重新被系统自由拖动，于是先贴一帧不合比例的矩形、再由 JS 事后回正，拖动全程抖动。
         let style = ns_window.styleMask();
         let mask = NSWindowStyleMask::Titled
             | NSWindowStyleMask::Closable
             | NSWindowStyleMask::Miniaturizable
-            | NSWindowStyleMask::Resizable
             | NSWindowStyleMask::FullSizeContentView;
         ns_window.setStyleMask(style | mask);
         ns_window.setTitlebarAppearsTransparent(true);

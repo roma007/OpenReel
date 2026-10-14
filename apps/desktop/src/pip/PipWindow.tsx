@@ -28,6 +28,12 @@ const DRAG_THRESHOLD = 3;
 const GEO_SUPPRESS_PAD_MS = 800;
 /** 正常态最小视频区高度（px）：按比例锁比后据此推导窗口最小宽高，防止被拖成不可用的小方块 */
 const MIN_VIDEO_AREA_H = 90;
+/** JS 主导缩放的「边」命中阈值（px）：距窗口边这个距离内按下即进入缩放 */
+const RESIZE_EDGE = 6;
+/** 「角」命中阈值（px）：角区域比边区域宽，便于抓角 */
+const RESIZE_CORNER = 14;
+/** 角拖动时「主导轴」切换滞回（px）：避免斜向拖动时推导轴来回反复切换 */
+const RESIZE_AXIS_HYSTERESIS = 8;
 
 interface PipNextEpisode {
   id: string;
@@ -111,6 +117,43 @@ async function runPipAppearAnimation(
 
 type ResizeDir = 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest';
 
+/** 缩放方向对应的鼠标光标 */
+function cursorForResizeDir(dir: ResizeDir | null): string {
+  switch (dir) {
+    case 'North':
+    case 'South':
+      return 'ns-resize';
+    case 'East':
+    case 'West':
+      return 'ew-resize';
+    case 'NorthWest':
+    case 'SouthEast':
+      return 'nwse-resize';
+    case 'NorthEast':
+    case 'SouthWest':
+      return 'nesw-resize';
+    default:
+      return '';
+  }
+}
+
+/**
+ * 命中缩放方向：坐标相对窗口内容区（逻辑像素）。
+ * 靠近边（RESIZE_EDGE 内）或靠近角（RESIZE_CORNER 内，且另一轴也在角区内）即命中；都不命中返回 null。
+ */
+function hitResizeDir(px: number, py: number, w: number, h: number): ResizeDir | null {
+  const inCornerX = px <= RESIZE_CORNER || px >= w - RESIZE_CORNER;
+  const inCornerY = py <= RESIZE_CORNER || py >= h - RESIZE_CORNER;
+  const edgeY = inCornerX ? RESIZE_CORNER : RESIZE_EDGE;
+  const edgeX = inCornerY ? RESIZE_CORNER : RESIZE_EDGE;
+  const vp: 'N' | 'S' | null = py <= edgeY ? 'N' : py >= h - edgeY ? 'S' : null;
+  const hp: 'W' | 'E' | null = px <= edgeX ? 'W' : px >= w - edgeX ? 'E' : null;
+  if (vp && hp) return `${vp === 'N' ? 'North' : 'South'}${hp === 'W' ? 'West' : 'East'}` as ResizeDir;
+  if (vp) return (vp === 'N' ? 'North' : 'South') as ResizeDir;
+  if (hp) return (hp === 'W' ? 'West' : 'East') as ResizeDir;
+  return null;
+}
+
 export function PipWindow() {
   return (
     <ThemeProvider>
@@ -161,6 +204,21 @@ function PipRoot() {
     moved: boolean;
   } | null>(null);
 
+  /** JS 主导缩放（替代系统缩放）的拖动状态 */
+  const resizeDragRef = useRef<{
+    pointerId: number;
+    dir: ResizeDir;
+    /** 按下时的指针屏幕坐标（逻辑点，绝对坐标；不受窗口自身移动影响） */
+    startScreenX: number;
+    startScreenY: number;
+    /** 按下时的窗口矩形（逻辑点、全局坐标） */
+    rect: { x: number; y: number; w: number; h: number };
+    /** 上一次已应用的矩形（省掉重复 set） */
+    cur: { x: number; y: number; w: number; h: number };
+    /** 角拖动时上一次选中的主导轴 */
+    axis: 'w' | 'h';
+  } | null>(null);
+
   // 弹出过渡帧：动画期间盖住正在加载的播放器，就绪后淡出
   const [bootFrame, setBootFrame] = useState<string | null>(() => readBootFrame());
   const [frameFading, setFrameFading] = useState(false);
@@ -183,11 +241,23 @@ function PipRoot() {
   }, [videoRatio]);
 
   useEffect(() => {
-    // 原生层给 pip 窗口套大圆角 + 贴合阴影（消除无边框窗口的矩形边界亮线）。
-    invoke('style_pip_window').catch((err) => {
-      console.error('[PipWindow] style_pip_window 失败:', err);
-    });
-  }, []);
+    // 顺序不可调换：先让原生层套「圆角 + 贴合阴影」，再关掉系统缩放。
+    // 缩放完全由 JS 主导（见 onRootPointerDownCapture）：系统缩放若开着，拖动时会先把自己
+    // 「不合比例」的矩形贴上去、再由 JS 事后回正（实测每个鼠标事件两帧，全程抖动），
+    // 并与系统最小尺寸（44x44，dock 收缩态需要）互搏。
+    void (async () => {
+      try {
+        await invoke('style_pip_window');
+      } catch (err) {
+        console.error('[PipWindow] style_pip_window 失败:', err);
+      }
+      try {
+        await win.setResizable(false);
+      } catch (err) {
+        console.error('[PipWindow] setResizable 失败:', err);
+      }
+    })();
+  }, [win]);
 
   const hideBootFrame = useCallback(() => {
     if (hideFrameRef.current || !bootFrame) return;
@@ -486,8 +556,9 @@ function PipRoot() {
         do {
           if (++guard > 4) break;
           pending = false;
-          // 豁免：dock 收缩/还原动画、弹出动画期间的程序化尺寸变化
+          // 豁免：dock 收缩/还原动画、弹出动画期间、JS 主导缩放过程中的程序化尺寸变化
           if (dockedRef.current || dockBusyRef.current) continue;
+          if (resizeDragRef.current) continue;
           if (Date.now() < suppressGeoUntilRef.current) continue;
           const r = videoRatioRef.current;
           if (!(r > 0)) continue;
@@ -600,13 +671,134 @@ function PipRoot() {
     win.startDragging().catch((err) => console.error('[PipWindow] startDragging 失败:', err));
   };
 
-  const onResizePointerDown =
-    (dir: ResizeDir) => (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.stopPropagation();
-      win
-        .startResizeDragging(dir)
-        .catch((err) => console.error('[PipWindow] startResizeDragging 失败:', err));
+  // ── JS 主导缩放（mac / win 通用）──
+  // 语义：被拖边跟指针；该轴的**对边固定**；未拖的另一轴保持起始锚点；尺寸始终满足
+  // h = round(w / videoRatio) + HEADER_H（与 correctOnce 判据一致，避免互相纠正）。
+  // 做法：pointerdown 判定方向并捕获指针 → 每次 pointermove 一次算出目标矩形 →
+  // 同一 tick 内 setSize + setPosition（两个 IPC 背靠背处理，不出现「只改尺寸/只改位置」的中间帧）。
+  const onRootPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    if (dockedRef.current || dockBusyRef.current) return;
+    if (document.fullscreenElement) return;
+    if (Date.now() < suppressGeoUntilRef.current) return;
+    if (resizeDragRef.current) return;
+    if (!(videoRatioRef.current > 0)) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dir = hitResizeDir(e.clientX, e.clientY, w, h);
+    if (!dir) return;
+    // 命中缩放区：拦住事件，避免触发标题栏拖动 / 视频控制条。
+    e.preventDefault();
+    e.stopPropagation();
+    // screenX/screenY 与 clientX/clientY 之差 = 窗口内容区在屏幕上的原点（逻辑点）
+    const rect = {
+      x: Math.round(e.screenX - e.clientX),
+      y: Math.round(e.screenY - e.clientY),
+      w,
+      h,
     };
+    resizeDragRef.current = {
+      pointerId: e.pointerId,
+      dir,
+      startScreenX: e.screenX,
+      startScreenY: e.screenY,
+      rect,
+      cur: { ...rect },
+      axis: 'w',
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const applyResizeDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = resizeDragRef.current;
+    if (!d) return;
+    const r = videoRatioRef.current;
+    if (!(r > 0)) return;
+    // 最小尺寸：以宽度为基准推导高度，保证 h = round(w / r) + HEADER_H 恒成立
+    const minW = Math.round(MIN_VIDEO_AREA_H * r);
+    const minH = Math.round(minW / r) + HEADER_H;
+    const canon = (w: number) => {
+      const nw = Math.max(Math.round(w), minW);
+      return { w: nw, h: Math.max(Math.round(nw / r) + HEADER_H, minH) };
+    };
+    const { rect, dir } = d;
+    const dx = e.screenX - d.startScreenX;
+    const dy = e.screenY - d.startScreenY;
+    const east = dir.includes('East');
+    const west = dir.includes('West');
+    const north = dir.includes('North');
+    const south = dir.includes('South');
+    // 被拖边按指针算出的候选尺寸（未拖轴保持起始值）
+    const wCand = east ? rect.w + dx : west ? rect.w - dx : rect.w;
+    const hCand = south ? rect.h + dy : north ? rect.h - dy : rect.h;
+    let w: number;
+    let h: number;
+    let axis: 'w' | 'h' = 'w';
+    if ((east || west) && (north || south)) {
+      // 角拖动：两种候选（按宽规范化 / 按高规范化），取「被拖边更贴合指针」的那个；
+      // 相差不超过滞回值就沿用上一次的主轴，避免斜向拖动时来回切换。
+      const byW = canon(wCand);
+      const byH = canon((Math.max(Math.round(hCand), minH) - HEADER_H) * r);
+      const missW = Math.abs(hCand - byW.h);
+      const missH = Math.abs(wCand - byH.w);
+      if (missW < missH - RESIZE_AXIS_HYSTERESIS) axis = 'w';
+      else if (missH < missW - RESIZE_AXIS_HYSTERESIS) axis = 'h';
+      else axis = d.axis;
+      const pick = axis === 'w' ? byW : byH;
+      w = pick.w;
+      h = pick.h;
+    } else if (east || west) {
+      const pick = canon(wCand);
+      w = pick.w;
+      h = pick.h;
+    } else {
+      const pick = canon((Math.max(Math.round(hCand), minH) - HEADER_H) * r);
+      w = pick.w;
+      h = pick.h;
+      axis = 'h';
+    }
+    d.axis = axis;
+    // 被拖轴的对边固定；未拖轴锚在起始位置（与原生的贴边语义一致）
+    const x = west ? rect.x + rect.w - w : rect.x;
+    const y = north ? rect.y + rect.h - h : rect.y;
+    if (w === d.cur.w && h === d.cur.h && x === d.cur.x && y === d.cur.y) return;
+    d.cur = { x, y, w, h };
+    void win.setSize(new LogicalSize(w, h));
+    void win.setPosition(new LogicalPosition(x, y));
+  };
+
+  const onRootPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeDragRef.current) {
+      if (resizeDragRef.current.pointerId !== e.pointerId) return;
+      applyResizeDrag(e);
+      return;
+    }
+    // 未拖动时只负责光标反馈（缩放已无系统边框，光标全靠这里提示）
+    if (dockedRef.current || dockBusyRef.current || document.fullscreenElement) return;
+    const dir = hitResizeDir(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
+    const cursor = cursorForResizeDir(dir);
+    const el = e.currentTarget;
+    if (el.style.cursor !== cursor) el.style.cursor = cursor;
+  };
+
+  const finishResizeDrag = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const d = resizeDragRef.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    resizeDragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    if (!cancelled && d.cur.w > 0) lastAppliedRectRef.current = { w: d.cur.w, h: d.cur.h };
+  };
+
+  const onRootPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => finishResizeDrag(e, false);
+  const onRootPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => finishResizeDrag(e, true);
+  const onRootPointerLeave = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeDragRef.current) return;
+    if (e.currentTarget.style.cursor) e.currentTarget.style.cursor = '';
+  };
 
   const handleSourceSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const src = data?.sources.find((s) => s.id === Number(e.target.value));
@@ -840,7 +1032,14 @@ function PipRoot() {
     'flex items-center gap-1 bg-black/90 text-white/90 text-xs px-2 cursor-move touch-none';
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-black select-none">
+    <div
+      className="relative flex h-screen w-screen flex-col overflow-hidden bg-black select-none"
+      onPointerDownCapture={onRootPointerDownCapture}
+      onPointerMove={onRootPointerMove}
+      onPointerUp={onRootPointerUp}
+      onPointerCancel={onRootPointerCancel}
+      onPointerLeave={onRootPointerLeave}
+    >
       {bootFrame && (
         <img
           src={bootFrame}
@@ -991,25 +1190,9 @@ function PipRoot() {
         </div>
       </div>
 
-      {(
-        [
-          ['North', 'top-0 left-1 right-1 h-1 cursor-ns-resize'],
-          ['South', 'bottom-0 left-1 right-1 h-1 cursor-ns-resize'],
-          ['West', 'left-0 top-1 bottom-1 w-1 cursor-ew-resize'],
-          ['East', 'right-0 top-1 bottom-1 w-1 cursor-ew-resize'],
-          ['NorthWest', 'top-0 left-0 size-3 cursor-nwse-resize'],
-          ['NorthEast', 'top-0 right-0 size-3 cursor-nesw-resize'],
-          ['SouthWest', 'bottom-0 left-0 size-3 cursor-nesw-resize'],
-          ['SouthEast', 'bottom-0 right-0 size-3 cursor-nwse-resize'],
-        ] as const
-      ).map(([dir, cls]) => (
-        <div
-          key={dir}
-          className={`absolute z-30 touch-none ${cls} ${pipDocked ? 'hidden' : ''}`}
-          style={{ position: 'fixed' }}
-          onPointerDown={onResizePointerDown(dir)}
-        />
-      ))}
+      {/* 缩放手柄已取消：缩放命中判定与光标反馈统一由根容器的 pointer 事件负责
+          （见 onRootPointerDownCapture / onRootPointerMove），不再用覆盖层 div，
+          避免底部命中区遮挡 vidstack 控制条。 */}
     </div>
   );
 }

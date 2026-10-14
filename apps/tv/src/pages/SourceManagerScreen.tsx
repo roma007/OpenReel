@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba, radius } from '@openreel/expo-ui';
+import { Pencil, Ban, Trash2, Database } from 'lucide-react-native';
 import type { VideoSource, CollectTask } from '@openreel/core';
 
 import { useAppStore, getProvider } from '../useAppStore';
@@ -290,25 +291,41 @@ export function SourceManagerScreen() {
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.actionRow}>
-          <TVButton id="src-add" label="手动添加" variant="primary" onPress={openAdd} testID="tv-src-add" />
-          <TVButton
-            id="src-ai"
-            label="AI 导入"
-            variant="primary"
-            onPress={() => nav.navigate('AiSourceImport')}
-            testID="tv-src-ai"
-          />
-          <TVButton
-            id="src-tasks"
-            label="任务列表"
-            onPress={() => nav.navigate('TaskList')}
-            testID="tv-src-tasks"
-          />
+        {/* 顶部操作行：外观照搬移动端 actionCard（卡片底 + 圆角 + 内边距 + 按钮等宽等距），
+            但按钮文案与入口保持 TV 现有三个（手动添加 / AI 导入 / 任务列表） */}
+        <View style={[styles.actionCard, { backgroundColor: hexToRgba(colors.card, cardOpacity / 100) }]}>
+          <View style={styles.actionRow}>
+            <TVButton
+              id="src-add"
+              label="手动添加"
+              variant="primary"
+              labelFontSize={scale(14)}
+              style={styles.actionBtn}
+              onPress={openAdd}
+              testID="tv-src-add"
+            />
+            <TVButton
+              id="src-ai"
+              label="AI 导入"
+              variant="primary"
+              labelFontSize={scale(14)}
+              style={styles.actionBtn}
+              onPress={() => nav.navigate('AiSourceImport')}
+              testID="tv-src-ai"
+            />
+            <TVButton
+              id="src-tasks"
+              label="任务列表"
+              labelFontSize={scale(14)}
+              style={styles.actionBtn}
+              onPress={() => nav.navigate('TaskList')}
+              testID="tv-src-tasks"
+            />
+          </View>
         </View>
 
         {formMode ? (
-          <View style={[styles.card, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100), borderColor: colors.borderHighlight }]}>
+          <View style={[styles.formCard, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100), borderColor: colors.borderHighlight }]}>
             <Text style={[styles.formTitle, { color: colors.foreground, fontSize: scale(19) }]}>
               {formMode === 'add' ? '添加视频源' : '编辑视频源'}
             </Text>
@@ -341,7 +358,7 @@ export function SourceManagerScreen() {
               onChangeText={setFormBaseUrl}
               testID="tv-src-form-url"
             />
-            <View style={styles.actionRow}>
+            <View style={styles.formActionRow}>
               <TVButton id="src-form-cancel" label="取消" onPress={closeForm} testID="tv-src-form-cancel" />
               <TVButton
                 id="src-form-submit"
@@ -360,114 +377,146 @@ export function SourceManagerScreen() {
           </Text>
         ) : null}
 
-        {videoSources.map((source: VideoSource) => {
-          const health = healthLabel(source);
-          const collecting = isSourceCollecting(source.code);
-          const progress = getProgress(source.code);
-          const checkingNow = checking === source.code;
-          const busy = !!submitting[source.code];
+        {/* 源卡片列表：结构与尺寸照搬移动端 sourceCard / list（gap 12） */}
+        <View style={styles.list}>
+          {videoSources.map((source: VideoSource) => {
+            const health = healthLabel(source);
+            const collecting = isSourceCollecting(source.code);
+            const progress = getProgress(source.code);
+            const checkingNow = checking === source.code;
+            const busy = !!submitting[source.code];
+            const busyType = submitting[source.code];
 
-          return (
-            <View
-              key={source.id}
-              style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
-            >
-              <View style={styles.headerRow}>
-                <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '700', flex: 1 }} numberOfLines={1}>
-                  {source.name}
-                </Text>
-                <View style={[styles.badge, { borderColor: health.color }]}>
-                  <Text style={{ color: health.color, fontSize: scale(14), fontWeight: '600' }}>{health.label}</Text>
-                </View>
-              </View>
-
-              <Text style={{ color: colors.mutedForeground, fontSize: scale(13), marginTop: tv(4) }} numberOfLines={1}>
-                {source.code} · {source.baseUrl}
-              </Text>
-
-              <View style={styles.actionRow}>
-                <TVButton
-                  id={`src-check:${source.id}`}
-                  label={checkingNow ? '检测中…' : '检测'}
-                  disabled={checkingNow}
-                  onPress={() => doCheck(source)}
-                  testID={`tv-src-check-${source.id}`}
-                />
-                <TVButton
-                  id={`src-inc:${source.id}`}
-                  label={busy && submitting[source.code] === 'increment' ? '建任务中…' : '增量采集'}
-                  disabled={collecting || busy}
-                  onPress={() => doCollect(source, 'increment')}
-                  testID={`tv-src-inc-${source.id}`}
-                />
-                <TVButton
-                  id={`src-full:${source.id}`}
-                  label={busy && submitting[source.code] === 'full' ? '建任务中…' : '全量采集'}
-                  disabled={collecting || busy}
-                  onPress={() => doCollect(source, 'full')}
-                  testID={`tv-src-full-${source.id}`}
-                />
-              </View>
-
-              <View style={styles.actionRow}>
-                <TVButton
-                  id={`src-edit:${source.id}`}
-                  label="编辑"
-                  onPress={() => openEdit(source)}
-                  testID={`tv-src-edit-${source.id}`}
-                />
-                <TVButton
-                  id={`src-toggle:${source.id}`}
-                  label={source.isEnabled ? '禁用' : '启用'}
-                  onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
-                  testID={`tv-src-toggle-${source.id}`}
-                />
-                <TVButton
-                  id={`src-del:${source.id}`}
-                  label={pendingDelete === `src:${source.id}` ? '确认删源？' : '删源'}
-                  variant="danger"
-                  onPress={() => pressDeleteSource(source)}
-                  testID={`tv-src-del-${source.id}`}
-                />
-                <TVButton
-                  id={`src-delp:${source.id}`}
-                  label={pendingDelete === `data:${source.id}` ? '确认删视频？' : '删视频'}
-                  variant="danger"
-                  onPress={() => pressDeletePlaySources(source)}
-                  testID={`tv-src-delp-${source.id}`}
-                />
-              </View>
-
-              <View style={styles.timeRow}>
-                <Text style={{ color: colors.mutedForeground, fontSize: scale(13) }}>
-                  检测：{formatCheckTime(source.lastCheckAt)}
-                </Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: scale(13) }}>
-                  增量：{formatCheckTime(source.lastIncrementalCollectedAt)}
-                </Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: scale(13) }}>
-                  全量：{formatCheckTime(source.lastCollectedAt)}
-                </Text>
-              </View>
-
-              {collecting || busy ? (
-                <View style={{ marginTop: tv(10) }}>
-                  <View style={[styles.progressBar, { backgroundColor: colors.trackBg }]}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { width: `${busy ? 0 : Math.min(100, progress)}%`, backgroundColor: colors.foreground },
-                      ]}
-                    />
-                  </View>
-                  <Text style={{ color: colors.mutedForeground, fontSize: scale(14), marginTop: tv(4) }}>
-                    {busy ? '正在建立任务…' : `采集中… ${progress}%`}
+            return (
+              <View
+                key={source.id}
+                style={[styles.sourceCard, { backgroundColor: hexToRgba(colors.card, cardOpacity / 100) }]}
+              >
+                <View style={styles.sourceHeader}>
+                  <Text
+                    style={{ color: colors.foreground, fontSize: scale(16), fontWeight: '600', flexShrink: 1 }}
+                    numberOfLines={1}
+                  >
+                    {source.name}
+                  </Text>
+                  <Text
+                    style={[styles.healthBadge, { color: health.color, borderColor: health.color, fontSize: scale(10) }]}
+                    numberOfLines={1}
+                  >
+                    {health.label}
                   </Text>
                 </View>
-              ) : null}
-            </View>
-          );
-        })}
+
+                <View style={styles.sourceControls}>
+                  <TVButton
+                    id={`src-edit:${source.id}`}
+                    label="编辑"
+                    variant="ghost"
+                    leftIcon={<Pencil size={14} color={colors.textSecondary} />}
+                    labelColor={colors.textSecondary}
+                    labelFontSize={scale(12)}
+                    style={styles.ghostBtn}
+                    onPress={() => openEdit(source)}
+                    testID={`tv-src-edit-${source.id}`}
+                  />
+                  <TVButton
+                    id={`src-toggle:${source.id}`}
+                    label={source.isEnabled ? '禁用' : '启用'}
+                    variant="ghost"
+                    leftIcon={<Ban size={14} color={colors.textSecondary} />}
+                    labelColor={colors.textSecondary}
+                    labelFontSize={scale(12)}
+                    style={styles.ghostBtn}
+                    onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
+                    testID={`tv-src-toggle-${source.id}`}
+                  />
+                  <TVButton
+                    id={`src-del:${source.id}`}
+                    label={pendingDelete === `src:${source.id}` ? '确认删源？' : '删源'}
+                    variant="ghost"
+                    leftIcon={<Trash2 size={14} color={colors.error} />}
+                    labelColor={colors.error}
+                    labelFontSize={scale(12)}
+                    style={styles.ghostBtn}
+                    onPress={() => pressDeleteSource(source)}
+                    testID={`tv-src-del-${source.id}`}
+                  />
+                  <TVButton
+                    id={`src-delp:${source.id}`}
+                    label={pendingDelete === `data:${source.id}` ? '确认删视频？' : '删视频'}
+                    variant="ghost"
+                    leftIcon={<Database size={14} color={colors.textSecondary} />}
+                    labelColor={colors.textSecondary}
+                    labelFontSize={scale(12)}
+                    style={styles.ghostBtn}
+                    onPress={() => pressDeletePlaySources(source)}
+                    testID={`tv-src-delp-${source.id}`}
+                  />
+                </View>
+
+                <View style={styles.sourceActions}>
+                  <TVButton
+                    id={`src-check:${source.id}`}
+                    label={checkingNow ? '检测中…' : '检测'}
+                    sublabel={source.lastCheckAt ? formatCheckTime(source.lastCheckAt) : '从未'}
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    sublabelFontSize={scale(11)}
+                    sublabelColor={colors.disabledForeground}
+                    disabled={checkingNow}
+                    style={styles.sourceActionBtn}
+                    onPress={() => doCheck(source)}
+                    testID={`tv-src-check-${source.id}`}
+                  />
+                  <TVButton
+                    id={`src-inc:${source.id}`}
+                    label={busyType === 'increment' ? '建任务中…' : '增量采集'}
+                    sublabel={
+                      source.lastIncrementalCollectedAt ? formatCheckTime(source.lastIncrementalCollectedAt) : '从未'
+                    }
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    sublabelFontSize={scale(11)}
+                    sublabelColor={colors.disabledForeground}
+                    disabled={collecting || busy}
+                    style={styles.sourceActionBtn}
+                    onPress={() => doCollect(source, 'increment')}
+                    testID={`tv-src-inc-${source.id}`}
+                  />
+                  <TVButton
+                    id={`src-full:${source.id}`}
+                    label={busyType === 'full' ? '建任务中…' : '全量采集'}
+                    sublabel={source.lastCollectedAt ? formatCheckTime(source.lastCollectedAt) : '从未'}
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    sublabelFontSize={scale(11)}
+                    sublabelColor={colors.disabledForeground}
+                    disabled={collecting || busy}
+                    style={styles.sourceActionBtn}
+                    onPress={() => doCollect(source, 'full')}
+                    testID={`tv-src-full-${source.id}`}
+                  />
+                </View>
+
+                {collecting || busy ? (
+                  <View style={styles.progressContainer}>
+                    <View style={[styles.progressBar, { backgroundColor: colors.trackBg }]}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${busy ? 0 : Math.min(100, progress)}%`, backgroundColor: colors.mutedForeground },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.progressText, { color: colors.mutedForeground, fontSize: scale(11) }]}>
+                      {busy ? '正在建立任务…' : `采集中… ${progress}%`}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
 
         {message ? (
           <TVFocusable id="src-msg" onPress={() => setMessage(null)} style={styles.msgBox} testID="tv-src-msg">
@@ -486,14 +535,49 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
   content: { paddingTop: tv(16), paddingBottom: tv(44) },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: tv(10) },
-  card: { padding: tv(18), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(14) },
+
+  /* 顶部操作行（外观照搬移动端 actionCard / actionRow / actionBtn 的数值） */
+  actionCard: { borderRadius: radius.lg, padding: 12, marginTop: 12, marginBottom: 12 },
+  actionRow: { flexDirection: 'row', gap: 8 },
+  actionBtn: { flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md, marginRight: 0 },
+
+  /* 页内表单卡片（保持 TV 原有外观，不在本次照搬范围） */
+  formCard: { padding: tv(18), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(14) },
   formTitle: { fontWeight: '700', marginBottom: tv(12) },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  badge: { borderWidth: 1, borderRadius: tv(6), paddingHorizontal: tv(8), paddingVertical: tv(2) },
-  timeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: tv(10) },
-  progressBar: { height: tv(6), borderRadius: tv(3), overflow: 'hidden' },
-  progressFill: { height: '100%' },
+  formActionRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: tv(10) },
+
+  /* 源卡片：数值照搬移动端 sourceCard / list */
+  list: { gap: 12 },
+  sourceCard: { borderRadius: radius.lg, padding: 12 },
+  sourceHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  healthBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginLeft: 8,
+  },
+  sourceControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 8,
+  },
+  ghostBtn: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: radius.sm, marginRight: 0 },
+  sourceActions: { flexDirection: 'row', gap: 6 },
+  sourceActionBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    minHeight: 40,
+    marginRight: 0,
+  },
+  progressContainer: { marginTop: 10 },
+  progressBar: { height: 4, borderRadius: radius.progress, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: radius.progress },
+  progressText: { marginTop: 4, textAlign: 'center' },
+
   msgBox: { marginTop: tv(10), padding: tv(14), borderRadius: tv(8) },
 });
 

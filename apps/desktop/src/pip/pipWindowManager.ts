@@ -28,7 +28,10 @@ export function ensurePipWindow(): Promise<WebviewWindow> {
       decorations: false,
       transparent: true,
       alwaysOnTop: true,
-      resizable: true,
+      // 缩放由 JS 主导（PipWindow 的 pointer 拖动）：必须关掉系统缩放，
+      // 否则系统自由拖动会先贴一帧不合比例的矩形、再由 JS 事后回正，拖动全程抖动，
+      // 并与系统最小尺寸（PIP_MIN_SIZE=44，dock 收缩态需要）互搏。
+      resizable: false,
       maximizable: false,
       minimizable: false,
       skipTaskbar: true,

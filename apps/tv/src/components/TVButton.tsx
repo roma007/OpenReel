@@ -15,6 +15,24 @@ export interface TVButtonProps {
   focused?: boolean;
   style?: any;
   testID?: string;
+  /**
+   * 以下均为可选扩展（默认不传时与旧行为完全一致），用于让某些页面的按钮
+   * 与移动端 `components/ui/Button` 完全对齐（如视频源管理页的源卡片）。
+   */
+  /** 左侧图标（如 lucide 图标节点） */
+  leftIcon?: React.ReactNode;
+  /** 第二行小字（如采集时间），居中显示在标题下方 */
+  sublabel?: string;
+  /** 覆盖标题文字颜色（默认按 variant 取色） */
+  labelColor?: string;
+  /** 覆盖第二行文字颜色（默认 mutedForeground） */
+  sublabelColor?: string;
+  /** 覆盖标题字号（默认 tv(18)） */
+  labelFontSize?: number;
+  /** 覆盖第二行字号（默认 tv(14)） */
+  sublabelFontSize?: number;
+  /** 追加到标题 Text 的样式 */
+  labelStyle?: any;
 }
 
 /**
@@ -32,6 +50,13 @@ export function TVButton({
   scaleOnFocus = false,
   style,
   testID,
+  leftIcon,
+  sublabel,
+  labelColor,
+  sublabelColor,
+  labelFontSize,
+  sublabelFontSize,
+  labelStyle,
 }: TVButtonProps) {
   const colors = useThemeColors();
 
@@ -61,9 +86,32 @@ export function TVButton({
       focusColor={variant === 'ghost' ? colors.cardAccent : undefined}
     >
       <View style={styles.inner}>
-        <Text style={[styles.text, { color: fg }]} numberOfLines={1}>
-          {label}
-        </Text>
+        {leftIcon ? <View style={styles.iconWrap}>{leftIcon}</View> : null}
+        <View style={styles.labels}>
+          <Text
+            style={[
+              styles.text,
+              { color: labelColor ?? fg },
+              labelFontSize !== undefined ? { fontSize: labelFontSize } : null,
+              labelStyle,
+            ]}
+            numberOfLines={1}
+          >
+            {label}
+          </Text>
+          {sublabel ? (
+            <Text
+              style={[
+                styles.sublabel,
+                { color: sublabelColor ?? colors.mutedForeground },
+                sublabelFontSize !== undefined ? { fontSize: sublabelFontSize } : null,
+              ]}
+              numberOfLines={1}
+            >
+              {sublabel}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </TVFocusable>
   );
@@ -77,12 +125,25 @@ const styles = StyleSheet.create({
     marginRight: tv(14),
   },
   inner: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+  },
+  iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  labels: {
+    alignItems: 'center',
   },
   text: {
     fontSize: tv(18),
     fontWeight: '600',
+  },
+  sublabel: {
+    fontSize: tv(14),
+    marginTop: 2,
   },
   focusScale: {
     transform: [{ scale: 1.06 }],
