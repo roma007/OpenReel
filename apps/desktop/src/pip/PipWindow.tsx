@@ -26,6 +26,8 @@ const DOCK_MARGIN = 24;
 const DRAG_THRESHOLD = 3;
 /** 收缩/还原动画期间 + 之后一段时间内不上报几何，防止 dock 尺寸污染主窗口记忆 */
 const GEO_SUPPRESS_PAD_MS = 800;
+/** 正常态最小视频区高度（px）：按比例锁比后据此推导窗口最小宽高，防止被拖成不可用的小方块 */
+const MIN_VIDEO_AREA_H = 90;
 
 interface PipNextEpisode {
   id: string;
@@ -133,8 +135,10 @@ function PipRoot() {
     if (typeof vw === 'number' && typeof vh === 'number' && vw > 0 && vh > 0) return vw / vh;
     return 16 / 9;
   });
-  const lastAppliedRectRef = useRef<{ w: number; h: number; x: number; y: number } | null>(null);
+  const lastAppliedRectRef = useRef<{ w: number; h: number } | null>(null);
   const applyingCorrectionRef = useRef(false);
+  /** 供 applyOpen（弹出动画结束后）主动触发一次比例回正 */
+  const correctRef = useRef<(() => void) | null>(null);
   const videoRatioRef = useRef(videoRatio);
   const lastTimeEmitRef = useRef(0);
   const lastNextEmitRef = useRef<{ id: string; at: number }>({ id: '', at: 0 });
@@ -174,6 +178,8 @@ function PipRoot() {
 
   useEffect(() => {
     videoRatioRef.current = videoRatio;
+    // 比例变化（首帧元数据到达 / 切集换片）时，把已打开的窗口回正到新比例
+    if (!dockedRef.current) correctRef.current?.();
   }, [videoRatio]);
 
   useEffect(() => {
@@ -270,11 +276,24 @@ function PipRoot() {
       const frame = readBootFrame();
       setBootFrame(frame);
       const a = payload.anim;
+      if (a) {
+        // 动画终点即本次打开的目标矩形，作为后续「主导轴」判定的基准，避免首次拖动误判
+        lastAppliedRectRef.current = { w: a.to.w, h: a.to.h };
+      }
       if (!frame && a) {
         void win.setPosition(new LogicalPosition(a.to.x, a.to.y));
         void win.setSize(new LogicalSize(a.to.w, a.to.h));
       }
       setData(payload);
+      // 弹出动画（最多 800ms 等帧 + 350ms 飞行）期间豁免比例回正与几何上报；
+      // 动画结束后补一次回正：记忆尺寸若与当前视频比例不符，此时收敛到正确比例。
+      suppressGeoUntilRef.current = Math.max(
+        suppressGeoUntilRef.current,
+        Date.now() + APPEAR_ANIM_MS + 900,
+      );
+      window.setTimeout(() => {
+        if (!dockedRef.current) correctRef.current?.();
+      }, APPEAR_ANIM_MS + 950);
       void win.show().catch(() => {});
       void win.setFocus().catch(() => {});
       window.setTimeout(() => {
@@ -454,70 +473,57 @@ function PipRoot() {
   }, [win]);
 
   useEffect(() => {
-    let unMoved: (() => void) | undefined;
     let unResized: (() => void) | undefined;
-    const clampAndCorrect = async () => {
-      if (dockedRef.current || Date.now() < suppressGeoUntilRef.current) return;
-      if (applyingCorrectionRef.current) return;
+    let pending = false;
+    const correctOnce = async () => {
+      if (applyingCorrectionRef.current) {
+        pending = true;
+        return;
+      }
       applyingCorrectionRef.current = true;
       try {
-        const [pos, size, sf] = await Promise.all([
-          win.outerPosition(),
-          win.innerSize(),
-          win.scaleFactor(),
-        ]);
-        const w = size.width / sf;
-        const h = size.height / sf;
-        const r = videoRatioRef.current;
-        if (r > 0) {
-          const hFromW = Math.round(w / r + HEADER_H);
-          const wFromH = Math.round((h - HEADER_H) * r);
+        let guard = 0;
+        do {
+          if (++guard > 4) break;
+          pending = false;
+          // 豁免：dock 收缩/还原动画、弹出动画期间的程序化尺寸变化
+          if (dockedRef.current || dockBusyRef.current) continue;
+          if (Date.now() < suppressGeoUntilRef.current) continue;
+          const r = videoRatioRef.current;
+          if (!(r > 0)) continue;
+          const [size, sf] = await Promise.all([win.innerSize(), win.scaleFactor()]);
+          const w = size.width / sf;
+          const h = size.height / sf;
+          const minW = Math.round(MIN_VIDEO_AREA_H * r);
+          const minH = MIN_VIDEO_AREA_H + HEADER_H;
+          const last = lastAppliedRectRef.current;
+          const dw = last ? Math.abs(w - last.w) : Infinity;
+          const dh = last ? Math.abs(h - last.h) : 0;
           let nw = w;
           let nh = h;
-          let nx = pos.x / sf;
-          let ny = pos.y / sf;
-          const last = lastAppliedRectRef.current;
-          if (last) {
-            const dw = Math.abs(w - last.w);
-            const dh = Math.abs(h - last.h);
-            if (dw > dh && Math.abs(hFromW - h) > 1) {
-              nh = hFromW;
-              nw = w;
-            } else if (dh >= dw && Math.abs(wFromH - w) > 1) {
-              nw = wFromH;
-              nh = h;
-            }
-          } else if (Math.abs(hFromW - h) > 1) {
-            nh = hFromW;
-            nw = w;
-          } else if (Math.abs(wFromH - w) > 1) {
-            nw = wFromH;
-            nh = h;
+          // 以「变化更多的那一轴」为主导轴，推导另一轴，保证被拖的那条边跟手
+          if (dw >= dh) nh = Math.round(Math.max(w, minW) / r + HEADER_H);
+          else nw = Math.round(Math.max(h - HEADER_H, MIN_VIDEO_AREA_H) * r);
+          if (nw < minW || nh < minH) {
+            nw = Math.max(nw, minW);
+            nh = Math.max(nh, minH);
           }
-          if (nw !== w || nh !== h) {
-            const m = await findMonitorRect(nx + nw / 2, ny + nh / 2);
-            const cw = Math.min(nw, m.w);
-            const ch = Math.min(nh, m.h);
-            nx = Math.min(Math.max(nx, m.x), m.x + m.w - cw);
-            ny = Math.min(Math.max(ny, m.y), m.y + m.h - ch);
-            await Promise.all([
-              win.setSize(new LogicalSize(cw, ch)),
-              win.setPosition(new LogicalPosition(nx, ny)),
-            ]);
-            lastAppliedRectRef.current = { w: cw, h: ch, x: nx, y: ny };
-            return;
+          if (Math.abs(nw - w) > 1 || Math.abs(nh - h) > 1) {
+            await win.setSize(new LogicalSize(nw, nh));
           }
-        }
-        lastAppliedRectRef.current = { w, h, x: pos.x / sf, y: pos.y / sf };
+          lastAppliedRectRef.current = { w: nw, h: nh };
+        } while (pending);
       } catch {}
-      finally {
-        applyingCorrectionRef.current = false;
-      }
+      applyingCorrectionRef.current = false;
     };
-    win.onMoved(() => { void clampAndCorrect(); }).then((f) => (unMoved = f));
-    win.onResized(() => { void clampAndCorrect(); }).then((f) => (unResized = f));
+    win
+      .onResized(() => {
+        void correctOnce();
+      })
+      .then((f) => (unResized = f));
+    correctRef.current = () => void correctOnce();
     return () => {
-      unMoved?.();
+      correctRef.current = null;
       unResized?.();
     };
   }, [win]);
@@ -934,6 +940,7 @@ function PipRoot() {
             playerRef={playerRef}
             key={`${data.episodeId}:${data.playSourceId}`}
             keyTarget="document"
+            aspectRatio={videoRatio}
             onLoadedMetadata={() => {
               const v = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null | undefined;
               if (v && v.videoWidth > 0 && v.videoHeight > 0) {

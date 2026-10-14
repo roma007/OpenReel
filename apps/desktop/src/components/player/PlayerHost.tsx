@@ -18,6 +18,8 @@ import { getProvider } from '../../init';
 
 const PIP_GEO_KEY = 'movie_app_pip_geo';
 const PIP_BOOT_FRAME_KEY = 'movie-app-pip-boot-frame';
+/** PIP 窗口顶部标题栏高度（px）；窗口高 = 视频区高 + 该值，比例锁定以此为准 */
+const PIP_HEADER_H = 36;
 
 interface PipGeometry {
   x?: number;
@@ -391,6 +393,19 @@ export function PlayerHost() {
     const geo = readPipGeometry();
     if (maxWidth) geo.w = Math.min(geo.w, maxWidth);
     if (maxHeight) geo.h = Math.min(geo.h, maxHeight);
+
+    // 按当前视频真实宽高比回正记忆尺寸（窗口高 = 视频区高 + 固定标题栏）：
+    // 记忆里的尺寸可能来自上一个不同比例的片子，直接复用会出现黑边。
+    const videoMeta = getVideoMeta();
+    const videoRatio = computeVideoRatio(videoMeta.videoWidth, videoMeta.videoHeight);
+    if (videoRatio) {
+      let h = Math.round(geo.w / videoRatio) + PIP_HEADER_H;
+      if (maxHeight && h > maxHeight) {
+        h = maxHeight;
+        geo.w = Math.round((maxHeight - PIP_HEADER_H) * videoRatio);
+      }
+      geo.h = h;
+    }
 
     // 播放器当前屏幕矩形（逻辑点、左上原点）= 动画起点
     let from: { x: number; y: number; w: number; h: number } | undefined;

@@ -83,6 +83,8 @@ interface VideoPlayerProps {
   onSourceChange?: (source: PlaySource) => void;
   onVolumeChange?: (volume: number, muted: boolean) => void;
   onLoadedMetadata?: () => void;
+  /** 视频区域宽高比（width/height）。传入则按此比例撑满容器（PIP 锁比用），不传沿用固定 16:9。 */
+  aspectRatio?: number;
 }
 
 export function VideoPlayer({
@@ -102,6 +104,7 @@ export function VideoPlayer({
   onSourceChange,
   onVolumeChange,
   onLoadedMetadata,
+  aspectRatio,
 }: VideoPlayerProps) {
   const playerContainerRef = useRef<HTMLDivElement>(null);
 
@@ -543,8 +546,14 @@ export function VideoPlayer({
   const currentSource = activeSources[currentIndex];
   const src = currentSource?.url ?? '';
 
+  const lockedRatio = typeof aspectRatio === 'number' && Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : null;
+
   return (
-    <div ref={playerContainerRef} className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+    <div
+      ref={playerContainerRef}
+      className={`relative w-full bg-black rounded-lg overflow-hidden ${lockedRatio ? '' : 'aspect-video'}`}
+      style={lockedRatio ? { aspectRatio: lockedRatio } : undefined}
+    >
       <MediaPlayer
         key={`${currentIndex}:${retryNonce}`}
         ref={playerRef}
