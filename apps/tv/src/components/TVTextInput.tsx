@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Text, View, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { TVKeypad, type TVKeypadMode } from './TVKeypad';
 import { tv } from '../theme/tokens';
@@ -49,6 +49,8 @@ export function TVTextInput({
 }: TVTextInputProps) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 输入框底遵循「卡片透明度」，与移动端 ui/Input 一致（input * cardOpacity * 0.9）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -79,7 +81,7 @@ export function TVTextInput({
         onPress={openKeypad}
         style={[
           styles.field,
-          { backgroundColor: colors.input, borderColor: open ? colors.borderHighlight : colors.border },
+          { backgroundColor: hexToRgba(colors.input, cardOpacity / 100 * 0.9), borderColor: open ? colors.borderHighlight : colors.border },
           style,
         ]}
         testID={testID ?? `tv-input-${id}`}

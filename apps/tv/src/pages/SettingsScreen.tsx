@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
@@ -12,7 +12,7 @@ import type { RootStackParamList } from '../navigation/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const ENTRIES: Array<{ key: string; label: string; route: keyof RootStackParamList; desc: string }> = [
-  { key: 'appearance', label: '外观与主题', route: 'AppearanceSettings', desc: '配色模式、字号、背景图设置、卡片透明度' },
+  { key: 'appearance', label: '外观设置', route: 'AppearanceSettings', desc: '颜色模式、字体大小、背景图设置、透明度' },
   { key: 'usage', label: '使用偏好', route: 'UsagePreferences', desc: '播放行为与默认设置' },
   { key: 'recommend', label: '推荐偏好', route: 'RecommendationSettings', desc: '推荐依据与不感兴趣内容' },
   { key: 'video', label: '视频与缓存', route: 'VideoManagement', desc: '缓存占用、清理缓存、删除影片' },
@@ -30,6 +30,8 @@ export function SettingsScreen() {
   const nav = useNavigation<Nav>();
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 设置列表行底遵循「卡片透明度」，与移动端 Sidebar 菜单项一致（hexToRgba(colors.card, cardOpacity/100)）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   useEffect(() => {
     const t = setTimeout(() => focusRegistry.requestInitialFocus('settings-back'), 120);
@@ -60,7 +62,7 @@ export function SettingsScreen() {
             key={e.key}
             id={`settings:${e.key}`}
             onPress={() => nav.navigate(e.route as any)}
-            style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            style={[styles.row, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
             testID={`tv-settings-${e.key}`}
           >
             <View style={styles.rowMain}>

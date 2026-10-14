@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { useAppStore } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -26,6 +26,8 @@ import { tv } from '../theme/tokens';
  */
 export function VideoManagementScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const deleteAllMedia = useAppStore((s) => s.deleteAllMedia);
@@ -110,7 +112,7 @@ export function VideoManagementScreen() {
           style={[
             styles.infoBox,
             {
-              backgroundColor: colors.surface,
+              backgroundColor: hexToRgba(colors.surface, cardOpacity / 100),
               borderColor: lowStorage ? colors.error : colors.border,
             },
           ]}
@@ -161,7 +163,7 @@ export function VideoManagementScreen() {
         >
           数据统计
         </Text>
-        <View style={[styles.infoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.infoBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={{ color: colors.textSecondary, fontSize: scale(16) }}>
             已隐藏影片：{hiddenCount} 部
           </Text>
@@ -176,7 +178,7 @@ export function VideoManagementScreen() {
         >
           删除影片数据
         </Text>
-        <View style={[styles.infoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.infoBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={{ color: colors.mutedForeground, fontSize: scale(15), marginBottom: tv(12) }}>
             删除操作不可恢复；视频源配置与采集设置不受影响
           </Text>

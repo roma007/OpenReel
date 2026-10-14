@@ -9,7 +9,7 @@ import {
   View,
   StyleSheet,
 } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
 import { tv } from '../theme/tokens';
@@ -69,6 +69,8 @@ export function TVKeypad({
 }: TVKeypadProps) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 数字回显框底遵循「卡片透明度」，与移动端 ui/Input 一致（数字键本身移动端无对应物，保持不动）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const inputRef = useRef<TextInput>(null);
 
   const [upper, setUpper] = useState(false);
@@ -171,7 +173,7 @@ export function TVKeypad({
         ) : null}
 
         {/* 值显示区：既是系统 IME 的挂载点，也是粘贴结果的回显 */}
-        <View style={[styles.valueBox, { backgroundColor: colors.input, borderColor: colors.border }]}>
+        <View style={[styles.valueBox, { backgroundColor: hexToRgba(colors.input, cardOpacity / 100 * 0.9), borderColor: colors.border }]}>
           <TextInput
             ref={inputRef}
             value={value}

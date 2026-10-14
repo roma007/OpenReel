@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import type { VideoSource, CollectTask } from '@openreel/core';
 
 import { useAppStore, getProvider } from '../useAppStore';
@@ -36,6 +36,8 @@ function formatCheckTime(timestamp: string | null | undefined): string {
  */
 export function SourceManagerScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
   const nav = useNavigation<any>();
 
@@ -306,7 +308,7 @@ export function SourceManagerScreen() {
         </View>
 
         {formMode ? (
-          <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderHighlight }]}>
+          <View style={[styles.card, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100), borderColor: colors.borderHighlight }]}>
             <Text style={[styles.formTitle, { color: colors.foreground, fontSize: scale(19) }]}>
               {formMode === 'add' ? '添加视频源' : '编辑视频源'}
             </Text>
@@ -368,7 +370,7 @@ export function SourceManagerScreen() {
           return (
             <View
               key={source.id}
-              style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
             >
               <View style={styles.headerRow}>
                 <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '700', flex: 1 }} numberOfLines={1}>

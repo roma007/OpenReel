@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Media } from '@openreel/core';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { getProvider } from '../useAppStore';
 import { TVFocusable } from '../focus/TVFocusable';
@@ -37,6 +37,8 @@ export function SearchScreen() {
   const nav = useNavigation<Nav>();
   const route = useRoute<Rt>();
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const [keyword, setKeyword] = useState(route.params?.keyword ?? '');
@@ -179,7 +181,7 @@ export function SearchScreen() {
                       setPage(1);
                       doSearch(r, 1);
                     }}
-                    style={[styles.recentItem, { backgroundColor: colors.surface }]}
+                    style={[styles.recentItem, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
                     testID={`tv-search-recent-${r}`}
                   >
                     <Text style={{ color: colors.foreground, fontSize: scale(17) }}>{r}</Text>

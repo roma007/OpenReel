@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import type { CollectTask, FailedItem } from '@openreel/core';
 
 import { useAppStore } from '../useAppStore';
@@ -46,6 +46,8 @@ function parseFailedItems(task: CollectTask): FailedItem[] {
  */
 export function TaskListScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const collectTasks = useAppStore((s) => s.collectTasks);
@@ -237,7 +239,7 @@ export function TaskListScreen() {
           return (
             <View
               key={task.taskId || String(task.id)}
-              style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
             >
               <Text style={[styles.source, { color: colors.foreground, fontSize: scale(19) }]} numberOfLines={1}>
                 {task.sourceName || task.sourceCode}

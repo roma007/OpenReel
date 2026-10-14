@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TV_LAYOUT, tv } from '../theme/tokens';
@@ -61,6 +61,8 @@ const AUTO_COLLECT_POINTS = [
 /** TV 采集教程（内容同手机端 CollectGuide，第四节按 TV 实际行为改写，不照抄手机端文案） */
 export function CollectGuideScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const steps = (list: string[]) =>
@@ -89,14 +91,14 @@ export function CollectGuideScreen() {
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>采集教程</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(16) }]}>
             从配置视频源到全量、增量采集，本教程带你完整掌握电视端的采集功能。
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>一、视频源配置</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(16) }]}>
             采集前必须先添加视频源，支持手动配置和 AI 导入两种方式。
@@ -111,7 +113,7 @@ export function CollectGuideScreen() {
           {CMS_REFS.map((cms) => (
             <View
               key={cms.name}
-              style={[styles.subCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+              style={[styles.subCard, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100), borderColor: colors.border }]}
             >
               <Text style={[styles.pointTitle, { color: colors.foreground, fontSize: scale(17) }]}>{cms.name}</Text>
               <Text style={[styles.code, { color: colors.mutedForeground, fontSize: scale(15) }]}>
@@ -125,17 +127,17 @@ export function CollectGuideScreen() {
           {steps(AI_IMPORT_STEPS)}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>二、全量采集</Text>
           {points(FULL_COLLECT_POINTS)}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>三、手动增量采集</Text>
           {points(INCREMENTAL_COLLECT_POINTS)}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>四、关于自动采集</Text>
           {points(AUTO_COLLECT_POINTS)}
         </View>

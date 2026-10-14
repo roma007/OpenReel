@@ -15,7 +15,7 @@ import MediaCard from '../components/MediaCard';
 import PosterImage from '../components/PosterImage';
 import { TVButton } from '../components/TVButton';
 import { TVNavBar } from '../components/TVNavBar';
-import { TV_GRID_CARD, TV_LAYOUT, tv } from '../theme/tokens';
+import { TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
 import { hexToRgba } from '@openreel/expo-ui';
 
@@ -351,11 +351,11 @@ export function HomeScreen() {
           rowId="row-latesthome"
           data={latestMedia}
           keyExtractor={(m) => String(m.id)}
-          itemWidth={TV_GRID_CARD.width}
-          itemHeight={TV_GRID_CARD.height}
+          itemWidth={100}
+          itemHeight={164}
           onItemPress={openDetail}
           renderItem={(m) => (
-            <MediaCard media={m} width={TV_GRID_CARD.width} height={TV_GRID_CARD.height} showRating={false} />
+            <MediaCard media={m} compact />
           )}
         />
       ) : (
@@ -389,8 +389,8 @@ export function HomeScreen() {
             rowId="row-tvhome"
             data={items}
             keyExtractor={(h) => String(h.id)}
-            itemWidth={TV_GRID_CARD.width}
-            itemHeight={TV_GRID_CARD.height}
+            itemWidth={100}
+            itemHeight={200}
             onItemPress={(h) => {
               const media = historyMedia.find((m) => m.id === h.mediaId);
               if (media) openDetail(media);
@@ -426,56 +426,53 @@ export function HomeScreen() {
               const ep = h.episodeId ? episodeMap[h.episodeId] : null;
               const epLabel = ep ? ep.title || `第${ep.episodeNumber}集` : null;
               return (
-                <View style={{ width: TV_GRID_CARD.width }}>
+                <View style={{ width: 100 }}>
                   <View
                     style={{
-                      width: TV_GRID_CARD.width,
-                      height: Math.round(TV_GRID_CARD.height * 0.76),
-                      borderRadius: radius.sm,
+                      width: 100,
+                      height: 150,
+                      borderRadius: radius.md,
                       overflow: 'hidden',
                       backgroundColor: hexToRgba(colors.surface, cardOpacity / 100),
                     }}
                   >
                     <PosterImage
                       uri={media.posterUrl}
-                      style={{ width: '100%', height: '100%', borderRadius: radius.sm }}
+                      style={{ width: '100%', height: '100%', borderRadius: radius.md }}
                     />
                   </View>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: colors.foreground,
-                      fontSize: scale(15),
-                      fontWeight: '600',
-                      marginTop: tv(8),
-                    }}
-                  >
-                    {media.title}
-                  </Text>
-                  {epLabel ? (
+                  <View style={{ paddingHorizontal: 6, paddingTop: 6 }}>
                     <Text
                       numberOfLines={1}
-                      style={{ color: colors.mutedForeground, fontSize: scale(13), marginTop: tv(2) }}
+                      style={{ color: colors.text, fontSize: scale(12) }}
                     >
-                      {epLabel}
+                      {media.title}
                     </Text>
-                  ) : null}
-                  <View
-                    style={{
-                      height: tv(4),
-                      backgroundColor: colors.trackBg,
-                      borderRadius: radius.progress,
-                      overflow: 'hidden',
-                      marginTop: tv(4),
-                    }}
-                  >
+                    {epLabel ? (
+                      <Text
+                        numberOfLines={1}
+                        style={{ color: colors.textSecondary, fontSize: scale(10), marginTop: 2 }}
+                      >
+                        {epLabel}
+                      </Text>
+                    ) : null}
                     <View
                       style={{
-                        height: '100%',
-                        width: `${progressPct}%`,
-                        backgroundColor: colors.mutedForeground,
+                        height: 4,
+                        backgroundColor: colors.trackBg,
+                        borderRadius: radius.progress,
+                        overflow: 'hidden',
+                        marginTop: 4,
                       }}
-                    />
+                    >
+                      <View
+                        style={{
+                          height: '100%',
+                          width: `${progressPct}%`,
+                          backgroundColor: colors.mutedForeground,
+                        }}
+                      />
+                    </View>
                   </View>
                 </View>
               );
@@ -519,11 +516,11 @@ export function HomeScreen() {
           rowId="row-histhome"
           data={historyMedia}
           keyExtractor={(m) => String(m.id)}
-          itemWidth={TV_GRID_CARD.width}
-          itemHeight={TV_GRID_CARD.height}
+          itemWidth={100}
+          itemHeight={164}
           onItemPress={openDetail}
           renderItem={(m) => (
-            <MediaCard media={m} width={TV_GRID_CARD.width} height={TV_GRID_CARD.height} showRating={false} />
+            <MediaCard media={m} compact />
           )}
         />
       )}
@@ -552,11 +549,11 @@ export function HomeScreen() {
           rowId="row-favhome"
           data={favMediaList}
           keyExtractor={(m) => String(m.id)}
-          itemWidth={TV_GRID_CARD.width}
-          itemHeight={TV_GRID_CARD.height}
+          itemWidth={100}
+          itemHeight={164}
           onItemPress={openDetail}
           renderItem={(m) => (
-            <MediaCard media={m} width={TV_GRID_CARD.width} height={TV_GRID_CARD.height} showRating={false} />
+            <MediaCard media={m} compact />
           )}
         />
       )}
@@ -647,11 +644,11 @@ export function HomeScreen() {
                     onTitlePress={() => nav.navigate('History', {})}
                     data={historyMedia}
                     keyExtractor={(m) => String(m.id)}
-                    itemWidth={TV_GRID_CARD.width}
-                    itemHeight={TV_GRID_CARD.height}
+                    itemWidth={100}
+                    itemHeight={164}
                     onItemPress={openDetail}
                     renderItem={(m) => (
-                      <MediaCard media={m} width={TV_GRID_CARD.width} height={TV_GRID_CARD.height} showRating={false} />
+                      <MediaCard media={m} compact />
                     )}
                   />
                 ) : null}
@@ -662,12 +659,12 @@ export function HomeScreen() {
                     title={def.title}
                     data={rows[def.rowId] || []}
                     keyExtractor={(m) => String(m.id)}
-                    itemWidth={TV_GRID_CARD.width}
-                    itemHeight={TV_GRID_CARD.height}
+                    itemWidth={100}
+                    itemHeight={164}
                     emptyText="暂无内容"
                     onItemPress={openDetail}
                     renderItem={(m) => (
-                      <MediaCard media={m} width={TV_GRID_CARD.width} height={TV_GRID_CARD.height} />
+                      <MediaCard media={m} compact />
                     )}
                   />
                 ))}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVButton } from '../components/TVButton';
@@ -28,6 +28,8 @@ function validatePin(pin: string): string | null {
 export function KidLockScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 卡片/状态框底遵循「卡片透明度」，与移动端 KidLockScreen 一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const active = useKidLockStore((s) => s.active);
   const loaded = useKidLockStore((s) => s.loaded);
   const refresh = useKidLockStore((s) => s.refresh);
@@ -139,13 +141,13 @@ export function KidLockScreen() {
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>儿童锁</Text>
           <Text style={[styles.desc, { color: colors.textSecondary, fontSize: scale(16) }]}>
             开启后仅显示适合儿童观看的内容，关闭儿童模式需要输入密码。
           </Text>
 
-          <View style={[styles.statusBox, { backgroundColor: colors.surfaceElevated }]}>
+          <View style={[styles.statusBox, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}>
             {!loaded ? (
               <Text style={{ color: colors.textSecondary, fontSize: scale(16) }}>加载中…</Text>
             ) : active ? (

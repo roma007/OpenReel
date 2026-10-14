@@ -13,6 +13,7 @@ import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
+import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
 import HomeScreen from './src/pages/HomeScreen';
 import CategoryScreen from './src/pages/CategoryScreen';
 import SearchScreen from './src/pages/SearchScreen';
@@ -92,7 +93,14 @@ export default function App() {
   const bgImageUrl = useBackgroundImageStore((s) => s.imageUrl);
 
   useEffect(() => {
-    Promise.all([initApp({ onMigrationProgress: setMigrationProgress }), initTheme(), initColorMode(), initFontSizeScale()])
+    Promise.all([
+      initApp({ onMigrationProgress: setMigrationProgress }),
+      initTheme(),
+      initColorMode(),
+      initFontSizeScale(),
+      // TV 侧恢复外观数值项（卡片透明度/背景图缩放/背景图模糊/磨砂强度）——共享包的加载器与 TV 取值范围不一致，见该文件注释
+      restoreTvAppearanceSettings(),
+    ])
       .then(async () => {
         // TV 端分片预读并发降为 4（盒子网络/存储弱于手机），写入原生读取的文件桥
         await writePrefetchConcurrency();

@@ -2,7 +2,7 @@ import React from 'react';
 import { Linking, Text, View, StyleSheet, ScrollView } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVFocusable } from '../focus/TVFocusable';
@@ -25,6 +25,8 @@ export function AboutScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
   const nav = useNavigation<any>();
+  // 卡片/行底遵循「卡片透明度」，与移动端 AboutScreen 一致（按钮不套，移动端按钮亦未套）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const [copyNote, setCopyNote] = React.useState<string | null>(null);
 
   return (
@@ -35,7 +37,7 @@ export function AboutScreen() {
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.brand, { color: colors.foreground, fontSize: scale(24) }]}>OpenReel</Text>
           <Text style={[styles.tagline, { color: colors.textSecondary, fontSize: scale(18) }]}>
             把散落的片源，收进自己的片库。
@@ -48,7 +50,7 @@ export function AboutScreen() {
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>设计原则</Text>
           {PRINCIPLES.map((p) => (
             <View key={p.title} style={styles.pointRow}>
@@ -58,14 +60,14 @@ export function AboutScreen() {
           ))}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>关于数据</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             桌面端、手机端与电视端共用同一套业务逻辑，但各自独立存储数据：任一端建立的片库不会自动同步到其它端，如需在电视端观看请在电视端自行采集一次。
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>源代码</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             本应用遵循 MIT 协议开源。遇到问题或有改进建议，欢迎到仓库提交 Issue 或 Pull Request。
@@ -110,7 +112,7 @@ export function AboutScreen() {
         <TVFocusable
           id="about-to-license"
           onPress={() => nav.navigate('License')}
-          style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={[styles.row, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
           testID="tv-about-to-license"
         >
           <View style={styles.rowMain}>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -31,6 +31,8 @@ export function TVNavBar({
 }) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 导航项底遵循「卡片透明度」，与移动端 Sidebar 菜单项一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   return (
     <View
@@ -55,7 +57,7 @@ export function TVNavBar({
             onPress={it.onPress}
             focusStyle={styles.focusedItem}
             testID={`tv-nav-${it.key}`}
-            style={[styles.itemWrap, { backgroundColor: colors.surface }]}
+            style={[styles.itemWrap, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
           >
             <View style={styles.itemInner}>
               <Text style={[styles.itemText, { color: colors.foreground, fontSize: scale(17) }]}>
@@ -78,7 +80,7 @@ export function TVNavBar({
           onPress={onSearch}
           focusStyle={styles.focusedSearch}
           testID="tv-nav-search"
-          style={[styles.searchBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={[styles.searchBtn, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
           hitSlop={8}
         >
           <Text style={[styles.searchIcon, { color: colors.foreground, fontSize: scale(20) }]}>⌕ 搜索</Text>

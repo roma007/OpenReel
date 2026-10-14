@@ -36,7 +36,11 @@ const SORTS: Array<{ key: string; label: string }> = [
   { key: 'year', label: '年份' },
 ];
 
-/** 分类页网格：6 列，卡片沿用 2:3 海报比例（尺寸与首页行内海报共享 TV_GRID_CARD） */
+/**
+ * 分类页网格：6 列，卡片沿用 2:3 海报比例（尺寸与首页行内海报共享 TV_GRID_CARD）。
+ * 卡片总高不再固定（行高由内容自适应，对齐移动端）；GRID_CARD_HEIGHT 仅用于
+ * 传给 MediaCard 计算海报高（posterHeight = height*0.76，保持海报比例不变）。
+ */
 const GRID_COLUMNS = TV_GRID_CARD.columns ?? 6;
 const GRID_GAP = TV_GRID_CARD.gap;
 const GRID_CARD_WIDTH = TV_GRID_CARD.width;
@@ -381,7 +385,6 @@ export function CategoryScreen() {
             keyExtractor={(m) => String(m.id)}
             columns={GRID_COLUMNS}
             itemWidth={GRID_CARD_WIDTH}
-            itemHeight={GRID_CARD_HEIGHT}
             gap={GRID_GAP}
             onItemPress={openDetail}
             onItemFocus={(index) => {

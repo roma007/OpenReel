@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TV_LAYOUT, tv } from '../theme/tokens';
@@ -12,6 +12,8 @@ import { TV_LAYOUT, tv } from '../theme/tokens';
 export function LicenseScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 卡片底遵循「卡片透明度」，与移动端 LicenseScreen 一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
@@ -21,7 +23,7 @@ export function LicenseScreen() {
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>
             内容与责任
           </Text>
@@ -36,7 +38,7 @@ export function LicenseScreen() {
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>软件许可</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             本软件以 MIT 协议开源。软件代码的许可协议仅适用于代码本身，不涉及使用者自行添加的片源内容及第三方资源的权利归属。
@@ -49,7 +51,7 @@ export function LicenseScreen() {
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>第三方资源</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             本应用使用的片源接口、海报与元数据服务均由第三方提供，其内容与权利归属由各自权利人所有。若你认为自己提供的接口或内容侵犯了他人权利，请通过仓库 Issue 与我们联系。

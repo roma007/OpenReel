@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import {
   SourceImportService,
   AI_SOURCE_PROMPT,
@@ -51,6 +51,8 @@ export function AiSourceImportScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
   const nav = useNavigation<any>();
+  // 卡片/提示框底遵循「卡片透明度」，与移动端 AiSourceImportScreen 一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   const batchImportSources = useAppStore((s) => s.batchImportSources);
   const validateImportSources = useAppStore((s) => s.validateImportSources);
@@ -187,7 +189,7 @@ export function AiSourceImportScreen() {
             <Text style={[styles.desc, { color: colors.textSecondary, fontSize: scale(17) }]}>
               点「复制提示词」把它复制到剪贴板，发给 AI 助手（如 ChatGPT、Claude 等），再把 AI 返回的结果复制回来，下一步粘贴。
             </Text>
-            <View style={[styles.promptBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.promptBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
               <Text style={[styles.promptText, { color: colors.textSecondary, fontSize: scale(14) }]}>
                 {AI_SOURCE_PROMPT}
               </Text>
@@ -225,7 +227,7 @@ export function AiSourceImportScreen() {
 
         {step === 'preview' ? (
           result ? (
-            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
               <Text
                 style={{
                   color: result.imported > 0 ? colors.success : colors.mutedForeground,
@@ -252,7 +254,7 @@ export function AiSourceImportScreen() {
                 return (
                   <View
                     key={idx}
-                    style={[styles.card, { backgroundColor: colors.surface, borderColor: st.color }]}
+                    style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: st.color }]}
                   >
                     <View style={styles.cardHeader}>
                       <Text style={{ color: colors.foreground, fontSize: scale(18), fontWeight: '600', flex: 1 }} numberOfLines={1}>

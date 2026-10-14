@@ -786,6 +786,21 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     this.kidModeActive = kidModeRow?.value === '1';
     mark('kid_mode');
 
+    // 启动收束 WAL：把上次会话残留的 WAL 回写主库并把 -wal 文件截断（低端机磁盘保护）。
+    // 位置必须在「打开读连接」之前，且此刻 UI 尚未渲染（各端 App 均以 ready 门控，init 返回前
+    // 不挂任何页面）→ 写连接独占、无在飞语句，必然成功。
+    // 原先放在 postInitMaintenance（init 返回后的后台任务）里，会与同连接并发的首屏长查询相撞，
+    // SQLite 直接返回 SQLITE_LOCKED（"database table is locked"）；实测 PASSIVE/FULL 同样会报，
+    // 且 PASSIVE 不缩小 WAL 文件，故只能靠「挪到无并发的位置」规避，不能降级。
+    const tWal = Date.now();
+    try {
+      await wrappedDb.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (err) {
+      // 失败不阻断启动：仅损失本次 WAL 文件截断（回写由 autocheckpoint 兜住）
+      console.error('[DB] WAL checkpoint 失败:', err);
+    }
+    timing.wal_checkpoint = Date.now() - tWal;
+
     // 独立读连接：WAL 下与写连接并发，采集大量写库时 UI 查询不再排队阻塞。
     // 读连接必须在前台就绪，否则读方法拿到 null。
     this.readDb = this.wrapWithRetry(await SQLite.openDatabaseAsync('movieapp.db'));
@@ -839,13 +854,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       await this.handlePruneOversizedFailedItems();
       timing.post_prune = Date.now() - tPrune;
 
-      const tWal = Date.now();
-      try {
-        await this.db!.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
-      } catch (err) {
-        console.error('[DB] WAL checkpoint 失败:', err);
-      }
-      timing.post_walCheckpoint = Date.now() - tWal;
+      // WAL 收束已移至 init() 前台、open_read_db 之前执行：在后台与 UI 同连接并发时，
+      // wal_checkpoint 一旦与同连接在飞语句相撞即抛 SQLITE_LOCKED（详见 init() 内注释）。
       timing.post_total = Date.now() - t0;
 
       const fullTiming = Object.assign({}, frontTiming, timing);
@@ -1338,11 +1348,13 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       console.warn('[DB] media_fts 回填失败（搜索可能为空）:', e);
     }
 
-    // 上一步建 3 个 UNIQUE 索引（episode/play_source 各 590 万行）+ 回填 FTS 会再产生 GB 级 WAL。
-    // 必须在 open_read_db 之前回写截断：只读连接一旦打开，其长读事务会让后续
-    // wal_checkpoint(TRUNCATE) 报「database table is locked」而长期失败
-    // （实测 init 尾部的 post_walCheckpoint 即如此），导致 WAL 永久滞留、
-    // 设备磁盘占用比逻辑体积多出 1GB 以上。
+    // 上一步建 3 个 UNIQUE 索引（episode/play_source 各 590 万行）+ 回填 FTS 会再产生 GB 级 WAL，
+    // 故在此回写截断。注意：「database table is locked」的真正原因是 wal_checkpoint 与
+    // **同一连接上未结束的语句**相撞抛 SQLITE_LOCKED（2026-10-14 宿主实测：同连接冲突下
+    // TRUNCATE/PASSIVE/FULL 三者都立即报错；跨连接读者只会等 busy_timeout 后返回 busy 行、
+    // 不抛异常），不是只读连接挡住的（旧注释为误归因）。此处能生效正是因为位于
+    // open_read_db 之前且无在飞语句；init() 里的启动收束同理被移到 open_read_db 之前
+    // （原先放后台长期失败），否则 WAL 永久滞留、设备磁盘占用比逻辑体积多出 1GB 以上。
     try {
       await this.db!.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
       console.warn('[DB] 索引与 FTS 补跑后的 WAL 已回写截断');

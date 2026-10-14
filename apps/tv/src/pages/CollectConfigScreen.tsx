@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { useAppStore } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -65,6 +65,8 @@ function toDraft(cfg: Record<string, any> | null): Draft {
  */
 export function CollectConfigScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const collectConfig = useAppStore((s) => s.collectConfig);
@@ -173,17 +175,17 @@ export function CollectConfigScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={[styles.section, { color: colors.foreground, fontSize: scale(19) }]}>基本设置</Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           {BASIC_FIELDS.map(renderField)}
         </View>
 
         <Text style={[styles.section, { color: colors.foreground, fontSize: scale(19) }]}>采集限制</Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           {LIMIT_FIELDS.map(renderField)}
         </View>
 
         <Text style={[styles.section, { color: colors.foreground, fontSize: scale(19) }]}>自动增量采集</Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={[styles.note, { color: colors.warning, fontSize: scale(15) }]}>
             电视端不启动后台自动采集调度（盒子长期待机，定时采集会持续占用网络与内存）。
             下列开关与间隔仍会保存到数据库，但电视端不会自动执行，请手动点「增量采集」。

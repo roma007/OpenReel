@@ -21,6 +21,8 @@ export function TVSelectRow<T extends string | number | boolean>({
   options,
   onChange,
   format,
+  hideLabel = false,
+  style,
 }: {
   id: string;
   label: string;
@@ -28,6 +30,10 @@ export function TVSelectRow<T extends string | number | boolean>({
   options: TVSelectOption<T>[];
   onChange: (v: T) => void;
   format?: (v: T) => string;
+  /** 隐藏行标签与当前值（分组标题已给出组名时用，仅留选项 chips） */
+  hideLabel?: boolean;
+  /** 追加到行的样式（如卡片内左右留白） */
+  style?: any;
 }) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
@@ -39,8 +45,16 @@ export function TVSelectRow<T extends string | number | boolean>({
   };
 
   return (
-    <View style={[styles.row, { borderBottomColor: colors.border }]}>
-      <Text style={[styles.label, { color: colors.foreground, fontSize: scale(18) }]}>{label}</Text>
+    <View
+      style={[
+        styles.row,
+        !hideLabel && { borderBottomWidth: 1, borderBottomColor: colors.border },
+        style,
+      ]}
+    >
+      {!hideLabel && (
+        <Text style={[styles.label, { color: colors.foreground, fontSize: scale(18) }]}>{label}</Text>
+      )}
       <View style={styles.options}>
         {options.map((o) => (
           <TVFocusable
@@ -70,9 +84,11 @@ export function TVSelectRow<T extends string | number | boolean>({
           </TVFocusable>
         ))}
       </View>
-      <Text style={[styles.current, { color: colors.mutedForeground, fontSize: scale(16) }]}>
-        {render(value)}
-      </Text>
+      {!hideLabel && (
+        <Text style={[styles.current, { color: colors.mutedForeground, fontSize: scale(16) }]}>
+          {render(value)}
+        </Text>
+      )}
     </View>
   );
 }
@@ -82,7 +98,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: tv(14),
-    borderBottomWidth: 1,
   },
   label: { width: tv(200), fontWeight: '600' },
   options: { flexDirection: 'row', flex: 1, flexWrap: 'wrap' },

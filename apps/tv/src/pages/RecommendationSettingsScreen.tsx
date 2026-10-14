@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from '@openreel/core';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { useAppStore } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -18,6 +18,8 @@ import { tv } from '../theme/tokens';
  */
 export function RecommendationSettingsScreen() {
   const colors = useThemeColors();
+  // 卡片/面板底遵循「卡片透明度」，与移动端同名页面一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const scale = useScaledFontSize();
 
   const [overview, setOverview] = useState<RecommendationOverview | null>(null);
@@ -93,7 +95,7 @@ export function RecommendationSettingsScreen() {
         <Text style={[styles.sectionTitle, { color: colors.foreground, fontSize: scale(19) }]}>
           推荐学习概况
         </Text>
-        <View style={[styles.infoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.infoBox, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
           <Text style={{ color: colors.textSecondary, fontSize: scale(16) }}>
             看完 {overview?.completedCount ?? 0} 部 · 中途放弃 {overview?.giveUpCount ?? 0} 部
           </Text>
@@ -159,7 +161,7 @@ export function RecommendationSettingsScreen() {
                   key={`${t.tagType}:${t.tag}`}
                   id={`rec-tag:${t.tagType}:${t.tag}`}
                   onPress={() => doToggleTag(t.tag, t.tagType)}
-                  style={[styles.tag, { backgroundColor: colors.surface }]}
+                  style={[styles.tag, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
                   testID={`tv-rec-tag-${t.tag}`}
                 >
                   <Text style={{ color: colors.foreground, fontSize: scale(15) }}>

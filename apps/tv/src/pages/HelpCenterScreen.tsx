@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVFocusable } from '../focus/TVFocusable';
@@ -108,6 +108,8 @@ export function HelpCenterScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
   const nav = useNavigation<any>();
+  // 卡片/行底遵循「卡片透明度」，与移动端 HelpCenterScreen 一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   return (
@@ -121,7 +123,7 @@ export function HelpCenterScreen() {
         <TVFocusable
           id="help-to-guide"
           onPress={() => nav.navigate('CollectGuide')}
-          style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={[styles.row, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
           testID="tv-help-to-guide"
         >
           <View style={styles.rowMain}>
@@ -136,7 +138,7 @@ export function HelpCenterScreen() {
         {FAQ_GROUPS.map((group, gi) => (
           <View
             key={group.title}
-            style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
           >
             <Text style={[styles.groupTitle, { color: colors.foreground, fontSize: scale(19) }]}>
               {group.title}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SystemConfigService, type UserUsageType } from '@openreel/core';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { useAppStore, getProvider } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -25,6 +25,8 @@ const USAGE_OPTIONS: Array<{ type: UserUsageType; label: string }> = [
 export function UsagePreferencesScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 使用方式 chip 底遵循「卡片透明度」，与移动端 UsagePreferencesScreen 的 chip 一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   const userUsageTypes = useAppStore((s) => s.userUsageTypes);
   const loadUserUsageTypes = useAppStore((s) => s.loadUserUsageTypes);
@@ -94,7 +96,11 @@ export function UsagePreferencesScreen() {
                 onPress={() => toggleUsage(o.type)}
                 style={[
                   styles.usageChip,
-                  { backgroundColor: active ? colors.buttonPrimaryBg : colors.surface },
+                  {
+                    backgroundColor: active
+                      ? hexToRgba(colors.buttonPrimaryBg, cardOpacity / 100)
+                      : hexToRgba(colors.surface, cardOpacity / 100),
+                  },
                 ]}
                 testID={`tv-usage-${o.type}`}
               >
