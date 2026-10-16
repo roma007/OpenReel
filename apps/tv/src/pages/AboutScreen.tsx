@@ -84,7 +84,7 @@ export function AboutScreen() {
                   setCopyNote(`复制失败：${e instanceof Error ? e.message : String(e)}`);
                 }
               }}
-              style={[styles.btn, { backgroundColor: colors.surfaceElevated }]}
+              style={[styles.btn, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}
               testID="tv-about-copy-repo"
             >
               <View style={styles.btnInner}>
@@ -96,7 +96,7 @@ export function AboutScreen() {
               onPress={() => {
                 Linking.openURL(REPO_URL).catch(() => setCopyNote('电视上无法打开浏览器，请复制地址到电脑查看'));
               }}
-              style={[styles.btn, { backgroundColor: colors.surfaceElevated }]}
+              style={[styles.btn, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}
               testID="tv-about-open-repo"
             >
               <View style={styles.btnInner}>

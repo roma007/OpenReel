@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { tv } from '../theme/tokens';
 
@@ -37,6 +37,8 @@ export function TVSelectRow<T extends string | number | boolean>({
 }) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // chip 底遵循「卡片透明度」，与移动端按钮/选项底一致
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   const render = (v: T) => {
     if (format) return format(v);
@@ -64,7 +66,10 @@ export function TVSelectRow<T extends string | number | boolean>({
             style={[
               styles.chip,
               {
-                backgroundColor: o.value === value ? colors.buttonPrimaryBg : colors.surface,
+                backgroundColor:
+                  o.value === value
+                    ? hexToRgba(colors.buttonPrimaryBg, cardOpacity / 100)
+                    : hexToRgba(colors.surface, cardOpacity / 100),
               },
             ]}
             testID={`${id}-${o.value}`}

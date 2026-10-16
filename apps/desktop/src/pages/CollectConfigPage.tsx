@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, RotateCcw, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RotateCcw, RefreshCw } from 'lucide-react';
 import { useBackgroundStore } from '../themes/backgroundStore';
 import { Switch } from '@/components/ui/switch';
 
@@ -29,6 +29,10 @@ export default function CollectConfigPage() {
   const [autoLastRunAt, setAutoLastRunAt] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const savedConfigRef = useRef('');
+  // 即时保存：本地 state 为唯一编辑源，store 仅在首次水合时写入本地，避免写库后的回写打断正在输入的值
+  const hydratedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadCollectConfig();
@@ -36,6 +40,10 @@ export default function CollectConfigPage() {
 
   useEffect(() => {
     if (collectConfig) {
+      // autoLastRunAt 可能由自动采集在别处更新，始终同步
+      setAutoLastRunAt(collectConfig.autoLastRunAt);
+      if (hydratedRef.current) return;
+      hydratedRef.current = true;
       savedConfigRef.current = JSON.stringify({
         minYear: collectConfig.minYear,
         retryTimes: collectConfig.retryTimes,
@@ -60,7 +68,6 @@ export default function CollectConfigPage() {
         autoIntervalHours: collectConfig.autoIntervalHours,
         autoOnStartup: collectConfig.autoOnStartup,
       });
-      setAutoLastRunAt(collectConfig.autoLastRunAt);
     }
   }, [collectConfig]);
 
@@ -81,6 +88,7 @@ export default function CollectConfigPage() {
     return current !== savedConfigRef.current;
   }, [localConfig, collectConfig]);
 
+  // 桌面端关闭窗口兜底：有未落库变更时拦截
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (hasChanges) {
@@ -91,36 +99,48 @@ export default function CollectConfigPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasChanges]);
 
-  const handleSave = async () => {
-    await updateCollectConfig({
-      ...localConfig,
-      maxIncrementalHours: Math.max(0, localConfig.maxIncrementalHours),
-    });
-    savedConfigRef.current = JSON.stringify({
-      minYear: localConfig.minYear,
-      retryTimes: localConfig.retryTimes,
-      pageSize: localConfig.pageSize,
-      maxPages: localConfig.maxPages,
-      incrementalMaxPages: localConfig.incrementalMaxPages,
-      maxIncrementalHours: Math.max(0, localConfig.maxIncrementalHours),
-      concurrency: localConfig.concurrency,
-      autoEnabled: localConfig.autoEnabled,
-      autoIntervalHours: localConfig.autoIntervalHours,
-      autoOnStartup: localConfig.autoOnStartup,
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  // 清理未触发的 debounce / 提示定时器
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+  }, []);
 
-  const handleFieldBlur = async (field: string, value: number) => {
-    await updateCollectConfig({
-      ...localConfig,
-      [field]: value,
-    });
-  };
+  /** 落库（即时保存的唯一写入口） */
+  const persist = useCallback(async (cfg: typeof localConfig) => {
+    const payload = { ...cfg, maxIncrementalHours: Math.max(0, cfg.maxIncrementalHours) };
+    await updateCollectConfig(payload);
+    savedConfigRef.current = JSON.stringify(payload);
+    setSaved(true);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = setTimeout(() => setSaved(false), 2000);
+  }, [updateCollectConfig]);
+
+  /** 数值输入：本地即时更新 + 500ms debounce 写库 */
+  const scheduleSave = useCallback((cfg: typeof localConfig) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void persist(cfg);
+    }, 500);
+  }, [persist]);
+
+  /** 字段变更：immediate=true（开关/重置）立即写库，否则 debounce */
+  const update = useCallback((patch: Partial<typeof localConfig>, immediate = false) => {
+    const next = { ...localConfig, ...patch };
+    setLocalConfig(next);
+    if (immediate) {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void persist(next);
+    } else {
+      scheduleSave(next);
+    }
+  }, [localConfig, persist, scheduleSave]);
 
   const handleReset = () => {
-    setLocalConfig({
+    update({
       minYear: 2025,
       retryTimes: 3,
       pageSize: 20,
@@ -131,15 +151,17 @@ export default function CollectConfigPage() {
       autoEnabled: false,
       autoIntervalHours: 24,
       autoOnStartup: false,
-    });
+    }, true);
   };
 
   const handleBack = useCallback(async () => {
-    if (hasChanges) {
-      await handleSave();
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void persist(localConfig);
     }
     navigate('/settings');
-  }, [hasChanges, navigate, handleSave]);
+  }, [localConfig, navigate, persist]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -155,10 +177,9 @@ export default function CollectConfigPage() {
             <RotateCcw className="size-3.5 mr-1.5" />
             重置默认
           </Button>
-          <Button size="sm" onClick={handleSave}>
-            <Save className="size-4 mr-2" />
-            {saved ? '已保存' : '保存配置'}
-          </Button>
+          <span className={`text-sm text-muted-foreground transition-opacity ${saved ? 'opacity-100' : 'opacity-0'}`}>
+            已自动保存
+          </span>
         </div>
       </div>
 
@@ -171,7 +192,7 @@ export default function CollectConfigPage() {
               type="number"
               min="1"
               value={localConfig.maxPages}
-              onChange={(e) => setLocalConfig({ ...localConfig, maxPages: Math.max(1, parseInt(e.target.value) || 10) })}
+              onChange={(e) => update({ maxPages: Math.max(1, parseInt(e.target.value) || 10) })}
             />
             <p className="text-xs text-muted-foreground">全量采集时最多采集多少页数据</p>
           </div>
@@ -183,8 +204,7 @@ export default function CollectConfigPage() {
               type="number"
               min="1"
               value={localConfig.incrementalMaxPages}
-              onChange={(e) => setLocalConfig({ ...localConfig, incrementalMaxPages: Math.max(1, parseInt(e.target.value) || 10) })}
-              onBlur={() => handleFieldBlur('incrementalMaxPages', localConfig.incrementalMaxPages)}
+              onChange={(e) => update({ incrementalMaxPages: Math.max(1, parseInt(e.target.value) || 10) })}
             />
             <p className="text-xs text-muted-foreground">断点和定额模式均受此限制</p>
           </div>
@@ -197,7 +217,7 @@ export default function CollectConfigPage() {
               min="0"
               max="8760"
               value={localConfig.maxIncrementalHours}
-              onChange={(e) => setLocalConfig({ ...localConfig, maxIncrementalHours: Math.max(0, parseInt(e.target.value) || 0) })}
+              onChange={(e) => update({ maxIncrementalHours: Math.max(0, parseInt(e.target.value) || 0) })}
             />
             <p className="text-xs text-muted-foreground">0=不限，断点续采时 h 的最大值（全量采集不受影响）</p>
           </div>
@@ -210,7 +230,7 @@ export default function CollectConfigPage() {
               min="1"
               max="20"
               value={localConfig.concurrency}
-              onChange={(e) => setLocalConfig({ ...localConfig, concurrency: Math.min(20, Math.max(1, parseInt(e.target.value) || 1)) })}
+              onChange={(e) => update({ concurrency: Math.min(20, Math.max(1, parseInt(e.target.value) || 1)) })}
             />
             <p className="text-xs text-muted-foreground">同时处理多少个项目（过高可能触发反爬）</p>
           </div>
@@ -223,7 +243,7 @@ export default function CollectConfigPage() {
               min="5"
               max="100"
               value={localConfig.pageSize}
-              onChange={(e) => setLocalConfig({ ...localConfig, pageSize: Math.min(100, Math.max(5, parseInt(e.target.value) || 20)) })}
+              onChange={(e) => update({ pageSize: Math.min(100, Math.max(5, parseInt(e.target.value) || 20)) })}
             />
             <p className="text-xs text-muted-foreground">每页返回的数据条数</p>
           </div>
@@ -234,7 +254,7 @@ export default function CollectConfigPage() {
               id="minYear"
               type="number"
               value={localConfig.minYear}
-              onChange={(e) => setLocalConfig({ ...localConfig, minYear: parseInt(e.target.value) || 2025 })}
+              onChange={(e) => update({ minYear: parseInt(e.target.value) || 2025 })}
             />
             <p className="text-xs text-muted-foreground">低于此年份的内容将被跳过</p>
           </div>
@@ -247,7 +267,7 @@ export default function CollectConfigPage() {
               min="0"
               max="10"
               value={localConfig.retryTimes}
-              onChange={(e) => setLocalConfig({ ...localConfig, retryTimes: Math.min(10, Math.max(0, parseInt(e.target.value) || 3)) })}
+              onChange={(e) => update({ retryTimes: Math.min(10, Math.max(0, parseInt(e.target.value) || 3)) })}
             />
             <p className="text-xs text-muted-foreground">采集失败时的重试次数</p>
           </div>
@@ -271,12 +291,11 @@ export default function CollectConfigPage() {
             <Switch
               checked={localConfig.autoEnabled}
               onCheckedChange={(checked) =>
-                setLocalConfig({
-                  ...localConfig,
+                update({
                   autoEnabled: checked,
                   // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
                   autoOnStartup: checked ? localConfig.autoOnStartup : false,
-                })
+                }, true)
               }
             />
             <p className="text-xs text-muted-foreground">关闭后定时与启动触发均不执行</p>
@@ -286,7 +305,7 @@ export default function CollectConfigPage() {
             <div className="text-sm font-medium">启动时立即采集</div>
             <Switch
               checked={localConfig.autoOnStartup}
-              onCheckedChange={(checked) => setLocalConfig({ ...localConfig, autoOnStartup: checked })}
+              onCheckedChange={(checked) => update({ autoOnStartup: checked }, true)}
               disabled={!localConfig.autoEnabled}
             />
             <p className="text-xs text-muted-foreground">应用启动后延迟数秒自动执行一次增量采集</p>
@@ -300,7 +319,7 @@ export default function CollectConfigPage() {
               min="1"
               max="8760"
               value={localConfig.autoIntervalHours}
-              onChange={(e) => setLocalConfig({ ...localConfig, autoIntervalHours: Math.min(8760, Math.max(1, parseInt(e.target.value) || 24)) })}
+              onChange={(e) => update({ autoIntervalHours: Math.min(8760, Math.max(1, parseInt(e.target.value) || 24)) })}
             />
             <p className="text-xs text-muted-foreground">距上次自动采集达到该间隔后触发</p>
           </div>

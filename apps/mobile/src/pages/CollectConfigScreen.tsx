@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Switch } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Switch } from 'react-native';
 import { useAppStore } from '../useAppStore';
-import { ArrowLeft, Save, RotateCcw } from 'lucide-react-native';
+import { ArrowLeft, RotateCcw } from 'lucide-react-native';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
 import { useScaledFontSize } from '../themes/useScaledFontSize';
@@ -14,6 +14,43 @@ import { Input } from '../components/ui/Input';
 interface Props {
   navigation: any;
 }
+
+type LocalConfig = {
+  minYear: string;
+  retryTimes: string;
+  pageSize: string;
+  maxPages: string;
+  incrementalMaxPages: string;
+  maxIncrementalHours: string;
+  concurrency: string;
+  autoEnabled: boolean;
+  autoIntervalHours: string;
+  autoOnStartup: boolean;
+};
+
+const NUMERIC_KEYS = [
+  'minYear', 'retryTimes', 'pageSize', 'maxPages',
+  'incrementalMaxPages', 'maxIncrementalHours', 'concurrency', 'autoIntervalHours',
+] as const;
+
+/** 字符串草稿 → 落库数值（范围收敛语义与旧「保存」按钮保持一致） */
+function toPayload(c: LocalConfig) {
+  return {
+    minYear: parseInt(c.minYear) || 2025,
+    retryTimes: Math.min(10, Math.max(0, parseInt(c.retryTimes) || 3)),
+    pageSize: Math.min(100, Math.max(5, parseInt(c.pageSize) || 20)),
+    maxPages: Math.max(1, parseInt(c.maxPages) || 10),
+    incrementalMaxPages: Math.max(1, parseInt(c.incrementalMaxPages) || 100),
+    maxIncrementalHours: Math.max(0, parseInt(c.maxIncrementalHours) || 720),
+    concurrency: Math.min(20, Math.max(1, parseInt(c.concurrency) || 1)),
+    autoEnabled: c.autoEnabled,
+    autoIntervalHours: Math.min(8760, Math.max(1, parseInt(c.autoIntervalHours) || 24)),
+    autoOnStartup: c.autoOnStartup,
+  };
+}
+
+/** 文本是否为可解析的纯数字（避免把输入中间态/空串写库） */
+const isNumericText = (t: string) => /^\d+$/.test(t.trim());
 
 export default function CollectConfigScreen({ navigation }: Props) {
   const { collectConfig, loadCollectConfig, updateCollectConfig } = useAppStore();
@@ -36,40 +73,48 @@ export default function CollectConfigScreen({ navigation }: Props) {
     autoOnStartup: false,
   });
   const [autoLastRunAt, setAutoLastRunAt] = useState<string | null>(null);
+  const [savedTip, setSavedTip] = useState(false);
   const savedConfigRef = useRef('');
+  // 即时保存：本地 state 为唯一编辑源，store 仅在首次水合时写入本地，
+  // 避免写库后的 loadCollectConfig 回写打断正在输入的内容
+  const hydratedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadCollectConfig();
   }, []);
 
   useEffect(() => {
-    if (collectConfig) {
-      savedConfigRef.current = JSON.stringify({
-        minYear: collectConfig.minYear,
-        retryTimes: collectConfig.retryTimes,
-        pageSize: collectConfig.pageSize,
-        maxPages: collectConfig.maxPages,
-        incrementalMaxPages: collectConfig.incrementalMaxPages,
-        maxIncrementalHours: collectConfig.maxIncrementalHours,
-        concurrency: collectConfig.concurrency,
-        autoEnabled: collectConfig.autoEnabled,
-        autoIntervalHours: collectConfig.autoIntervalHours,
-        autoOnStartup: collectConfig.autoOnStartup,
-      });
-      setLocalConfig({
-        minYear: String(collectConfig.minYear),
-        retryTimes: String(collectConfig.retryTimes),
-        pageSize: String(collectConfig.pageSize),
-        maxPages: String(collectConfig.maxPages),
-        incrementalMaxPages: String(collectConfig.incrementalMaxPages),
-        maxIncrementalHours: String(collectConfig.maxIncrementalHours),
-        concurrency: String(collectConfig.concurrency),
-        autoEnabled: collectConfig.autoEnabled,
-        autoIntervalHours: String(collectConfig.autoIntervalHours),
-        autoOnStartup: collectConfig.autoOnStartup,
-      });
-      setAutoLastRunAt(collectConfig.autoLastRunAt);
-    }
+    if (!collectConfig) return;
+    // autoLastRunAt 由自动采集在别处更新，始终同步
+    setAutoLastRunAt(collectConfig.autoLastRunAt);
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    savedConfigRef.current = JSON.stringify({
+      minYear: collectConfig.minYear,
+      retryTimes: collectConfig.retryTimes,
+      pageSize: collectConfig.pageSize,
+      maxPages: collectConfig.maxPages,
+      incrementalMaxPages: collectConfig.incrementalMaxPages,
+      maxIncrementalHours: collectConfig.maxIncrementalHours,
+      concurrency: collectConfig.concurrency,
+      autoEnabled: collectConfig.autoEnabled,
+      autoIntervalHours: collectConfig.autoIntervalHours,
+      autoOnStartup: collectConfig.autoOnStartup,
+    });
+    setLocalConfig({
+      minYear: String(collectConfig.minYear),
+      retryTimes: String(collectConfig.retryTimes),
+      pageSize: String(collectConfig.pageSize),
+      maxPages: String(collectConfig.maxPages),
+      incrementalMaxPages: String(collectConfig.incrementalMaxPages),
+      maxIncrementalHours: String(collectConfig.maxIncrementalHours),
+      concurrency: String(collectConfig.concurrency),
+      autoEnabled: collectConfig.autoEnabled,
+      autoIntervalHours: String(collectConfig.autoIntervalHours),
+      autoOnStartup: collectConfig.autoOnStartup,
+    });
   }, [collectConfig]);
 
   const hasChanges = useMemo(() => {
@@ -89,38 +134,52 @@ export default function CollectConfigScreen({ navigation }: Props) {
     return current !== savedConfigRef.current;
   }, [localConfig, collectConfig]);
 
-  const handleSave = async () => {
-    await updateCollectConfig({
-      minYear: parseInt(localConfig.minYear) || 2025,
-      retryTimes: Math.min(10, Math.max(0, parseInt(localConfig.retryTimes) || 3)),
-      pageSize: Math.min(100, Math.max(5, parseInt(localConfig.pageSize) || 20)),
-      maxPages: Math.max(1, parseInt(localConfig.maxPages) || 10),
-      incrementalMaxPages: Math.max(1, parseInt(localConfig.incrementalMaxPages) || 100),
-      maxIncrementalHours: Math.max(0, parseInt(localConfig.maxIncrementalHours) || 720),
-      concurrency: Math.min(20, Math.max(1, parseInt(localConfig.concurrency) || 1)),
-      autoEnabled: localConfig.autoEnabled,
-      autoIntervalHours: Math.min(8760, Math.max(1, parseInt(localConfig.autoIntervalHours) || 24)),
-      autoOnStartup: localConfig.autoOnStartup,
-    });
+  // 清理未触发的 debounce / 提示定时器
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+  }, []);
 
-    savedConfigRef.current = JSON.stringify({
-      minYear: parseInt(localConfig.minYear) || 2025,
-      retryTimes: parseInt(localConfig.retryTimes) || 3,
-      pageSize: parseInt(localConfig.pageSize) || 20,
-      maxPages: parseInt(localConfig.maxPages) || 10,
-      incrementalMaxPages: parseInt(localConfig.incrementalMaxPages) || 100,
-      maxIncrementalHours: parseInt(localConfig.maxIncrementalHours) || 720,
-      concurrency: parseInt(localConfig.concurrency) || 1,
-      autoEnabled: localConfig.autoEnabled,
-      autoIntervalHours: Math.min(8760, Math.max(1, parseInt(localConfig.autoIntervalHours) || 24)),
-      autoOnStartup: localConfig.autoOnStartup,
-    });
+  /** 即时保存唯一写入口：落库 + 轻提示（无弹窗） */
+  const persist = useCallback(async (c: LocalConfig) => {
+    const payload = toPayload(c);
+    await updateCollectConfig(payload);
+    savedConfigRef.current = JSON.stringify(payload);
+    setSavedTip(true);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    tipTimerRef.current = setTimeout(() => setSavedTip(false), 2000);
+  }, [updateCollectConfig]);
 
-    Alert.alert('成功', '配置已保存');
-  };
+  /** 数值输入：500ms debounce 写库 */
+  const scheduleSave = useCallback((c: LocalConfig) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void persist(c);
+    }, 500);
+  }, [persist]);
+
+  /**
+   * 字段变更：immediate=true（开关/重置）立即写库，否则 debounce。
+   * 数值字段处于输入中间态（空串/非纯数字）时只更新本地，不写库。
+   */
+  const update = useCallback((patch: Partial<LocalConfig>, immediate = false) => {
+    const next = { ...localConfig, ...patch };
+    setLocalConfig(next);
+    if (!NUMERIC_KEYS.every((k) => isNumericText(next[k]))) return;
+    if (immediate) {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void persist(next);
+    } else {
+      scheduleSave(next);
+    }
+  }, [localConfig, persist, scheduleSave]);
 
   const handleReset = () => {
-    setLocalConfig({
+    update({
       minYear: '2025',
       retryTimes: '3',
       pageSize: '20',
@@ -131,29 +190,24 @@ export default function CollectConfigScreen({ navigation }: Props) {
       autoEnabled: false,
       autoIntervalHours: '24',
       autoOnStartup: false,
-    });
+    }, true);
   };
 
+  // 兜底：离开页面时把未触发的 debounce 立即落库；若仍有未落库变更（异常路径）则保存后再离开
   useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', async (e: any) => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void persist(localConfig);
+        return;
+      }
       if (!hasChanges) return;
       e.preventDefault();
-      await updateCollectConfig({
-        minYear: parseInt(localConfig.minYear) || 2025,
-        retryTimes: Math.min(10, Math.max(0, parseInt(localConfig.retryTimes) || 3)),
-        pageSize: Math.min(100, Math.max(5, parseInt(localConfig.pageSize) || 20)),
-        maxPages: Math.max(1, parseInt(localConfig.maxPages) || 10),
-        incrementalMaxPages: Math.max(1, parseInt(localConfig.incrementalMaxPages) || 100),
-        maxIncrementalHours: Math.max(0, parseInt(localConfig.maxIncrementalHours) || 720),
-        concurrency: Math.min(20, Math.max(1, parseInt(localConfig.concurrency) || 1)),
-        autoEnabled: localConfig.autoEnabled,
-        autoIntervalHours: Math.min(8760, Math.max(1, parseInt(localConfig.autoIntervalHours) || 24)),
-        autoOnStartup: localConfig.autoOnStartup,
-      });
-      navigation.dispatch(e.data.action);
+      void persist(localConfig).then(() => navigation.dispatch(e.data.action));
     });
     return () => unsubscribe();
-  }, [hasChanges, navigation, localConfig, updateCollectConfig]);
+  }, [hasChanges, navigation, localConfig, persist]);
 
   const styles = useMemo(() => StyleSheet.create({
     container: { flex: 1 },
@@ -225,11 +279,11 @@ export default function CollectConfigScreen({ navigation }: Props) {
           </Button>
           <Text style={styles.title}>采集配置</Text>
           <View style={styles.headerActions}>
+            {savedTip ? (
+              <Text style={{ color: colors.mutedForeground, fontSize: s(12) }}>已自动保存</Text>
+            ) : null}
             <Button variant="secondary" size="sm" onPress={handleReset}>
               <RotateCcw size={16} color={colors.text} />
-            </Button>
-            <Button variant="primary" size="sm" onPress={handleSave}>
-              <Save size={16} color={colors.text} />
             </Button>
           </View>
         </View>
@@ -245,7 +299,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.minYear}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, minYear: text })}
+                onChangeText={(text) => update({ minYear: text })}
               />
             </View>
             <View style={styles.fieldColRight}>
@@ -254,7 +308,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.retryTimes}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, retryTimes: text })}
+                onChangeText={(text) => update({ retryTimes: text })}
               />
             </View>
           </View>
@@ -265,7 +319,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.pageSize}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, pageSize: text })}
+                onChangeText={(text) => update({ pageSize: text })}
               />
             </View>
           </View>
@@ -280,7 +334,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.maxPages}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, maxPages: text })}
+                onChangeText={(text) => update({ maxPages: text })}
               />
             </View>
             <View style={styles.fieldColRight}>
@@ -289,7 +343,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.incrementalMaxPages}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, incrementalMaxPages: text })}
+                onChangeText={(text) => update({ incrementalMaxPages: text })}
               />
             </View>
           </View>
@@ -300,7 +354,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.maxIncrementalHours}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, maxIncrementalHours: text })}
+                onChangeText={(text) => update({ maxIncrementalHours: text })}
               />
             </View>
             <View style={styles.fieldColRight}>
@@ -309,7 +363,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
                 size="sm"
                 keyboardType="numeric"
                 value={localConfig.concurrency}
-                onChangeText={(text) => setLocalConfig({ ...localConfig, concurrency: text })}
+                onChangeText={(text) => update({ concurrency: text })}
               />
             </View>
           </View>
@@ -325,12 +379,11 @@ export default function CollectConfigScreen({ navigation }: Props) {
             <Switch
               value={localConfig.autoEnabled}
               onValueChange={(checked) =>
-                setLocalConfig({
-                  ...localConfig,
+                update({
                   autoEnabled: checked,
                   // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
                   autoOnStartup: checked ? localConfig.autoOnStartup : false,
-                })
+                }, true)
               }
               trackColor={{ false: colors.swiftTrack, true: colors.swiftActiveTrack }}
               thumbColor={colors.swiftThumb}
@@ -348,7 +401,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
               keyboardType="numeric"
               editable={localConfig.autoEnabled}
               value={localConfig.autoIntervalHours}
-              onChangeText={(text) => setLocalConfig({ ...localConfig, autoIntervalHours: text })}
+              onChangeText={(text) => update({ autoIntervalHours: text })}
             />
           </View>
 
@@ -359,7 +412,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
             </View>
             <Switch
               value={localConfig.autoOnStartup}
-              onValueChange={(checked) => setLocalConfig({ ...localConfig, autoOnStartup: checked })}
+              onValueChange={(checked) => update({ autoOnStartup: checked }, true)}
               disabled={!localConfig.autoEnabled}
               trackColor={{ false: colors.swiftTrack, true: colors.swiftActiveTrack }}
               thumbColor={colors.swiftThumb}

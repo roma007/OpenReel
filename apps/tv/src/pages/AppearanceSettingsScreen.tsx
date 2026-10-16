@@ -152,7 +152,9 @@ export function AppearanceSettingsScreen() {
             value={fontSizeScale}
             options={FONT_SIZES.map((item) => ({
               ...item,
-              style: { fontSize: Math.round(scale(18) * item.value) },
+              // 字号预览只乘该预设自身系数，不乘当前全局 scale：
+              // 否则变更当前选中值时，四个选项标签会一起变大/变小（移动端不这样）。
+              style: { fontSize: Math.round(18 * item.value) },
             }))}
             onChange={(v) => setFontSizeScale(v)}
           />

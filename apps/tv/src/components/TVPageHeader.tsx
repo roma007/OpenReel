@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -26,6 +26,8 @@ export function TVPageHeader({
   const nav = useNavigation();
   const colors = useThemeColors();
   const scale = useScaledFontSize();
+  // 返回按钮底遵循「卡片透明度」（保留 TV 焦点可见性所需底色，只让底随透明度联动）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   const handleBack = () => {
     if (onBack) onBack();
@@ -36,13 +38,18 @@ export function TVPageHeader({
     <View
       style={[
         styles.bar,
-        { backgroundColor: colors.background, borderBottomColor: colors.border, paddingHorizontal: TV_LAYOUT.paddingX },
+        {
+          // 标题栏底遵循「卡片透明度」，与返回按钮同口径（保留实底以保证标题可读，只让底色随透明度联动）
+          backgroundColor: hexToRgba(colors.background, cardOpacity / 100),
+          borderBottomColor: colors.border,
+          paddingHorizontal: TV_LAYOUT.paddingX,
+        },
       ]}
     >
       <TVFocusable
         id={backId}
         onPress={handleBack}
-        style={[styles.back, { backgroundColor: colors.surface }]}
+        style={[styles.back, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
         testID={`tv-${backId}`}
       >
         <Text style={{ color: colors.foreground, fontSize: scale(17), fontWeight: '600' }}>返回</Text>

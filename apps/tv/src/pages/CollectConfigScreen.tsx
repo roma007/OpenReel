@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
@@ -55,6 +55,35 @@ function toDraft(cfg: Record<string, any> | null): Draft {
   };
 }
 
+const ALL_FIELDS: FieldDef[] = [...BASIC_FIELDS, ...LIMIT_FIELDS];
+
+/** 文本是否为可解析的纯数字（避免把输入中间态/空串写库） */
+const isDigits = (v: string | undefined) => /^\d+$/.test((v ?? '').trim());
+
+/** 数值字段草稿是否全部可解析（缺一即视为输入中间态，暂不写库） */
+const draftReady = (d: Draft) => ALL_FIELDS.every((f) => isDigits(d[f.key]));
+
+/** 草稿 → 落库载荷（范围收敛语义与旧「保存配置」按钮一致） */
+function buildPayload(d: Draft, autoEnabled: boolean, autoOnStartup: boolean) {
+  const num = (k: string, min: number, max: number, fallback: number) => {
+    const n = parseInt(d[k] ?? '', 10);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  const interval = parseInt(d.autoIntervalHours ?? '', 10);
+  return {
+    minYear: num('minYear', 1900, 2100, 2025),
+    retryTimes: num('retryTimes', 0, 10, 3),
+    pageSize: num('pageSize', 5, 100, 20),
+    maxPages: num('maxPages', 1, 10000, 10),
+    incrementalMaxPages: num('incrementalMaxPages', 1, 10000, 100),
+    maxIncrementalHours: num('maxIncrementalHours', 0, 87600, 720),
+    concurrency: num('concurrency', 1, 20, 6),
+    autoEnabled,
+    autoIntervalHours: Number.isFinite(interval) ? Math.min(8760, Math.max(1, interval)) : 24,
+    autoOnStartup: autoOnStartup && autoEnabled,
+  };
+}
+
 /**
  * TV 采集配置页。
  *
@@ -77,7 +106,12 @@ export function CollectConfigScreen() {
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoOnStartup, setAutoOnStartup] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [savedTip, setSavedTip] = useState(false);
+  // 即时保存：本地 state 为唯一编辑源，store 仅在首次水合时写入本地，
+  // 避免写库后的 loadCollectConfig 回写打断正在输入的内容
+  const hydratedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadCollectConfig().catch(() => {});
@@ -87,10 +121,18 @@ export function CollectConfigScreen() {
 
   useEffect(() => {
     if (!collectConfig) return;
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
     setDraft(toDraft(collectConfig as unknown as Record<string, any>));
     setAutoEnabled(!!collectConfig.autoEnabled);
     setAutoOnStartup(!!collectConfig.autoOnStartup);
   }, [collectConfig]);
+
+  // 清理未触发的 debounce / 提示定时器
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+  }, []);
 
   const parsed = useMemo(() => {
     const out: Record<string, number> = {};
@@ -109,31 +151,61 @@ export function CollectConfigScreen() {
     return all.filter((f) => String(parsed[f.key]) !== (draft[f.key] ?? '').trim()).map((f) => f.label);
   }, [draft, parsed]);
 
-  const save = async () => {
-    setSaving(true);
+  /** 即时保存唯一写入口：落库 + 轻提示（页面已无手动保存按钮） */
+  const persist = useCallback(async (d: Draft, en: boolean, startup: boolean) => {
     try {
-      await updateCollectConfig({
-        minYear: parsed.minYear,
-        retryTimes: parsed.retryTimes,
-        pageSize: parsed.pageSize,
-        maxPages: parsed.maxPages,
-        incrementalMaxPages: parsed.incrementalMaxPages,
-        maxIncrementalHours: parsed.maxIncrementalHours,
-        concurrency: parsed.concurrency,
-        autoEnabled,
-        autoIntervalHours: parsed.autoIntervalHours,
-        autoOnStartup: autoOnStartup && autoEnabled,
-      });
-      setMessage('配置已保存');
+      await updateCollectConfig(buildPayload(d, en, startup));
+      setMessage(null);
+      setSavedTip(true);
+      if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+      tipTimerRef.current = setTimeout(() => setSavedTip(false), 2000);
     } catch (e) {
       setMessage(`保存失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSaving(false);
     }
+  }, [updateCollectConfig]);
+
+  /** 数值输入：500ms debounce 写库；输入中间态（空串/非纯数字）暂不写库 */
+  const scheduleSave = useCallback((d: Draft, en: boolean, startup: boolean) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void persist(d, en, startup);
+    }, 500);
+  }, [persist]);
+
+  /** 立即写库（开关 / 恢复默认参数） */
+  const saveNow = useCallback((d: Draft, en: boolean, startup: boolean) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    void persist(d, en, startup);
+  }, [persist]);
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...draft, [key]: value };
+    setDraft(next);
+    if (!draftReady(next)) return;
+    scheduleSave(next, autoEnabled, autoOnStartup);
+  };
+
+  const toggleAutoEnabled = () => {
+    const next = !autoEnabled;
+    // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
+    const nextStartup = next ? autoOnStartup : false;
+    setAutoEnabled(next);
+    setAutoOnStartup(nextStartup);
+    saveNow(draft, next, nextStartup);
+  };
+
+  const toggleAutoOnStartup = () => {
+    const next = !autoOnStartup;
+    setAutoOnStartup(next);
+    saveNow(draft, autoEnabled, next);
   };
 
   const resetDefaults = () => {
-    setDraft({
+    const next: Draft = {
       minYear: '2025',
       retryTimes: '3',
       pageSize: '20',
@@ -142,8 +214,9 @@ export function CollectConfigScreen() {
       maxIncrementalHours: '720',
       concurrency: '6',
       autoIntervalHours: '24',
-    });
-    setMessage('已填入默认参数，按「保存配置」生效');
+    };
+    setDraft(next);
+    saveNow(next, autoEnabled, autoOnStartup);
   };
 
   const renderField = (f: FieldDef) => (
@@ -156,7 +229,7 @@ export function CollectConfigScreen() {
       maxLength={8}
       placeholder={`${f.fallback}（${f.min}~${f.max}）`}
       hint={`${f.desc}；超范围将自动截到 ${f.min}~${f.max}`}
-      onChangeText={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+      onChangeText={(v) => updateField(f.key, v)}
       testID={`tv-cfg-${f.key}`}
     />
   );
@@ -166,7 +239,7 @@ export function CollectConfigScreen() {
       <TVPageHeader
         title="采集配置"
         backId="cfg-back"
-        right={<TVButton id="cfg-save" label={saving ? '保存中…' : '保存配置'} variant="primary" disabled={saving} onPress={save} testID="tv-cfg-save" />}
+        right={savedTip ? <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>已自动保存</Text> : null}
       />
 
       <ScrollView
@@ -193,11 +266,7 @@ export function CollectConfigScreen() {
 
           <TVFocusable
             id="cfg:autoEnabled"
-            onPress={() => {
-              const next = !autoEnabled;
-              setAutoEnabled(next);
-              if (!next) setAutoOnStartup(false);
-            }}
+            onPress={toggleAutoEnabled}
             style={[styles.switchRow, { borderColor: colors.border }]}
             testID="tv-cfg-auto-enabled"
           >
@@ -227,7 +296,7 @@ export function CollectConfigScreen() {
             maxLength={6}
             placeholder="24（1~8760）"
             hint="距上次自动采集达到该间隔后触发（电视端仅记录）"
-            onChangeText={(v) => setDraft((d) => ({ ...d, autoIntervalHours: v }))}
+            onChangeText={(v) => updateField('autoIntervalHours', v)}
             testID="tv-cfg-auto-interval"
           />
 
@@ -238,7 +307,7 @@ export function CollectConfigScreen() {
                 setMessage('需先开启「启用自动采集」');
                 return;
               }
-              setAutoOnStartup((v) => !v);
+              toggleAutoOnStartup();
             }}
             style={[styles.switchRow, { borderColor: colors.border, opacity: autoEnabled ? 1 : 0.5 }]}
             testID="tv-cfg-auto-startup"
@@ -269,20 +338,12 @@ export function CollectConfigScreen() {
 
         {clampWarn.length > 0 ? (
           <Text style={[styles.note, { color: colors.warning, fontSize: scale(15) }]}>
-            以下字段超出合法范围，保存时按范围截断：{clampWarn.join('、')}
+            以下字段超出合法范围，将自动截断到允许区间：{clampWarn.join('、')}
           </Text>
         ) : null}
 
         <View style={styles.btnRow}>
           <TVButton id="cfg-reset" label="恢复默认参数" onPress={resetDefaults} testID="tv-cfg-reset" />
-          <TVButton
-            id="cfg-save-bottom"
-            label={saving ? '保存中…' : '保存配置'}
-            variant="primary"
-            disabled={saving}
-            onPress={save}
-            testID="tv-cfg-save-bottom"
-          />
         </View>
 
         {message ? (

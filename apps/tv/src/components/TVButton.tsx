@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text, View, StyleSheet } from 'react-native';
-import { useThemeColors, radius } from '@openreel/expo-ui';
+import { useThemeColors, useThemeStore, hexToRgba, radius } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { tv } from '../theme/tokens';
 
@@ -59,15 +59,17 @@ export function TVButton({
   labelStyle,
 }: TVButtonProps) {
   const colors = useThemeColors();
+  // 按钮底遵循「卡片透明度」，与移动端 ui/Button 一致（移动端也乘 cardOpacity）
+  const cardOpacity = useThemeStore((s) => s.cardOpacity);
 
   const bg =
     variant === 'primary'
-      ? colors.buttonPrimaryBg
+      ? hexToRgba(colors.buttonPrimaryBg, cardOpacity / 100)
       : variant === 'danger'
-        ? colors.buttonDestructiveBg
+        ? hexToRgba(colors.error, cardOpacity / 100 * 0.15)
         : variant === 'ghost'
           ? 'transparent'
-          : colors.surface;
+          : hexToRgba(colors.surface, cardOpacity / 100);
   const fg =
     variant === 'primary'
       ? colors.buttonPrimaryText
