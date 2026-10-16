@@ -98,8 +98,8 @@ android {
         applicationId 'com.movie.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 187
-        versionName "1.0.187"
+        versionCode 188
+        versionName "1.0.188"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -110,15 +110,24 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // 永久固定 release 签名（2026-10-16 启用）。升级/重装由「包名 + 签名」判定：
+            // 本密钥一经发布永久不可更换，更换会让存量用户被判为新装，必须卸载重装且清空本地数据。
+            // 与 TV 端 apps/tv/android/app/release.keystore 为同一把密钥。
+            storeFile file('release.keystore')
+            storePassword '5b59870e35e3d953ff9eef7f'
+            keyAlias 'openreel'
+            keyPassword '5b59870e35e3d953ff9eef7f'
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // 永久固定 release 签名（2026-10-16 起），不再使用 debug.keystore。
+            // 与移动端 apps/mobile/android/app/release.keystore 为同一把密钥。
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
