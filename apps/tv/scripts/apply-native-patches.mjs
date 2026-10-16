@@ -8,7 +8,7 @@
 // 依据：AGENTS.md「移动端构建同步铁律」——依赖 node_modules 补丁的能力在重装/重编时有丢失风险，
 // 故 TV 端同样在 postinstall 自动重打。
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { createRequire } from 'module';
 
@@ -19,6 +19,60 @@ function resolvePkg(name) {
     return dirname(require.resolve(`${name}/package.json`));
   } catch {
     return null;
+  }
+}
+
+// ---------- 并发保护 ----------
+// apps/tv 与 apps/mobile 的 postinstall 会补丁同一份被 pnpm hoist 的 node_modules/expo-video，
+// 而 pnpm 可能并发执行两个 package 的 postinstall。两个进程同时读-改-写同一文件会互相覆盖
+// （lost update）并因非原子写产生残渣——曾把 VideoPlayer.kt 写坏（多出 2 行残渣），Kotlin 编译失败。
+// 故用目录锁把整个补丁流程串行化（Node 主线程可用 Atomics.wait 同步等待）。
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function patchLockDir() {
+  for (const name of ['expo-video', 'expo-video-cache', 'expo-file-system']) {
+    const pkgDir = resolvePkg(name);
+    if (pkgDir) return join(dirname(pkgDir), '.apply-native-patches.lock');
+  }
+  return null;
+}
+
+function withPatchLock(fn) {
+  const dir = patchLockDir();
+  if (!dir) {
+    fn();
+    return;
+  }
+  const started = Date.now();
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      break;
+    } catch (e) {
+      if (e && e.code !== 'EEXIST') {
+        fn(); // 无法加锁也不阻断安装
+        return;
+      }
+      try {
+        // 陈旧锁（上次进程被强杀）超 5 分钟则接管
+        if (Date.now() - statSync(dir).mtimeMs > 5 * 60 * 1000) {
+          rmSync(dir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {}
+      if (Date.now() - started > 10 * 60 * 1000) {
+        console.log('[tv-patch] 等待补丁锁超时（跳过，可手动重跑本脚本）');
+        return;
+      }
+      sleepSync(100);
+    }
+  }
+  try {
+    fn();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -35,8 +89,13 @@ function patchConcurrency() {
     return;
   }
   let content = readFileSync(file, 'utf8');
-  if (content.includes('N 并发分片读取')) {
-    console.log('[tv-patch] Android 并发补丁已存在，跳过');
+  // 幂等标记：两端同源补丁共用功能标记，避免顺序/并发不同导致重复注入或误报
+  if (
+    content.includes('N 并发分片读取') ||
+    content.includes('功能12') ||
+    content.includes('prefetch_concurrency')
+  ) {
+    console.log('[tv-patch] Android 并发补丁已存在（TV 或移动端脚本注入），跳过');
     return;
   }
   if (!content.includes('import okhttp3.Dispatcher')) {
@@ -80,8 +139,13 @@ function patchSegmentProgress() {
     return;
   }
   let content = readFileSync(file, 'utf8');
-  if (content.includes('预读分片进度')) {
-    console.log('[tv-patch] Android 分片进度已存在，跳过');
+  // 幂等标记：两端同源补丁共用功能标记
+  if (
+    content.includes('预读分片进度') ||
+    content.includes('功能13') ||
+    content.includes('segment_progress.json')
+  ) {
+    console.log('[tv-patch] Android 分片进度补丁已存在（TV 或移动端脚本注入），跳过');
     return;
   }
   if (!content.includes('import java.io.File\n')) {
@@ -167,9 +231,11 @@ function patchSegmentProgress() {
   console.log('[tv-patch] Android VideoPlayer.kt 已注入分片进度补丁');
 }
 
-try {
-  patchConcurrency();
-  patchSegmentProgress();
-} catch (e) {
-  console.log('[tv-patch] 补丁过程异常（已忽略）:', e?.message || String(e));
-}
+withPatchLock(() => {
+  try {
+    patchConcurrency();
+    patchSegmentProgress();
+  } catch (e) {
+    console.log('[tv-patch] 补丁过程异常（已忽略）:', e?.message || String(e));
+  }
+});
