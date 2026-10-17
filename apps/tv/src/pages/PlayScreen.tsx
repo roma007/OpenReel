@@ -59,7 +59,6 @@ export function PlayScreen() {
   const wantEpIdRef = useRef<number | null>(route.params.episodeId ?? null);
 
   const [media, setMedia] = useState<Media | null>(null);
-  const [title, setTitle] = useState(route.params.title || '');
   const [seasons, setSeasons] = useState<number[]>([]);
   const [seriesMedia, setSeriesMedia] = useState<Media[]>([]);
   const [currentSeason, setCurrentSeason] = useState<number>(route.params.season ?? 1);
@@ -77,9 +76,12 @@ export function PlayScreen() {
   const [currentSpeed, setCurrentSpeed] = useState(1);
   const [panelOpen, setPanelOpen] = useState(false);
   const [player, setPlayer] = useState<any>(null);
+  // 进度条仅在左右键快进快退时显示，停止操作 2.5s 后自动隐藏（需求：删除常显底部浮窗）
+  const [seekBarVisible, setSeekBarVisible] = useState(false);
 
   const playerRef = useRef<any>(null);
   const initedRef = useRef<number | null>(null);
+  const seekBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const curEpRef = useRef<number | null>(currentEpId);
   curEpRef.current = currentEpId;
 
@@ -134,8 +136,6 @@ export function PlayScreen() {
       const m = await provider.getMediaById(activeMediaId);
       if (cancelled) return;
       setMedia(m);
-      // 切季可能切到「关联的其他季」的另一个 media，标题必须以实际加载到的 media 为准
-      setTitle(m?.title || route.params.title || '');
       provider.incrementViewCount(activeMediaId).catch(() => {});
 
       const ss = await provider.getSeasonsByMediaId(activeMediaId);
@@ -383,6 +383,20 @@ export function PlayScreen() {
     } catch {}
   }, []);
 
+  // 显示进度条并重置自动隐藏定时器（连续按左右键时保持显示）
+  const showSeekBar = useCallback(() => {
+    setSeekBarVisible(true);
+    if (seekBarTimerRef.current) clearTimeout(seekBarTimerRef.current);
+    seekBarTimerRef.current = setTimeout(() => setSeekBarVisible(false), 2500);
+  }, []);
+
+  // 卸载：清进度条自动隐藏定时器
+  useEffect(() => {
+    return () => {
+      if (seekBarTimerRef.current) clearTimeout(seekBarTimerRef.current);
+    };
+  }, []);
+
   // ─── 面板选择 ───
   const switchSeason = useCallback(
     (season: number) => {
@@ -490,15 +504,19 @@ export function PlayScreen() {
   const onSurfaceKey = useCallback(
     (e: any) => {
       const code = e?.nativeEvent?.code;
-      if (code === 'ArrowLeft') seek(-SKIP_SECONDS);
-      else if (code === 'ArrowRight') seek(SKIP_SECONDS);
-      else if (code === 'ArrowUp') {
+      if (code === 'ArrowLeft') {
+        seek(-SKIP_SECONDS);
+        showSeekBar();
+      } else if (code === 'ArrowRight') {
+        seek(SKIP_SECONDS);
+        showSeekBar();
+      } else if (code === 'ArrowUp') {
         if (prevEp) switchEpisode(prevEp.id);
       } else if (code === 'ArrowDown') {
         if (nextEp) switchEpisode(nextEp.id);
       }
     },
-    [seek, prevEp, nextEp, switchEpisode],
+    [seek, showSeekBar, prevEp, nextEp, switchEpisode],
   );
 
   if (error) {
@@ -541,32 +559,24 @@ export function PlayScreen() {
         onKeyDown={onSurfaceKey}
       >
         <View style={styles.overlay} pointerEvents="none">
-          <View style={styles.progressRow}>
-            <Text style={[styles.time, { color: colors.foreground }]}>{fmt(position)}</Text>
-            <View style={[styles.track, { backgroundColor: colors.trackBg }]}>
-              <View
-                style={[
-                  styles.trackFill,
-                  {
-                    backgroundColor: colors.buttonPrimaryBg,
-                    width: duration > 0 ? `${Math.min(100, (position / duration) * 100)}%` : '0%',
-                  },
-                ]}
-              />
+          {/* 进度条：仅左右键快进快退时显示 2.5s（需求：删除常显底部浮窗） */}
+          {seekBarVisible ? (
+            <View style={styles.progressRow}>
+              <Text style={[styles.time, { color: colors.foreground }]}>{fmt(position)}</Text>
+              <View style={[styles.track, { backgroundColor: colors.trackBg }]}>
+                <View
+                  style={[
+                    styles.trackFill,
+                    {
+                      backgroundColor: colors.buttonPrimaryBg,
+                      width: duration > 0 ? `${Math.min(100, (position / duration) * 100)}%` : '0%',
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.time, { color: colors.foreground }]}>{fmt(duration)}</Text>
             </View>
-            <Text style={[styles.time, { color: colors.foreground }]}>{fmt(duration)}</Text>
-          </View>
-
-          <Text numberOfLines={1} style={[styles.title, { color: colors.foreground }]}>
-            {title || media?.title || ''}
-            {episodes.length > 0 && currentIndex >= 0
-              ? `  ${epTitle(episodes[currentIndex])}`
-              : ''}
-          </Text>
-
-          <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-            {paused ? '⏸ 已暂停　' : '▶ 播放中　'}← → 快进快退　↑ ↓ 切集　OK 播放/暂停　菜单 更多
-          </Text>
+          ) : null}
         </View>
       </TVFocusable>
 
@@ -815,7 +825,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   surface: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  // 不可聚焦 overlay：进度条 + 标题 + 键位提示
+  // 不可聚焦 overlay：进度条（仅左右键快进快退时显示）
   overlay: {
     position: 'absolute',
     left: 0,
@@ -824,12 +834,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 48,
     paddingBottom: 36,
   },
-  progressRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  progressRow: { flexDirection: 'row', alignItems: 'center' },
   time: { fontSize: 20, fontVariant: ['tabular-nums'] },
   track: { flex: 1, height: 6, marginHorizontal: 16, borderRadius: 3, overflow: 'hidden' },
   trackFill: { height: '100%' },
-  title: { fontSize: 26, fontWeight: '600', marginBottom: 6 },
-  hint: { fontSize: 18 },
 
   panelBackdrop: {
     flex: 1,
