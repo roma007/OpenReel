@@ -1,6 +1,6 @@
 {
   "name": "@openreel/expo-db",
-  "version": "1.0.188",
+  "version": "1.0.189",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {

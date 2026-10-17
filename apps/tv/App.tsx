@@ -11,6 +11,7 @@ import { initApp } from './src/init';
 import { writePrefetchConcurrency } from './src/services/cache';
 import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
+import CollectProgressDialog from './src/components/CollectProgressDialog';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
@@ -76,6 +77,8 @@ function RootNavigator() {
       </Stack.Navigator>
       {/* 焦点桥：无有效焦点时补焦点（页面初始焦点 / 焦点丢失恢复），全局只挂一次 */}
       <TVFocusBridge />
+      {/* 增量采集进度窗口：全局浮层，collectSourceProgress 非空即在左下角弹出（对齐移动端） */}
+      <CollectProgressDialog />
     </>
   );
 }

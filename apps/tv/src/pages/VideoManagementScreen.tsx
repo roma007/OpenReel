@@ -594,99 +594,150 @@ export function VideoManagementScreen() {
 
           {localConfig && (
             <>
-              <TVSelectRow<number>
-                id="vm-layer"
-                label=""
-                hideLabel
-                value={activeLayer}
-                options={CONFIG_TABS.map((t) => ({ value: t.id, label: `${t.badge} ${t.label}` }))}
-                onChange={(v) => setActiveLayer(v)}
+              <View style={styles.segmentRow}>
+                {CONFIG_TABS.map((tab) => {
+                  const isActive = activeLayer === tab.id;
+                  return (
+                    <TVFocusable
+                      key={tab.id}
+                      id={`vm-layer:${tab.id}`}
+                      onPress={() => setActiveLayer(tab.id)}
+                      style={[
+                        styles.segment,
+                        isActive && styles.segmentActive,
+                        {
+                          backgroundColor: hexToRgba(
+                            isActive ? colors.cardAccent : colors.cardDim,
+                            cardOpacity / 100,
+                          ),
+                        },
+                      ]}
+                      testID={`tv-vm-layer-${tab.id}`}
+                    >
+                      <View style={styles.segmentBadge}>
+                        <Text
+                          style={[
+                            styles.segmentBadgeText,
+                            {
+                              color: isActive ? colors.buttonPrimaryText : colors.buttonSecondaryText,
+                              fontSize: scale(18),
+                            },
+                          ]}
+                        >
+                          {tab.badge}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.segmentText,
+                          isActive && styles.segmentTextActive,
+                          {
+                            color: isActive ? colors.buttonPrimaryText : colors.buttonSecondaryText,
+                            fontSize: scale(16),
+                          },
+                        ]}
+                      >
+                        {tab.label}
+                      </Text>
+                    </TVFocusable>
+                  );
+                })}
+              </View>
+
+              <View
+                style={[
+                  styles.configPanel,
+                  { backgroundColor: hexToRgba(colors.cardAccent, cardOpacity / 100) },
+                ]}
+              >
+                {activeLayer === 1 && (
+                  <>
+                    <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
+                      用 {'{N}'} 代表数字，例如「{'{N}'}分钟」可匹配"30分钟"、"每集30分钟"等文本中的时长
+                    </Text>
+                    <RemovableChips
+                      idPrefix="vm-pattern"
+                      items={localConfig.summaryPatterns}
+                      onRemove={removePattern}
+                      tone="neutral"
+                      testIDPrefix="tv-vm-pattern"
+                    />
+                    <TVTextInput
+                      id="vm-pattern-input"
+                      value={patternInput}
+                      mode="text"
+                      maxLength={60}
+                      placeholder="输入模板，如 {N}分钟"
+                      hint="输入完成后点「添加」写入模板列表"
+                      onChangeText={setPatternInput}
+                      testID="tv-vm-pattern-input"
+                    />
+                    <View style={styles.btnRow}>
+                      <TVButton id="vm-pattern-add" label="添加" variant="primary" onPress={addPattern} testID="tv-vm-pattern-add" />
+                    </View>
+                  </>
+                )}
+
+                {activeLayer === 2 && (
+                  <>
+                    <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
+                      逐集探测视频流时长，成功1集即止；根据探测结果与下方阈值判断长短剧
+                    </Text>
+                    <TVTextInput
+                      id="vm-threshold"
+                      label="短剧判定阈值（分钟）"
+                      value={String(localConfig.durationThresholdMinutes)}
+                      mode="digits"
+                      maxLength={4}
+                      hint="单集时长低于阈值为短剧"
+                      onChangeText={setThreshold}
+                      testID="tv-vm-threshold"
+                    />
+                    <TVTextInput
+                      id="vm-probe-count"
+                      label="探测集数上限"
+                      value={String(localConfig.probeEpisodeCount)}
+                      mode="digits"
+                      maxLength={4}
+                      hint="最多探测N集视频流"
+                      onChangeText={setProbeCount}
+                      testID="tv-vm-probe-count"
+                    />
+                  </>
+                )}
+
+                {activeLayer === 3 && (
+                  <>
+                    <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
+                      当第1、2层均未命中时，根据简介、标题、类型中是否包含这些关键词来判断
+                    </Text>
+                    <RemovableChips
+                      idPrefix="vm-keyword"
+                      items={localConfig.metaKeywords}
+                      onRemove={removeKeyword}
+                      tone="neutral"
+                      testIDPrefix="tv-vm-keyword"
+                    />
+                    <TVTextInput
+                      id="vm-keyword-input"
+                      value={keywordInput}
+                      mode="text"
+                      maxLength={40}
+                      placeholder="输入关键词"
+                      hint="输入完成后点「添加」写入关键词列表"
+                      onChangeText={setKeywordInput}
+                      testID="tv-vm-keyword-input"
+                    />
+                    <View style={styles.btnRow}>
+                      <TVButton id="vm-keyword-add" label="添加" variant="primary" onPress={addKeyword} testID="tv-vm-keyword-add" />
+                    </View>
+                  </>
+                )}
+              </View>
+
+              <View
+                style={[styles.panelDivider, { backgroundColor: hexToRgba(colors.mutedForeground, 0.2) }]}
               />
-
-              {activeLayer === 1 && (
-                <>
-                  <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
-                    用 {'{N}'} 代表数字，例如「{'{N}'}分钟」可匹配"30分钟"、"每集30分钟"等文本中的时长
-                  </Text>
-                  <RemovableChips
-                    idPrefix="vm-pattern"
-                    items={localConfig.summaryPatterns}
-                    onRemove={removePattern}
-                    tone="neutral"
-                    testIDPrefix="tv-vm-pattern"
-                  />
-                  <TVTextInput
-                    id="vm-pattern-input"
-                    value={patternInput}
-                    mode="text"
-                    maxLength={60}
-                    placeholder="输入模板，如 {N}分钟"
-                    hint="输入完成后点「添加」写入模板列表"
-                    onChangeText={setPatternInput}
-                    testID="tv-vm-pattern-input"
-                  />
-                  <View style={styles.btnRow}>
-                    <TVButton id="vm-pattern-add" label="添加" variant="primary" onPress={addPattern} testID="tv-vm-pattern-add" />
-                  </View>
-                </>
-              )}
-
-              {activeLayer === 2 && (
-                <>
-                  <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
-                    逐集探测视频流时长，成功1集即止；根据探测结果与下方阈值判断长短剧
-                  </Text>
-                  <TVTextInput
-                    id="vm-threshold"
-                    label="短剧判定阈值（分钟）"
-                    value={String(localConfig.durationThresholdMinutes)}
-                    mode="digits"
-                    maxLength={4}
-                    hint="单集时长低于阈值为短剧"
-                    onChangeText={setThreshold}
-                    testID="tv-vm-threshold"
-                  />
-                  <TVTextInput
-                    id="vm-probe-count"
-                    label="探测集数上限"
-                    value={String(localConfig.probeEpisodeCount)}
-                    mode="digits"
-                    maxLength={4}
-                    hint="最多探测N集视频流"
-                    onChangeText={setProbeCount}
-                    testID="tv-vm-probe-count"
-                  />
-                </>
-              )}
-
-              {activeLayer === 3 && (
-                <>
-                  <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontSize: scale(15) }]}>
-                    当第1、2层均未命中时，根据简介、标题、类型中是否包含这些关键词来判断
-                  </Text>
-                  <RemovableChips
-                    idPrefix="vm-keyword"
-                    items={localConfig.metaKeywords}
-                    onRemove={removeKeyword}
-                    tone="neutral"
-                    testIDPrefix="tv-vm-keyword"
-                  />
-                  <TVTextInput
-                    id="vm-keyword-input"
-                    value={keywordInput}
-                    mode="text"
-                    maxLength={40}
-                    placeholder="输入关键词"
-                    hint="输入完成后点「添加」写入关键词列表"
-                    onChangeText={setKeywordInput}
-                    testID="tv-vm-keyword-input"
-                  />
-                  <View style={styles.btnRow}>
-                    <TVButton id="vm-keyword-add" label="添加" variant="primary" onPress={addKeyword} testID="tv-vm-keyword-add" />
-                  </View>
-                </>
-              )}
-
               <View style={styles.btnRow}>
                 <TVButton
                   id="vm-config-reset"
@@ -1051,6 +1102,38 @@ const styles = StyleSheet.create({
   sectionTitle: { fontWeight: '700', marginBottom: tv(12), marginTop: tv(6) },
   card: { padding: tv(20), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(22) },
   cardDesc: { lineHeight: tv(24), marginBottom: tv(12) },
+  segmentRow: { flexDirection: 'row', gap: tv(6), alignItems: 'flex-end' },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: tv(6),
+    paddingVertical: tv(8),
+    borderTopLeftRadius: tv(10),
+    borderTopRightRadius: tv(10),
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  segmentActive: { paddingVertical: tv(11) },
+  segmentBadge: {
+    width: tv(30),
+    height: tv(30),
+    borderRadius: tv(15),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentBadgeText: { fontWeight: '700' },
+  segmentText: { fontWeight: '500' },
+  segmentTextActive: { fontWeight: '600' },
+  configPanel: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: tv(10),
+    borderBottomRightRadius: tv(10),
+    padding: tv(14),
+  },
+  panelDivider: { height: StyleSheet.hairlineWidth, marginVertical: tv(4) },
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: tv(14) },
   quickRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   sectionRow: {

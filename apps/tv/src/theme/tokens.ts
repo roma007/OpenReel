@@ -73,11 +73,23 @@ export const TV_GRID_CARD = {
   gap: GRID_GAP,
 } as const;
 
-/** 剧集格（详情页选集，4:3 缩略） */
+/**
+ * 剧集格（详情页选集）。
+ *
+ * 用户要求「一排 10 集」：宽度由可用宽度反算，保证 10 × (width + gap) 不超出内容宽度
+ * （内容宽 = 屏宽 − 左右安全边距；item 自带 marginRight=gap，故每列实际占 width+gap）。
+ * 高度按 0.75 比例收窄，配合只有一行「集标题」的按钮形态。
+ */
+const EP_COLUMNS = 10;
+const EP_GAP = tv(12);
+const EP_WIDTH = Math.floor(
+  (width - TV_LAYOUT.paddingX * 2 + tv(8) - EP_GAP * EP_COLUMNS) / EP_COLUMNS,
+);
 export const TV_EPISODE = {
-  width: tv(230),
-  height: tv(150),
-  gap: tv(18),
+  columns: EP_COLUMNS,
+  width: EP_WIDTH,
+  height: Math.round(EP_WIDTH * 0.75),
+  gap: EP_GAP,
 } as const;
 
 export const TV_SCREEN = { width, height } as const;
