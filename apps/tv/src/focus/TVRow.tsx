@@ -16,7 +16,7 @@ export interface TVRowProps {
   title?: string;
   /**
    * 标题点击回调：传入时标题渲染成可聚焦的「xxx ›」入口。
-   * TV 端没有手势下拉，行标题是唯一的「查看全部」入口（如首页「继续观看 ›」→ 观看历史页）。
+   * TV 端没有手势下拉，行标题是唯一的「查看全部」入口（如分类页行标题跳列表页）。
    */
   onTitlePress?: () => void;
   /** 行首是否带「查看全部」等尾部动作元素 */
@@ -32,6 +32,11 @@ export interface TVRowProps {
   onFocusIndexChange?: (index: number) => void;
   /** 空列表时的提示文案 */
   emptyText?: string;
+  /**
+   * 行内全部卡片的「向下」焦点目标（registry id，非必填）。
+   * 如首页四栏：本栏行向下钉死进入下一栏首个视频卡（TVFocusable.nextFocusDownId）。
+   */
+  nextFocusDownId?: string;
 }
 
 export function TVRow({
@@ -47,6 +52,7 @@ export function TVRow({
   onItemPress,
   onFocusIndexChange,
   emptyText = '暂无内容',
+  nextFocusDownId,
 }: TVRowProps) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
@@ -110,6 +116,7 @@ export function TVRow({
           <TVFocusable
             key={`${rowId}-${keyExtractor(item, index)}`}
             id={`${rowId}:${keyExtractor(item, index)}`}
+            nextFocusDownId={nextFocusDownId}
             // onLayout 必须挂在 Pressable（内容容器直接子节点）上，layout.x 才是相对内容的真实偏移
             onLayout={(e) => onItemLayout(index, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
             onFocus={() => {

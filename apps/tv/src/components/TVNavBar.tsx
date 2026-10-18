@@ -22,12 +22,18 @@ export function TVNavBar({
   initialFocusKey,
   title,
   onSearch,
+  itemsNextFocusDownId,
 }: {
   items: TVNavItem[];
   initialFocusKey?: string;
   title?: string;
   /** 搜索入口：遥控端没有系统级搜索手势，必须显式可聚焦 */
   onSearch?: () => void;
+  /**
+   * 全部导航项（含搜索按钮）的「向下」焦点目标（registry id，非必填）。
+   * 如首页：导航条向下钉死进入第一个已渲染栏的首个视频卡。
+   */
+  itemsNextFocusDownId?: string;
 }) {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
@@ -57,6 +63,7 @@ export function TVNavBar({
             onPress={it.onPress}
             focusStyle={styles.focusedItem}
             testID={`tv-nav-${it.key}`}
+            nextFocusDownId={itemsNextFocusDownId}
             style={[styles.itemWrap, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
           >
             <View style={styles.itemInner}>
@@ -80,6 +87,7 @@ export function TVNavBar({
           onPress={onSearch}
           focusStyle={styles.focusedSearch}
           testID="tv-nav-search"
+          nextFocusDownId={itemsNextFocusDownId}
           style={[styles.searchBtn, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
           hitSlop={8}
         >

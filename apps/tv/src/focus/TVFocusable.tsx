@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  View,
+  findNodeHandle,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { focusRegistry } from './registry';
 import { useThemeColors } from '@openreel/expo-ui';
 import { TV_FIXED } from '../theme/tokens';
@@ -12,6 +19,12 @@ import { TV_FIXED } from '../theme/tokens';
  *
  * 焦点视觉沿用现有主题 token（不另造视觉体系）：焦点时叠 3dp 主色描边，可选轻微放大；
  * 电视观看距离远，故焦点态对比度比手机端更强。
+ *
+ * 焦点环用「外扩覆盖层」绘制（absolute 负 inset，不占布局空间）：
+ * 若直接用 borderWidth，Yoga 会把内容区收窄环宽，而调用方普遍给子卡传固定全宽，
+ * 卡片会向右溢出恰好盖住右边框（实测分类页卡片焦点环右边缺失，只有上/下/左三条边）。
+ * 覆盖层画在子内容之上（children 之后渲染），四条边均不会被卡片内容遮挡；
+ * 外扩量 = 环宽，圆角半径同步 + 环宽，保持与卡片圆角同心。
  */
 export interface TVFocusableProps {
   /** 稳定 id：焦点恢复（TVFocusBridge）据此定位目标 */
@@ -45,6 +58,16 @@ export interface TVFocusableProps {
    * 若挂在卡片内层 View 上，x 恒为 0，会导致横向滚动跟随失效。
    */
   onLayout?: (e: LayoutChangeEvent) => void;
+  /**
+   * 「向下」焦点目标（registry id，非必填）。
+   *
+   * 背景：Android 原生 FocusFinder 按几何就近选目标，首页这类「栏头按钮（右对齐）+
+   * 卡片行（左起）」布局里，向下常命中右对齐按钮而非卡片行。此 prop 把「按下」的
+   * 目标钉死为指定 registry 元素（如某栏首个视频卡），解决「进入一栏落在栏头按钮」。
+   * 目标常与自身同帧挂载，注册表里暂无节点，故订阅 registry 变化延迟解析 reactTag；
+   * 解析不到时不设原生属性，回落几何搜索（与旧行为一致）。
+   */
+  nextFocusDownId?: string;
 }
 
 let seq = 0;
@@ -64,6 +87,7 @@ export function TVFocusable({
   testID,
   onLayout,
   onKeyDown,
+  nextFocusDownId,
 }: TVFocusableProps) {
   const colors = useThemeColors();
   const nodeRef = useRef<React.ElementRef<typeof Pressable> | null>(null);
@@ -75,6 +99,24 @@ export function TVFocusable({
   handlersRef.current = { onFocus, onPress };
 
   const [isFocused, setIsFocused] = useState(false);
+  // 「向下」目标的原生 reactTag：nextFocusDown 需要数字 tag，而目标节点可能
+  // 与自身同帧挂载（渲染期 registry 里还没有），故挂载后订阅 registry 延迟解析。
+  const [nextFocusDownTag, setNextFocusDownTag] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!nextFocusDownId) {
+      setNextFocusDownTag(undefined);
+      return;
+    }
+    const resolve = () => {
+      const node = focusRegistry.node(nextFocusDownId);
+      const tag = node ? findNodeHandle(node as unknown as React.Component) : null;
+      setNextFocusDownTag(tag ?? undefined);
+    };
+    resolve();
+    // 目标 register/unregister 时 registry 会 emit，借机补解析/清失效 tag
+    return focusRegistry.subscribe(resolve);
+  }, [nextFocusDownId]);
 
   useEffect(() => {
     focusRegistry.register({
@@ -108,15 +150,7 @@ export function TVFocusable({
     focusRegistry.handleBlur(realId);
   }, [realId]);
 
-  const ring =
-    showFocusRing && isFocused
-      ? {
-          borderWidth: TV_FIXED.focusRingWidth,
-          // 主题无 primary token，沿用现有高亮语义色 cardAccent（与手机端卡片语言一致）
-          borderColor: focusColor || colors.buttonPrimaryBg,
-          borderRadius: TV_FIXED.radius,
-        }
-      : null;
+  const ringColor = focusColor || colors.buttonPrimaryBg;
 
   return (
     <Pressable
@@ -124,6 +158,7 @@ export function TVFocusable({
       ref={nodeRef as any}
       // Android TV：focusable 声明该节点可被方向键聚焦
       focusable={!disabled}
+      nextFocusDown={nextFocusDownTag}
       onLayout={onLayout}
       onFocus={handleFocus}
       onBlur={handleBlur}
@@ -132,13 +167,24 @@ export function TVFocusable({
       hitSlop={hitSlop}
       onPress={onPress}
       onLongPress={onLongPress}
-      style={[
-        style,
-        isFocused ? focusStyle : null,
-        ring,
-      ]}
+      style={[style, isFocused ? focusStyle : null]}
     >
       {children}
+      {showFocusRing && isFocused ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: -TV_FIXED.focusRingWidth,
+            left: -TV_FIXED.focusRingWidth,
+            right: -TV_FIXED.focusRingWidth,
+            bottom: -TV_FIXED.focusRingWidth,
+            borderWidth: TV_FIXED.focusRingWidth,
+            borderColor: ringColor,
+            borderRadius: TV_FIXED.radius + TV_FIXED.focusRingWidth,
+          }}
+        />
+      ) : null}
     </Pressable>
   );
 }

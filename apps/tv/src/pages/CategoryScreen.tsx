@@ -28,12 +28,10 @@ import type { RootStackParamList } from '../navigation/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Rt = RouteProp<RootStackParamList, 'Category'>;
 
-const SORTS: Array<{ key: string; label: string }> = [
+// 排序仅保留「推荐/最新」，对齐移动端/桌面端分类页
+const SORTS: Array<{ key: 'recommend' | 'latest'; label: string }> = [
   { key: 'recommend', label: '推荐' },
   { key: 'latest', label: '最新' },
-  { key: 'rating', label: '评分' },
-  { key: 'hot', label: '热门' },
-  { key: 'year', label: '年份' },
 ];
 
 /**
@@ -41,6 +39,9 @@ const SORTS: Array<{ key: string; label: string }> = [
  * 卡片总高不再固定（行高由内容自适应，对齐移动端）；GRID_CARD_HEIGHT 仅用于
  * 传给 MediaCard 计算海报高（posterHeight = height*0.76，保持海报比例不变）。
  */
+// 每页卡片数（首屏与触底追加共用，loadPage 的提前终止判断也依赖此值，禁止分开硬编码）
+const CATEGORY_PAGE_SIZE = 18;
+
 const GRID_COLUMNS = TV_GRID_CARD.columns ?? 6;
 const GRID_GAP = TV_GRID_CARD.gap;
 const GRID_CARD_WIDTH = TV_GRID_CARD.width;
@@ -57,24 +58,45 @@ export function CategoryScreen() {
 
   // 筛选状态全部来自 route.params（可被返回还原），缺省才用本地默认值
   const [page, setPage] = useState(route.params?.page ?? 1);
-  const [sort, setSort] = useState<string>(route.params?.sort ?? 'recommend');
+  const [sort, setSort] = useState<'latest' | 'recommend'>(route.params?.sort ?? 'recommend');
   const [subType, setSubType] = useState<string | undefined>(route.params?.subType);
   const [year, setYear] = useState<number | undefined>(route.params?.year);
+  const [area, setArea] = useState<string | undefined>(route.params?.area);
+  const [episodeType, setEpisodeType] = useState<'short' | 'long' | undefined>(
+    route.params?.episodeType === 'short' || route.params?.episodeType === 'long'
+      ? route.params.episodeType
+      : undefined,
+  );
 
   const [subTypes, setSubTypes] = useState<string[]>([]);
   const [years, setYears] = useState<number[]>([]);
+  const [areas, setAreas] = useState<string[]>([]);
+  const [showShortDramaFilter, setShowShortDramaFilter] = useState(false);
   const [items, setItems] = useState<Media[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // 对齐移动端：分类取「每个视频的第一个子类型」（不展开组合标签）；
+  // 地区参与筛选；「剧集（短剧/长剧）」仅在电视剧分类且库内存在短剧时提供。
   const loadFilters = useCallback(async () => {
     const store = getStore();
-    const [subs, ys] = await Promise.all([
-      store.getState().getSubTypesByType(initialType, false, false),
+    const [subs, ys, as] = await Promise.all([
+      store.getState().getSubTypesByType(initialType, undefined, true),
       store.getState().getYearsByType(initialType),
+      store.getState().getAreasByType(initialType),
     ]);
     setSubTypes((subs || []) as string[]);
     setYears((ys || []) as number[]);
+    setAreas((as || []) as string[]);
+    if (initialType === 'TV') {
+      try {
+        setShowShortDramaFilter(await store.getState().hasShortDrama('TV'));
+      } catch {
+        setShowShortDramaFilter(false);
+      }
+    } else {
+      setShowShortDramaFilter(false);
+    }
   }, [initialType]);
 
   const [loadingMore, setLoadingMore] = useState(false);
@@ -100,8 +122,9 @@ export function CategoryScreen() {
   const restorePageRef = useRef(Math.max(1, Number(route.params?.page) || 1));
 
   const loadPage = useCallback(
-    async (target: number) => {
-      setLoading(true);
+    async (target: number, opts?: { silent?: boolean }) => {
+      const silent = opts?.silent ?? false;
+      if (!silent) setLoading(true);
       try {
         const pages = Math.max(1, target);
         const collected: Media[] = [];
@@ -109,26 +132,32 @@ export function CategoryScreen() {
         for (let p = 1; p <= pages; p += 1) {
           const r = await getProvider().listMedia({
             page: p,
-            pageSize: 20,
-            sort: sort as any,
+            pageSize: CATEGORY_PAGE_SIZE,
+            sort,
             type: initialType,
             subType,
             year,
+            area,
+            isShortDrama:
+              episodeType === 'short' ? true : episodeType === 'long' ? false : undefined,
           });
           collected.push(...(r.items as Media[]));
           next = r.meta.total;
-          if (r.items.length < 20) break; // 已到最后一页
+          if (r.items.length < CATEGORY_PAGE_SIZE) break; // 已到最后一页
         }
         setItems(collected);
         setTotal(next);
       } catch {
-        setItems([]);
-        setTotal(0);
+        if (!silent) {
+          setItems([]);
+          setTotal(0);
+        }
+        // 静默重查失败保持现状，下次返回本页再试
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
-    [sort, initialType, subType, year],
+    [sort, initialType, subType, year, area, episodeType],
   );
 
   /** 触底加载下一页（追加，不替换），对应手机端 onEndReached */
@@ -139,11 +168,14 @@ export function CategoryScreen() {
     try {
       const r = await getProvider().listMedia({
         page: page + 1,
-        pageSize: 20,
-        sort: sort as any,
+        pageSize: CATEGORY_PAGE_SIZE,
+        sort,
         type: initialType,
         subType,
         year,
+        area,
+        isShortDrama:
+          episodeType === 'short' ? true : episodeType === 'long' ? false : undefined,
       });
       setItems((prev) => {
         const seen = new Set(prev.map((x) => x.id));
@@ -157,19 +189,21 @@ export function CategoryScreen() {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [page, items.length, total, sort, initialType, subType, year]);
+  }, [page, items.length, total, sort, initialType, subType, year, area, episodeType]);
 
   useEffect(() => {
     loadFilters();
   }, [loadFilters]);
 
-  // 顶部导航栏可在各大分类间直接切换：类型变化时清空上一个分类的子类型/年份筛选，回到第 1 页
+  // 顶部导航栏可在各大分类间直接切换：类型变化时清空上一个分类的子类型/年份/地区/剧集筛选，回到第 1 页
   const prevTypeRef = useRef(initialType);
   useEffect(() => {
     if (prevTypeRef.current === initialType) return;
     prevTypeRef.current = initialType;
     setSubType(undefined);
     setYear(undefined);
+    setArea(undefined);
+    setEpisodeType(undefined);
     setPage(1);
   }, [initialType]);
 
@@ -179,12 +213,36 @@ export function CategoryScreen() {
     loadPage(target);
   }, [loadPage]);
 
-  // 折叠筛选：默认全部收缩，同一时刻只展开一个筛选类
-  const [expandedFilter, setExpandedFilter] = useState<'sort' | 'subType' | 'year' | null>(null);
+  // 页码镜像：focus 重查时读取当前页码（重查 1..page 页，保持「返回还原」语义）
+  const pageRef = useRef(page);
+  pageRef.current = page;
 
-  const toggleFilter = useCallback((key: 'sort' | 'subType' | 'year') => {
-    setExpandedFilter((prev) => (prev === key ? null : key));
-  }, []);
+  // 返回本页（从详情/播放/视频管理等）时静默重查：隐藏/取消隐藏/采集入库后数据立即可见。
+  // 不闪加载态、不重置页码与筛选；首次 focus 交给上方 useEffect(restorePage) 处理，避免双跑。
+  // loadFilters 同步重查：筛选 chips 仅在挂载时加载，隐藏/取消隐藏子类型后返回必须刷新（对齐移动端 0cc1d8f）。
+  const didInitFocusRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!didInitFocusRef.current) {
+        didInitFocusRef.current = true;
+        return;
+      }
+      loadFilters();
+      loadPage(pageRef.current, { silent: true });
+    }, [loadFilters, loadPage]),
+  );
+
+  // 折叠筛选：默认全部收缩，同一时刻只展开一个筛选类
+  const [expandedFilter, setExpandedFilter] = useState<
+    'sort' | 'subType' | 'year' | 'area' | 'episode' | null
+  >(null);
+
+  const toggleFilter = useCallback(
+    (key: 'sort' | 'subType' | 'year' | 'area' | 'episode') => {
+      setExpandedFilter((prev) => (prev === key ? null : key));
+    },
+    [],
+  );
 
   /**
    * 收起面板后把焦点还原到刚操作的触发器。
@@ -207,7 +265,7 @@ export function CategoryScreen() {
   }, [loading]);
 
   // 筛选变更 → 页码回到第 1（与手机端一致：换筛选不应停留在旧页）；收起面板并把焦点还给触发器
-  const applySort = useCallback((s: string) => {
+  const applySort = useCallback((s: 'recommend' | 'latest') => {
     setSort(s);
     setPage(1);
     setExpandedFilter(null);
@@ -225,10 +283,24 @@ export function CategoryScreen() {
     setExpandedFilter(null);
     restoreFocus('cat-filter:year');
   }, [restoreFocus]);
+  const applyArea = useCallback((a?: string) => {
+    setArea(a);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:area');
+  }, [restoreFocus]);
+  const applyEpisodeType = useCallback((e?: 'short' | 'long') => {
+    setEpisodeType(e);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:episode');
+  }, [restoreFocus]);
 
   const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? '推荐';
   const subTypeLabel = subType ?? '全部';
   const yearLabel = year != null ? String(year) : '全部';
+  const areaLabel = area ?? '全部';
+  const episodeLabel = episodeType === 'short' ? '短剧' : episodeType === 'long' ? '长剧' : '全部';
 
   const openDetail = useCallback(
     (m: Media) => {
@@ -237,14 +309,16 @@ export function CategoryScreen() {
         title: m.title,
         from: 'category',
         page,
-        sort: sort as any,
+        sort,
         type: initialType,
         subType,
         year,
+        area,
+        episodeType,
         subtypePage: !!subType,
       });
     },
-    [nav, page, sort, initialType, subType, year],
+    [nav, page, sort, initialType, subType, year, area, episodeType],
   );
 
   const header = useMemo(
@@ -313,6 +387,24 @@ export function CategoryScreen() {
                 testID="tv-category-filter-year"
               />
             ) : null}
+            {areas.length > 0 ? (
+              <TVButton
+                id="cat-filter:area"
+                label={`地区：${areaLabel}`}
+                variant={expandedFilter === 'area' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('area')}
+                testID="tv-category-filter-area"
+              />
+            ) : null}
+            {showShortDramaFilter ? (
+              <TVButton
+                id="cat-filter:episode"
+                label={`剧集：${episodeLabel}`}
+                variant={expandedFilter === 'episode' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('episode')}
+                testID="tv-category-filter-episode"
+              />
+            ) : null}
           </View>
 
           {expandedFilter === 'sort' ? (
@@ -358,7 +450,7 @@ export function CategoryScreen() {
                 variant={year == null ? 'primary' : 'ghost'}
                 onPress={() => applyYear(undefined)}
               />
-              {years.slice(0, 20).map((y) => (
+              {years.map((y) => (
                 <TVButton
                   key={y}
                   id={`cat-year:${y}`}
@@ -367,6 +459,49 @@ export function CategoryScreen() {
                   onPress={() => applyYear(y)}
                 />
               ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'area' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-area:all"
+                label="全部"
+                variant={!area ? 'primary' : 'ghost'}
+                onPress={() => applyArea(undefined)}
+              />
+              {areas.map((a) => (
+                <TVButton
+                  key={a}
+                  id={`cat-area:${a}`}
+                  label={a}
+                  variant={area === a ? 'primary' : 'ghost'}
+                  onPress={() => applyArea(a)}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'episode' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-ep:all"
+                label="全部"
+                variant={!episodeType ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType(undefined)}
+              />
+              <TVButton
+                id="cat-ep:short"
+                label="短剧"
+                variant={episodeType === 'short' ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType('short')}
+              />
+              <TVButton
+                id="cat-ep:long"
+                label="长剧"
+                variant={episodeType === 'long' ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType('long')}
+              />
             </View>
           ) : null}
         </View>

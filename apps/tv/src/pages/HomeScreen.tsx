@@ -23,11 +23,13 @@ import { hexToRgba } from '@openreel/expo-ui';
  * TV 首页。
  *
  * 结构：顶部导航条（分类入口 + 我的/设置）+ 使用偏好卡片（对齐桌面/移动：
- * 追新电影 / 我的追剧 / 观看历史 / 我的收藏）+ 内容行（继续观看）。
+ * 追新电影 / 我的追剧 / 观看历史 / 我的收藏）。
  * 数据全部来自本地 SQLite，不请求网络。
  *
- * 遥控焦点：页面数据就绪后把初始焦点给「继续观看」首项（若有），否则给第一行首项 /
- * 空态按钮，保证方向键按下时一定有确定去处（不留焦点黑洞）。
+ * 遥控焦点：页面就绪后初始焦点给顶部导航「首页」按钮；焦点从栏外移入
+ * 追新电影 / 我的追剧 / 观看历史 / 我的收藏任一栏时，落在该栏首个视频卡片
+ * （行空时为栏头按钮），见下方 nextFocusDownId 接线；栏头按钮仍可从本栏
+ * 行内按「上」到达，不留焦点黑洞。
  *
  * 数据刷新：loadHome 在挂载与每次首页获得焦点（采集/AI 导入返回）时执行，
  * 采集入库后回首页立即可见（焦点已在的元素不重置，静默换数据）。
@@ -100,7 +102,7 @@ export function HomeScreen() {
     );
     setRows(Object.fromEntries(results));
 
-    // 继续观看：watch_history 只存 mediaId，标题/封面需回查 media 表
+    // 观看历史卡/我的追剧卡数据源：watch_history 只存 mediaId，标题/封面需回查 media 表
     const history = getStore().getState().watchHistory || [];
     const hist = await Promise.all(
       history.slice(0, 10).map((h) => provider.getMediaById(h.mediaId).catch(() => null)),
@@ -281,35 +283,18 @@ export function HomeScreen() {
     }
   }, [showSourceGuide]);
 
-  // 初始焦点（2026-10-08 uiautomator 实证后重写）：
-  //  - 旧写死 `row-continue:0` / `row-movie:0`：TVRow item id 实为 `${rowId}:${media.id}`
-  //    （media.id 1~7466，id=0 不存在），pending 永远无效 → recoverFocus 返回无效 id
-  //    反复空转，启动后 0 持焦节点（按键才 fallback 到 tv-nav-home）。
-  //  - 改用真实 id 后实证：目标 `row-movie:7466 has=true` 但该行在五张卡之后
-  //    （屏幕深处 y≈2000），原生 View.focus() 对屏幕外视图静默失败，重试 6 次后放弃
-  //    → 仍 0 持焦。故初始焦点改为「首屏可见的卡片区域第一可聚焦元素」（按卡片渲染
-  //    顺序探测）；引导态首屏只有引导盒，给 empty-go-ai。空库态空态盒已上移到内容区首块。
-  //  - 依赖只含 ready / showSourceGuide：不含 rows 静默刷新、不含 userUsageTypes
-  //    （usage 回焦重读会换数组引用，若在 deps 里，回首页会把用户焦点抢回首卡）。
-  //    candidates 不做门控判断，直接按「卡片渲染顺序」探测注册表真实存在性，
-  //    运行时渲染了哪张卡就自然命中哪张（2026-10-09 实证：开启偏好后
-  //    home-new-collect 等依次注册成功）。
+  // 初始焦点（2026-10-18 用户需求重写）：
+  //  - 默认焦点在顶部导航「首页」按钮（nav:home，首屏可见；requestInitialFocus 的
+  //    生效由 TVFocusBridge 重试链保证）。
+  //  - 引导态（无视频源）首屏只有引导盒，初始焦点给 empty-go-ai。
+  //  - 历史方案（焦点给卡片区域首元素 home-new-collect 等）已废弃：现需求为默认
+  //    焦点在首页按钮，进入各栏时才落到首卡（见下方四栏 nextFocusDownId 接线）。
+  //  - 依赖只含 ready / showSourceGuide：不含 rows / latestMedia 静默刷新，避免
+  //    回首页把用户焦点抢回首元素。
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(() => {
-      let target: string;
-      if (showSourceGuide) {
-        target = 'empty-go-ai';
-      } else {
-        const candidates = [
-          'home-new-collect', // 追新电影卡（增量采集按钮）
-          'home-tv-collect', // 我的追剧卡（增量采集按钮）
-          'home-hist-more', // 观看历史卡（无门控恒渲染，兜底必中）
-          'home-fav-more', // 我的收藏卡
-        ];
-        target = candidates.find((id) => focusRegistry.has(id)) ?? 'nav:home';
-      }
-      focusRegistry.requestInitialFocus(target);
+      focusRegistry.requestInitialFocus(showSourceGuide ? 'empty-go-ai' : 'nav:home');
     }, 150);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,6 +305,41 @@ export function HomeScreen() {
     const media = historyMedia.find((m) => m.id === h.mediaId);
     return media && (media.type === 'TV' || media.type === 'VARIETY');
   });
+
+  // —— 四栏入口接线（2026-10-18 用户需求：焦点从栏外移入任一栏时落在该栏首个视频卡片）——
+  // 背景：方向键由 Android 原生 FocusFinder 几何就近搜索，四栏均为「栏头按钮（右对齐）
+  // 在上 + 卡片行（左起）在下」，从右侧向下/向上常命中按钮而非首卡。故用 nextFocusDownId
+  // 把「导航条向下 → 第一已渲染栏入口」「本栏行向下 → 顺序下一栏入口」钉死；
+  // 入口 = 该栏首个视频卡 id，行空时退回栏头按钮（该栏唯一控件，不产生焦点黑洞）。
+  // 栏头按钮不接线 nextFocusUp：从本栏行内按「上」仍几何到达（增量采集/更多不失联）；
+  // 空库态 / 引导态导航条不接线，让几何焦点落到空态盒 / 引导盒按钮。
+  const renderedSections = [
+    {
+      key: 'latest',
+      rendered: userUsageTypes.includes('NEW_MOVIES'),
+      entryId: latestMedia.length > 0 ? `row-latesthome:${latestMedia[0].id}` : 'home-new-collect',
+    },
+    {
+      key: 'tv',
+      rendered: userUsageTypes.includes('TV_SERIES'),
+      entryId: tvWatchHistory.length > 0 ? `row-tvhome:${tvWatchHistory[0].id}` : 'home-tv-collect',
+    },
+    {
+      key: 'hist',
+      rendered: true,
+      entryId: historyMedia.length > 0 ? `row-histhome:${historyMedia[0].id}` : 'home-hist-more',
+    },
+    {
+      key: 'fav',
+      rendered: true,
+      entryId: favMediaList.length > 0 ? `row-favhome:${favMediaList[0].id}` : 'home-fav-more',
+    },
+  ].filter((s) => s.rendered);
+  const nextEntryOf = (key: string): string | undefined => {
+    const i = renderedSections.findIndex((s) => s.key === key);
+    return renderedSections[i + 1]?.entryId;
+  };
+  const navDownTargetId = empty || showSourceGuide ? undefined : renderedSections[0]?.entryId;
 
   const cardHeaderStyle = [
     styles.card,
@@ -353,6 +373,7 @@ export function HomeScreen() {
           keyExtractor={(m) => String(m.id)}
           itemWidth={100}
           itemHeight={164}
+          nextFocusDownId={nextEntryOf('latest')}
           onItemPress={openDetail}
           renderItem={(m) => (
             <MediaCard media={m} compact />
@@ -391,6 +412,7 @@ export function HomeScreen() {
             keyExtractor={(h) => String(h.id)}
             itemWidth={100}
             itemHeight={200}
+            nextFocusDownId={nextEntryOf('tv')}
             onItemPress={(h) => {
               const media = historyMedia.find((m) => m.id === h.mediaId);
               if (media) openDetail(media);
@@ -431,14 +453,16 @@ export function HomeScreen() {
                     style={{
                       width: 100,
                       height: 150,
-                      borderRadius: radius.md,
+                      // 图框即追剧卡视觉主体：只留上两角圆角、下两角直角（2026-10-18 用户需求，与 MediaCard 统一）
+                      borderTopLeftRadius: radius.md,
+                      borderTopRightRadius: radius.md,
                       overflow: 'hidden',
                       backgroundColor: hexToRgba(colors.surface, cardOpacity / 100),
                     }}
                   >
                     <PosterImage
                       uri={media.posterUrl}
-                      style={{ width: '100%', height: '100%', borderRadius: radius.md }}
+                      style={{ width: '100%', height: '100%' }}
                     />
                   </View>
                   <View style={{ paddingHorizontal: 6, paddingTop: 6 }}>
@@ -518,6 +542,7 @@ export function HomeScreen() {
           keyExtractor={(m) => String(m.id)}
           itemWidth={100}
           itemHeight={164}
+          nextFocusDownId={nextEntryOf('hist')}
           onItemPress={openDetail}
           renderItem={(m) => (
             <MediaCard media={m} compact />
@@ -551,6 +576,7 @@ export function HomeScreen() {
           keyExtractor={(m) => String(m.id)}
           itemWidth={100}
           itemHeight={164}
+          nextFocusDownId={nextEntryOf('fav')}
           onItemPress={openDetail}
           renderItem={(m) => (
             <MediaCard media={m} compact />
@@ -562,7 +588,12 @@ export function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
-      <TVNavBar items={navItems} title="OpenReel TV" onSearch={() => nav.navigate('Search', {})} />
+      <TVNavBar
+        items={navItems}
+        title="OpenReel TV"
+        onSearch={() => nav.navigate('Search', {})}
+        itemsNextFocusDownId={navDownTargetId}
+      />
 
       <ScrollView
         style={styles.scroll}
@@ -637,21 +668,6 @@ export function HomeScreen() {
             {renderFavoritesCard()}
             {!empty ? (
               <>
-                {historyMedia.length > 0 ? (
-                  <TVRow
-                    rowId="row-continue"
-                    title="继续观看"
-                    onTitlePress={() => nav.navigate('History', {})}
-                    data={historyMedia}
-                    keyExtractor={(m) => String(m.id)}
-                    itemWidth={100}
-                    itemHeight={164}
-                    onItemPress={openDetail}
-                    renderItem={(m) => (
-                      <MediaCard media={m} compact />
-                    )}
-                  />
-                ) : null}
                 {ROW_DEFS.map((def) => (
                   <TVRow
                     key={def.rowId}

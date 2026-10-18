@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Modal, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Episode, Media, PlaySource, VideoSource, WatchHistory } from '@openreel/core';
@@ -394,16 +394,17 @@ export function DetailScreen() {
     if (hideGenres.length === 0 || hiding) return;
     setHiding(true);
     try {
-      const r = await getStore().getState().hideMediaByGenres(hideGenres);
+      await getStore().getState().hideMediaByGenres(hideGenres);
       setHideOpen(false);
-      setNotice(`已隐藏 ${r.hidden} 个「${hideGenres.join('/')}」类视频`);
+      // 需求：隐藏成功后立即返回来源页，不停留在详情页（分类页 useFocusEffect 会重查刷新列表）
+      goBack();
     } catch (e) {
       setHideOpen(false);
       setNotice(`隐藏失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setHiding(false);
     }
-  }, [hideGenres, hiding]);
+  }, [hideGenres, hiding, goBack]);
 
   // 弹层焦点监狱：打开时锁定在 hide: 前缀内，关闭后焦点还给「隐藏」按钮
   const hideFirstId = hideGenreItems.length
@@ -740,6 +741,8 @@ export function DetailScreen() {
                             {
                               backgroundColor: active ? colors.cardAccent : colors.cardDim,
                               width: active ? tv(150) : tv(120),
+                              paddingVertical: active ? tv(12) : tv(8),
+                              paddingHorizontal: active ? tv(14) : tv(12),
                             },
                           ]}
                           testID={`tv-detail-vsrc-${s.id}`}
@@ -747,7 +750,7 @@ export function DetailScreen() {
                           <Text
                             numberOfLines={1}
                             style={{
-                              color: active ? colors.buttonPrimaryText : colors.textSecondary,
+                              color: active ? colors.buttonPrimaryText : colors.buttonSecondaryText,
                               fontSize: scale(14),
                               fontWeight: active ? '700' : '500',
                             }}
@@ -761,9 +764,12 @@ export function DetailScreen() {
                 ) : null}
                 <View style={[styles.epPanelBody, { backgroundColor: colors.cardAccent }]}>
                   {epsLoading ? (
-                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>
-                      剧集加载中...
-                    </Text>
+                    <View style={styles.epsLoadingRow}>
+                      <ActivityIndicator size="small" color={colors.mutedForeground} />
+                      <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>
+                        剧集加载中...
+                      </Text>
+                    </View>
                   ) : sourceEpisodes.length === 0 ? (
                     <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>
                       暂无剧集
@@ -954,18 +960,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   epPanelRow: { flexDirection: 'row', alignItems: 'stretch' },
-  srcTabCol: { flexShrink: 0 },
+  // 源 tab 列：右对齐（贴紧右侧剧集面板），gap 替代 marginBottom，与桌面端 items-end gap-1.5 对齐
+  srcTabCol: { flexShrink: 0, alignItems: 'flex-end', gap: tv(6) },
+  // 源 tab：左圆角右直角（与右侧剧集面板嵌合），flexGrow 让 tab 在列内平分高度；padding 随 active 状态在 JSX 中动态传入
   srcTab: {
     justifyContent: 'center',
-    paddingVertical: tv(10),
-    paddingHorizontal: tv(12),
-    marginBottom: tv(6),
-    borderRadius: tv(6),
+    flexGrow: 1,
+    borderTopLeftRadius: tv(6),
+    borderBottomLeftRadius: tv(6),
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
   },
   epPanelBody: {
     flex: 1,
     minWidth: 0,
     padding: tv(16),
+  },
+  // 加载态：旋转指示器 + 文字横向排列（对齐桌面端 Loader2 + 文字）
+  epsLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tv(8),
   },
   // 季按钮行（多季时显示，对齐桌面「第 N 季」行）
   seasonRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: tv(14) },

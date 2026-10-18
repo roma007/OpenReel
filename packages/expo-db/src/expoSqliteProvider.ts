@@ -2341,6 +2341,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   async hideMediaByGenres(genres: string[]): Promise<{ hidden: number }> {
     if (genres.length === 0) return { hidden: 0 };
+    // 隐藏改变可见集，推荐视图缓存（120s，key 不含 hidden）必须立即失效
+    this.recommendViewCache = null;
     const isUncategorized = (g: string) => g === UNCATEGORIZED_GENRE;
     const normalGenres = genres.filter(g => !isUncategorized(g));
     let conditions: string[] = [];
@@ -2372,6 +2374,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   async unhideMediaByGenres(genres: string[]): Promise<{ unhidden: number }> {
     if (genres.length === 0) return { unhidden: 0 };
+    // 取消隐藏改变可见集，推荐视图缓存（120s，key 不含 hidden）必须立即失效
+    this.recommendViewCache = null;
     const isUncategorized = (g: string) => g === UNCATEGORIZED_GENRE;
     const normalGenres = genres.filter(g => !isUncategorized(g));
     let conditions: string[] = [];

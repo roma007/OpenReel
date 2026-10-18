@@ -186,20 +186,23 @@ const styles = StyleSheet.create({
   card: {
     // flex: 1 — 与移动端一致：卡片在外层（FlatList 列容器 / TVGrid 行）被 stretch 拉伸时，
     // 背景填满整行高度，保证同排卡片视觉等高（矮卡片内容顶部对齐、底部留白由背景承接）。
+    // 间距不在此处加 marginBottom：卡片视觉底即容器底，行间距由 TVGrid/TVRow 的 gap 统一承担
+    // （此前 marginBottom 14 与 gap 叠加成 30dp，且焦点环下边会因此悬空一节）。
     flex: 1,
-    marginBottom: 14,
     borderRadius: radius.md,
     overflow: 'hidden',
   },
   posterContainer: {
-    borderRadius: radius.md,
+    // 图片区只留上两角圆角（随卡片外框顶部圆角），下两角直角：
+    // 卡片外框自身 radius.md + overflow hidden 已保证四角圆弧，图内不再重复圆角（2026-10-18 用户需求）
+    borderTopLeftRadius: radius.md,
+    borderTopRightRadius: radius.md,
     overflow: 'hidden',
     position: 'relative',
   },
   poster: {
     width: '100%',
     height: '100%',
-    borderRadius: radius.md,
   },
   placeholder: {
     justifyContent: 'center',
@@ -220,6 +223,7 @@ const styles = StyleSheet.create({
   year: {
     marginTop: 2,
     paddingHorizontal: 8,
+    paddingBottom: 8,
   },
   compactCard: {
     width: '100%',
@@ -230,7 +234,9 @@ const styles = StyleSheet.create({
   compactPoster: {
     width: '100%',
     height: 140,
-    borderRadius: radius.sm,
+    // 图框即小卡的视觉主体：只留上两角圆角、下两角直角（2026-10-18 用户需求，与标准卡统一）
+    borderTopLeftRadius: radius.sm,
+    borderTopRightRadius: radius.sm,
     overflow: 'hidden',
   },
   compactPosterImg: {
