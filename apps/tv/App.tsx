@@ -12,6 +12,7 @@ import { writePrefetchConcurrency } from './src/services/cache';
 import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
 import CollectProgressDialog from './src/components/CollectProgressDialog';
+import { TVToast } from './src/components/TVToast';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
@@ -79,6 +80,8 @@ function RootNavigator() {
       <TVFocusBridge />
       {/* 增量采集进度窗口：全局浮层，collectSourceProgress 非空即在左下角弹出（对齐移动端） */}
       <CollectProgressDialog />
+      {/* 全局 Toast：顶部靠右，自动消失，不抢焦点。任意页面 showTVToast(...) 即可 */}
+      <TVToast />
     </>
   );
 }

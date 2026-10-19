@@ -8,7 +8,7 @@ import { useAppStore, getProvider } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVButton } from '../components/TVButton';
 import { TVTextInput } from '../components/TVTextInput';
-import { TVFocusable } from '../focus/TVFocusable';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -64,7 +64,6 @@ export function SourceManagerScreen() {
   const [checking, setChecking] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<Record<string, 'increment' | 'full'>>({});
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const hasRunningTaskRef = useRef(false);
 
@@ -147,7 +146,6 @@ export function SourceManagerScreen() {
     setFormName('');
     setFormBaseUrl('');
     setFormError(null);
-    setMessage('');
   }, []);
 
   const openEdit = useCallback((source: VideoSource) => {
@@ -158,7 +156,6 @@ export function SourceManagerScreen() {
     setFormName(source.name);
     setFormBaseUrl(source.baseUrl);
     setFormError(null);
-    setMessage('');
   }, []);
 
   const closeForm = useCallback(() => {
@@ -184,7 +181,7 @@ export function SourceManagerScreen() {
           return;
         }
         await addVideoSource({ ...origin, name, baseUrl });
-        setMessage(`「${name}」已更新`);
+        showTVToast(`「${name}」已更新`);
       } else {
         if (!code) {
           setFormError('请填写编码（唯一标识）');
@@ -200,7 +197,7 @@ export function SourceManagerScreen() {
           healthStatus: null,
           lastCheckAt: null,
         } as VideoSource);
-        setMessage(`「${name}」已添加`);
+        showTVToast(`「${name}」已添加`);
       }
       closeForm();
     } catch (e) {
@@ -213,13 +210,13 @@ export function SourceManagerScreen() {
       setChecking(source.code);
       try {
         const r = await checkVideoSource(source.id);
-        setMessage(
-          r.healthy
-            ? `「${source.name}」连接正常，响应时间 ${r.responseTime}ms`
-            : `「${source.name}」连接失败`,
-        );
+        if (r.healthy) {
+          showTVToast(`「${source.name}」连接正常，响应时间 ${r.responseTime}ms`, 'success');
+        } else {
+          showTVToast(`「${source.name}」连接失败`, 'error');
+        }
       } catch (e) {
-        setMessage(`「${source.name}」${e instanceof Error ? e.message : '无法连接'}`);
+        showTVToast(`「${source.name}」${e instanceof Error ? e.message : '无法连接'}`, 'error');
       } finally {
         setChecking(null);
       }
@@ -234,13 +231,13 @@ export function SourceManagerScreen() {
       try {
         const fn = type === 'increment' ? collectSourceLatest : collectSourceAll;
         const r = await fn(source.code);
-        setMessage(
-          r && !r.success
-            ? `${source.name}${label}采集失败：${r.error || '未知错误'}`
-            : `${source.name}${label}采集已建任务`,
-        );
+        if (r && !r.success) {
+          showTVToast(`${source.name}${label}采集失败：${r.error || '未知错误'}`, 'error');
+        } else {
+          showTVToast(`${source.name}${label}采集已建任务`, 'success');
+        }
       } catch (e) {
-        setMessage(`${source.name}${label}采集失败：${e instanceof Error ? e.message : '未知错误'}`);
+        showTVToast(`${source.name}${label}采集失败：${e instanceof Error ? e.message : '未知错误'}`, 'error');
       } finally {
         setSubmitting((p) => {
           const next = { ...p };
@@ -257,9 +254,9 @@ export function SourceManagerScreen() {
     async (source: VideoSource) => {
       try {
         await removeVideoSource(source.id);
-        setMessage(`已删除视频源「${source.name}」（已采集数据保留）`);
+        showTVToast(`已删除视频源「${source.name}」（已采集数据保留）`, 'success');
       } catch (e) {
-        setMessage(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`删除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
         await loadVideoSources().catch(() => {});
       }
@@ -271,9 +268,9 @@ export function SourceManagerScreen() {
     async (source: VideoSource) => {
       try {
         await getProvider().deletePlaySourcesBySourceId(source.id);
-        setMessage(`「${source.name}」的播放源已删除`);
+        showTVToast(`「${source.name}」的播放源已删除`, 'success');
       } catch (e) {
-        setMessage(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`删除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
         await loadVideoSources().catch(() => {});
       }
@@ -285,7 +282,7 @@ export function SourceManagerScreen() {
     (source: VideoSource) => {
       if (pendingDelete !== `src:${source.id}`) {
         setPendingDelete(`src:${source.id}`);
-        setMessage(`再按一次「确认删源」以删除「${source.name}」（3 秒内有效，采集数据保留）`);
+        showTVToast(`再按一次「确认删源」以删除「${source.name}」（3 秒内有效，采集数据保留）`, 'info');
         return;
       }
       setPendingDelete(null);
@@ -298,8 +295,9 @@ export function SourceManagerScreen() {
     (source: VideoSource) => {
       if (pendingDelete !== `data:${source.id}`) {
         setPendingDelete(`data:${source.id}`);
-        setMessage(
+        showTVToast(
           `再按一次「确认删视频」以删除「${source.name}」的所有播放源（无其它播放源的视频会一并删除）`,
+          'info',
         );
         return;
       }
@@ -512,15 +510,6 @@ export function SourceManagerScreen() {
             );
           })}
         </View>
-
-        {message ? (
-          <TVFocusable id="src-msg" onPress={() => setMessage(null)} style={styles.msgBox} testID="tv-src-msg">
-            <Text style={{ color: colors.foreground, fontSize: scale(16) }}>{message}</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: scale(13), marginTop: tv(4) }}>
-              （按 OK 关闭提示）
-            </Text>
-          </TVFocusable>
-        ) : null}
       </ScrollView>
 
       {/* 手动添加 / 编辑弹窗。遵守「弹窗不透明度规则」：面板底色用不透明 colors.background。
@@ -636,8 +625,6 @@ const styles = StyleSheet.create({
   progressBar: { height: 4, borderRadius: radius.progress, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: radius.progress },
   progressText: { marginTop: 4, textAlign: 'center' },
-
-  msgBox: { marginTop: tv(10), padding: tv(14), borderRadius: tv(8) },
 });
 
 export default SourceManagerScreen;

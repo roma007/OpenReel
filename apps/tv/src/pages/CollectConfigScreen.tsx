@@ -7,6 +7,7 @@ import { TVPageHeader } from '../components/TVPageHeader';
 import { TVButton } from '../components/TVButton';
 import { TVTextInput } from '../components/TVTextInput';
 import { TVFocusable } from '../focus/TVFocusable';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -100,7 +101,6 @@ export function CollectConfigScreen() {
 
   const [draft, setDraft] = useState<Draft>(() => toDraft(null));
   const [autoOnStartup, setAutoOnStartup] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [savedTip, setSavedTip] = useState(false);
   // 即时保存：本地 state 为唯一编辑源，store 仅在首次水合时写入本地，
   // 避免写库后的 loadCollectConfig 回写打断正在输入的内容
@@ -147,12 +147,11 @@ export function CollectConfigScreen() {
   const persist = useCallback(async (d: Draft, startup: boolean) => {
     try {
       await updateCollectConfig(buildPayload(d, startup));
-      setMessage(null);
       setSavedTip(true);
       if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
       tipTimerRef.current = setTimeout(() => setSavedTip(false), 2000);
     } catch (e) {
-      setMessage(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`保存失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }, [updateCollectConfig]);
 
@@ -280,10 +279,6 @@ export function CollectConfigScreen() {
         <View style={styles.btnRow}>
           <TVButton id="cfg-reset" label="恢复默认参数" onPress={resetDefaults} testID="tv-cfg-reset" />
         </View>
-
-        {message ? (
-          <Text style={{ color: colors.foreground, fontSize: scale(16), marginTop: tv(12) }}>{message}</Text>
-        ) : null}
       </ScrollView>
     </View>
   );

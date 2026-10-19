@@ -36,9 +36,10 @@ export default function TaskListScreen({ navigation }: Props) {
   const s = useScaledFontSize();
   const [isLoading, setIsLoading] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
-  const [resumingId, setResumingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [retryingId, setRetryingId] = useState<string | null>(null);
+  // 按任务独立记录忙碌状态（集合），避免多个任务并行操作时互相覆盖「续采中/重试中/删除中」
+  const [resumingIds, setResumingIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
   // 像视频列表页一样分页：先渲染 PAGE_STEP 条，滚动触底「上拉显示更多」追加
@@ -114,37 +115,56 @@ export default function TaskListScreen({ navigation }: Props) {
   useEffect(() => {
     if (!isFocused) return;
     const hasActive = collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
-    if (!hasActive && !resumingId && !retryingId) return;
+    if (!hasActive && resumingIds.size === 0 && retryingIds.size === 0) return;
     const id = setInterval(() => {
       loadCollectTasks();
     }, 2000);
     return () => clearInterval(id);
-  }, [isFocused, collectTasks, resumingId, retryingId, loadCollectTasks]);
+  }, [isFocused, collectTasks, resumingIds, retryingIds, loadCollectTasks]);
 
+  // 续采任务已在库中真实开跑（状态离开 FAILED）时，提前解除该任务的「续采中」按钮态
   useEffect(() => {
-    if (!resumingId) return;
-    const task = collectTasks.find((t) => t.taskId === resumingId);
-    if (task && task.status !== 'FAILED') {
-      setResumingId(null);
-    }
-  }, [collectTasks, resumingId]);
+    if (resumingIds.size === 0) return;
+    const done = [...resumingIds].filter((id) => {
+      const task = collectTasks.find((t) => t.taskId === id);
+      return task && task.status !== 'FAILED';
+    });
+    if (done.length === 0) return;
+    setResumingIds((prev) => {
+      const next = new Set(prev);
+      done.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, [collectTasks, resumingIds]);
 
+  // 重试任务已在库中结束（COMPLETED/FAILED）时，提前解除该任务的「重试中」按钮态
   useEffect(() => {
-    if (!retryingId) return;
-    const task = collectTasks.find((t) => t.taskId === retryingId);
-    if (task && (task.status === 'COMPLETED' || task.status === 'FAILED')) {
-      setRetryingId(null);
-    }
-  }, [collectTasks, retryingId]);
+    if (retryingIds.size === 0) return;
+    const done = [...retryingIds].filter((id) => {
+      const task = collectTasks.find((t) => t.taskId === id);
+      return task && (task.status === 'COMPLETED' || task.status === 'FAILED');
+    });
+    if (done.length === 0) return;
+    setRetryingIds((prev) => {
+      const next = new Set(prev);
+      done.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, [collectTasks, retryingIds]);
 
   // 删除期间 SQLite 写队列会排队（实测 125ms~2710ms），需禁用按钮并给出反馈，
   // 否则用户会以为点击无效而重复点击
   const doDelete = async (task: CollectTask) => {
-    setDeletingId(task.taskId);
+    setDeletingIds((prev) => new Set(prev).add(task.taskId));
     try {
       await deleteCollectTask(task.taskId);
     } finally {
-      setDeletingId(null);
+      setDeletingIds((prev) => {
+        if (!prev.has(task.taskId)) return prev;
+        const next = new Set(prev);
+        next.delete(task.taskId);
+        return next;
+      });
     }
   };
 
@@ -160,17 +180,27 @@ export default function TaskListScreen({ navigation }: Props) {
   };
 
   const handleResume = (task: CollectTask) => {
-    setResumingId(task.taskId);
+    setResumingIds((prev) => new Set(prev).add(task.taskId));
     resumeCollectTask(task.taskId)
       .then((result) => {
         if (!result.success) {
           Alert.alert('续采失败', result.error || '未知错误');
         }
-        setResumingId((cur) => (cur === task.taskId ? null : cur));
+        setResumingIds((cur) => {
+          if (!cur.has(task.taskId)) return cur;
+          const next = new Set(cur);
+          next.delete(task.taskId);
+          return next;
+        });
       })
       .catch((err: any) => {
         Alert.alert('续采失败', err.message || '未知错误');
-        setResumingId((cur) => (cur === task.taskId ? null : cur));
+        setResumingIds((cur) => {
+          if (!cur.has(task.taskId)) return cur;
+          const next = new Set(cur);
+          next.delete(task.taskId);
+          return next;
+        });
       });
     loadCollectTasks().catch(() => {});
   };
@@ -181,7 +211,7 @@ export default function TaskListScreen({ navigation }: Props) {
       Alert.alert('重试失败项', '没有需要重试的失败条目');
       return;
     }
-    setRetryingId(task.taskId);
+    setRetryingIds((prev) => new Set(prev).add(task.taskId));
     retryFailedItems(task.taskId)
       .then((result) => {
         if (!result.success) {
@@ -189,11 +219,21 @@ export default function TaskListScreen({ navigation }: Props) {
         } else {
           Alert.alert('重试完成', `成功${result.successCount}条，仍失败${result.failed}条`);
         }
-        setRetryingId((cur) => (cur === task.taskId ? null : cur));
+        setRetryingIds((cur) => {
+          if (!cur.has(task.taskId)) return cur;
+          const next = new Set(cur);
+          next.delete(task.taskId);
+          return next;
+        });
       })
       .catch((err: any) => {
         Alert.alert('重试失败项失败', err.message || '未知错误');
-        setRetryingId((cur) => (cur === task.taskId ? null : cur));
+        setRetryingIds((cur) => {
+          if (!cur.has(task.taskId)) return cur;
+          const next = new Set(cur);
+          next.delete(task.taskId);
+          return next;
+        });
       });
     loadCollectTasks().catch(() => {});
   };
@@ -318,12 +358,12 @@ export default function TaskListScreen({ navigation }: Props) {
                           variant="secondary"
                           size="sm"
                           onPress={() => handleRetryFailed(task)}
-                          disabled={retryingId === task.taskId || resumingId === task.taskId}
+                          disabled={retryingIds.has(task.taskId) || resumingIds.has(task.taskId)}
                         >
-                          {retryingId === task.taskId ? (
+                          {retryingIds.has(task.taskId) ? (
                             <Spinner size={12} color={colors.text} strokeWidth={2} style={{ marginRight: 4 }} />
                           ) : null}
-                          {retryingId === task.taskId ? '重试中...' : `重试失败项(${parseFailedItems(task).length})`}
+                          {retryingIds.has(task.taskId) ? '重试中...' : `重试失败项(${parseFailedItems(task).length})`}
                         </Button>
                       )}
                       {task.status === 'FAILED' && (task.type === 'INCREMENTAL' || task.type === 'FULL') && (
@@ -331,21 +371,21 @@ export default function TaskListScreen({ navigation }: Props) {
                           variant="secondary"
                           size="sm"
                           onPress={() => handleResume(task)}
-                          disabled={resumingId === task.taskId || retryingId === task.taskId}
+                          disabled={resumingIds.has(task.taskId) || retryingIds.has(task.taskId)}
                         >
-                          {resumingId === task.taskId ? (
+                          {resumingIds.has(task.taskId) ? (
                             <Spinner size={12} color={colors.text} strokeWidth={2} style={{ marginRight: 4 }} />
                           ) : null}
-                          {resumingId === task.taskId ? '续采中...' : '继续'}
+                          {resumingIds.has(task.taskId) ? '续采中...' : '继续'}
                         </Button>
                       )}
                       <Button
                         variant="secondary"
                         size="sm"
                         onPress={() => handleDelete(task)}
-                        disabled={deletingId === task.taskId || resumingId === task.taskId || retryingId === task.taskId}
+                        disabled={deletingIds.has(task.taskId) || resumingIds.has(task.taskId) || retryingIds.has(task.taskId)}
                       >
-                        {deletingId === task.taskId ? '删除中...' : '删除'}
+                        {deletingIds.has(task.taskId) ? '删除中...' : '删除'}
                       </Button>
                     </View>
                 </View>

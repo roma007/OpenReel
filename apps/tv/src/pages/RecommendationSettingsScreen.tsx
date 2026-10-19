@@ -24,6 +24,7 @@ import { TVPageHeader } from '../components/TVPageHeader';
 import { TVFocusable } from '../focus/TVFocusable';
 import { TVButton } from '../components/TVButton';
 import { TVTextInput } from '../components/TVTextInput';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import { tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
@@ -64,7 +65,6 @@ export function RecommendationSettingsScreen() {
   const [newTag, setNewTag] = useState('');
   const [newTagType, setNewTagType] = useState<TagBlacklistItem['tagType']>('genre');
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const getOverviewFn = useAppStore((s) => s.getRecommendationOverview);
   const getDislikedFn = useAppStore((s) => s.getDislikedMedia);
@@ -105,13 +105,13 @@ export function RecommendationSettingsScreen() {
 
   const doResetLearning = async () => {
     setBusy(true);
-    setMessage('正在从头学习…');
+    showTVToast('正在从头学习…', 'info');
     try {
       await resetLearning();
-      setMessage('已从头学习，推荐将从你的新观看行为重新积累');
+      showTVToast('已从头学习，推荐将从你的新观看行为重新积累', 'success');
       load();
     } catch (e) {
-      setMessage(`操作失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`操作失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -119,13 +119,13 @@ export function RecommendationSettingsScreen() {
 
   const doRecalculate = async () => {
     setBusy(true);
-    setMessage('正在重新计算推荐分…');
+    showTVToast('正在重新计算推荐分…', 'info');
     try {
       await flushRecompute();
-      setMessage('推荐分已重新计算');
+      showTVToast('推荐分已重新计算', 'success');
       load();
     } catch (e) {
-      setMessage(`操作失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`操作失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -137,17 +137,17 @@ export function RecommendationSettingsScreen() {
     try {
       await toggleTagFn(tag, newTagType);
       setNewTag('');
-      setMessage(`已屏蔽 ${TAG_TYPE_LABEL[newTagType]}「${tag}」`);
+      showTVToast(`已屏蔽 ${TAG_TYPE_LABEL[newTagType]}「${tag}」`, 'success');
       load();
     } catch (e) {
-      setMessage(`操作失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`操作失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   };
 
   const handleRemoveTag = async (item: TagBlacklistItem) => {
     try {
       await toggleTagFn(item.tag, item.tagType);
-      setMessage(`已取消屏蔽 ${TAG_TYPE_LABEL[item.tagType]}「${item.tag}」`);
+      showTVToast(`已取消屏蔽 ${TAG_TYPE_LABEL[item.tagType]}「${item.tag}」`, 'success');
       load();
     } catch {}
   };
@@ -155,7 +155,7 @@ export function RecommendationSettingsScreen() {
   const handleRemoveDislike = async (mediaId: number) => {
     try {
       await toggleDislikeFn(mediaId);
-      setMessage('已取消不感兴趣');
+      showTVToast('已取消不感兴趣', 'success');
       load();
     } catch {}
   };
@@ -421,9 +421,6 @@ export function RecommendationSettingsScreen() {
               testID="tv-rec-reset"
             />
           </View>
-          {message ? (
-            <Text style={{ color: colors.foreground, fontSize: scale(16), marginTop: tv(12) }}>{message}</Text>
-          ) : null}
         </View>
       </ScrollView>
     </View>

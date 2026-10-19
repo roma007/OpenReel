@@ -690,10 +690,17 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   /**
    * TV 端首字母索引开关（仅 TV 调 enableInitialsSearch 后为 true，手机端恒 false）。
-   * 打开后：upsertMedia 即时建索引、searchMedia 对纯字母数字关键词走联合检索。
+   * 打开后：upsertMedia 入队、后台批量建索引、searchMedia 对纯字母数字关键词走联合检索。
    */
   private initialsEnabled = false;
   private initialsComputer: InitialsComputer | null = null;
+
+  /** 首字母索引异步批量队列：upsertMedia 只入队，flushInitialsQueue 定时批量写 FTS，
+   *  避免每部片子在采集事务内同步 SELECT+FTS 写拖慢采集。 */
+  private pendingInitialsQueue: { fingerprint: string; initials: string; updatedAt: string }[] = [];
+  private initialsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly INITIALS_FLUSH_INTERVAL_MS = 2000;
+  private static readonly INITIALS_BATCH_SIZE = 50;
 
   /** 推荐排序「候选∩筛选」视图缓存：同筛选键 120s 内复用，翻页只需对有序候选切片（毫秒级）。 */
   private recommendViewCache: { key: string; view: number[]; at: number } | null = null;
@@ -1656,24 +1663,26 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       ]
     );
 
-    // TV 端首字母索引：开关打开时即时为新/更新片建索引（采集新增片无需等回填）。
-    // 失败不影响主数据写入（索引可后续回填补齐）。
+    // TV 端首字母索引：开关打开时仅入队，由 flushInitialsQueue 定时批量写 FTS。
+    // 不在采集事务内同步 SELECT id + 写 FTS，避免每部片子多 2 次 DB 操作拖慢采集。
+    // 入队失败/刷新失败均可由 backfillInitials（幂等回填）补齐，不影响主数据。
     if (this.initialsEnabled && this.initialsComputer) {
       try {
-        const row = await this.db!.getFirstAsync<{ id: number }>(
-          'SELECT id FROM media WHERE fingerprint = ?',
-          [media.fingerprint]
-        );
-        if (row) {
-          const initials = this.initialsComputer({
-            title: media.title,
-            alias: media.alias,
-            originalTitle: media.originalTitle,
+        const initials = this.initialsComputer({
+          title: media.title,
+          alias: media.alias,
+          originalTitle: media.originalTitle,
+        });
+        if (initials) {
+          this.pendingInitialsQueue.push({
+            fingerprint: media.fingerprint,
+            initials,
+            updatedAt: now,
           });
-          if (initials) await this.writeInitialsRow(row.id, initials, now);
+          this.scheduleInitialsFlush();
         }
       } catch {
-        // 忽略：索引失败不阻断采集入库
+        // 忽略：入队失败不阻断采集入库，可由回填补齐
       }
     }
   }
@@ -1763,6 +1772,67 @@ export class ExpoSqliteProvider implements DatabaseProvider {
        VALUES (?, ?, ?, ?)`,
       [mediaId, ExpoSqliteProvider.initialsTokens(initials), initials.toUpperCase(), mediaUpdatedAt]
     );
+  }
+
+  /**
+   * 安排首字母索引批量刷新：已有定时器在跑则不重复设，避免每次入队都重置倒计时。
+   * 队列攒满 INITIALS_BATCH_SIZE 时立即触发刷新，不等定时器。
+   */
+  private scheduleInitialsFlush(): void {
+    if (this.pendingInitialsQueue.length >= ExpoSqliteProvider.INITIALS_BATCH_SIZE) {
+      if (this.initialsFlushTimer) {
+        clearTimeout(this.initialsFlushTimer);
+        this.initialsFlushTimer = null;
+      }
+      void this.flushInitialsQueue();
+      return;
+    }
+    if (this.initialsFlushTimer) return;
+    this.initialsFlushTimer = setTimeout(() => {
+      this.initialsFlushTimer = null;
+      void this.flushInitialsQueue();
+    }, ExpoSqliteProvider.INITIALS_FLUSH_INTERVAL_MS);
+  }
+
+  /**
+   * 批量刷新首字母索引队列：
+   * 1. 取一批（最多 INITIALS_BATCH_SIZE 条）出队；
+   * 2. 一条 IN 查询把这批 fingerprint 对应的 media.id 查回；
+   * 3. 一条多值 INSERT OR REPLACE 批量写 FTS 表。
+   * expo-sqlite 单连接串行执行，此处与采集写库排队不冲突；失败丢弃，靠 backfillInitials 补齐。
+   */
+  private async flushInitialsQueue(): Promise<void> {
+    if (this.pendingInitialsQueue.length === 0 || !this.db) return;
+
+    const batch = this.pendingInitialsQueue.splice(0, ExpoSqliteProvider.INITIALS_BATCH_SIZE);
+    if (this.pendingInitialsQueue.length > 0) this.scheduleInitialsFlush();
+
+    try {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db.getAllAsync<{ id: number; fingerprint: string }>(
+        `SELECT id, fingerprint FROM media WHERE fingerprint IN (${placeholders})`,
+        batch.map((b) => b.fingerprint)
+      );
+      const idByFp = new Map(rows.map((r) => [r.fingerprint, r.id]));
+
+      const values: string[] = [];
+      const params: any[] = [];
+      for (const b of batch) {
+        const id = idByFp.get(b.fingerprint);
+        if (id == null) continue;
+        values.push('(?, ?, ?, ?)');
+        params.push(id, ExpoSqliteProvider.initialsTokens(b.initials), b.initials.toUpperCase(), b.updatedAt);
+      }
+      if (values.length === 0) return;
+
+      await this.db.runAsync(
+        `INSERT OR REPLACE INTO tv_media_initials_fts(rowid, tokens, initials, src_updated_at)
+         VALUES ${values.join(',')}`,
+        params
+      );
+    } catch (err) {
+      console.warn('[DB] 首字母索引批量刷新失败（可由回填补齐）:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   /**

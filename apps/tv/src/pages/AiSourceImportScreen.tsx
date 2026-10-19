@@ -14,6 +14,7 @@ import { useAppStore } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVButton } from '../components/TVButton';
 import { TVTextInput } from '../components/TVTextInput';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -62,7 +63,6 @@ export function AiSourceImportScreen() {
   const [preview, setPreview] = useState<ParsedImportSource[]>([]);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => focusRegistry.requestInitialFocus('ai-back'), 120);
@@ -74,9 +74,9 @@ export function AiSourceImportScreen() {
   const copyPrompt = useCallback(async () => {
     try {
       await Clipboard.setString(AI_SOURCE_PROMPT);
-      setMessage('提示词已复制到剪贴板');
+      showTVToast('提示词已复制到剪贴板', 'success');
     } catch (e) {
-      setMessage(`复制失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`复制失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }, []);
 
@@ -84,40 +84,39 @@ export function AiSourceImportScreen() {
     try {
       const text = await Clipboard.getString();
       if (!text) {
-        setMessage('剪贴板为空');
+        showTVToast('剪贴板为空', 'info');
         return;
       }
       setPasted(text);
-      setMessage(`已粘贴 ${text.length} 个字符`);
+      showTVToast(`已粘贴 ${text.length} 个字符`, 'success');
     } catch (e) {
-      setMessage(`读取剪贴板失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`读取剪贴板失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }, []);
 
   const parse = useCallback(async () => {
     if (!pasted.trim()) {
-      setMessage('请先粘贴 AI 返回的数据');
+      showTVToast('请先粘贴 AI 返回的数据', 'info');
       return;
     }
     const parsed = SourceImportService.parseJson(pasted.trim());
     if (parsed.errors.length > 0) {
-      setMessage(`解析失败：${parsed.errors[0].message}`);
+      showTVToast(`解析失败：${parsed.errors[0].message}`, 'error');
       return;
     }
     if (parsed.items.length === 0) {
-      setMessage('未解析到有效数据');
+      showTVToast('未解析到有效数据', 'info');
       return;
     }
     const p = await validateImportSources(parsed.items);
     setPreview(p);
     setStep('preview');
-    setMessage(null);
   }, [pasted, validateImportSources]);
 
   const doImport = useCallback(async () => {
     const validItems = preview.filter((p) => p.status === 'valid').map((p) => p.item);
     if (validItems.length === 0) {
-      setMessage('没有可导入的有效视频源');
+      showTVToast('没有可导入的有效视频源', 'info');
       return;
     }
     setImporting(true);
@@ -125,7 +124,7 @@ export function AiSourceImportScreen() {
       const r = await batchImportSources(validItems);
       setResult({ imported: r.imported, skipped: r.skipped });
     } catch (e) {
-      setMessage(`导入失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`导入失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setImporting(false);
     }
@@ -165,19 +164,6 @@ export function AiSourceImportScreen() {
           </View>
         ))}
       </View>
-
-      {message ? (
-        <Text
-          style={{
-            color: colors.warning,
-            fontSize: scale(16),
-            paddingHorizontal: TV_LAYOUT.paddingX,
-            paddingBottom: tv(8),
-          }}
-        >
-          {message}
-        </Text>
-      ) : null}
 
       <ScrollView
         style={styles.scroll}

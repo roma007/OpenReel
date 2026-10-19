@@ -9,6 +9,7 @@ import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 import { useAppStore } from '../useAppStore';
+import { showTVToast } from '../components/TVToast';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -54,7 +55,6 @@ export function SettingsScreen() {
   // 清除观看历史：3 秒内两次确认（沿用 HistoryScreen/VideoManagement 危险操作惯例，不弹 Alert）
   const [clearPending, setClearPending] = useState(false);
   const [clearBusy, setClearBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => focusRegistry.requestInitialFocus('settings-back'), 120);
@@ -71,17 +71,17 @@ export function SettingsScreen() {
     if (clearBusy) return;
     if (!clearPending) {
       setClearPending(true);
-      setMessage('再按一次「清除观看历史」以确认清空（3秒内有效）');
+      showTVToast('再按一次「清除观看历史」以确认清空（3秒内有效）', 'info');
       return;
     }
     setClearPending(false);
     setClearBusy(true);
-    setMessage('正在清除…');
+    showTVToast('正在清除…', 'info');
     try {
       await clearHistory();
-      setMessage('已清除全部观看历史');
+      showTVToast('已清除全部观看历史', 'success');
     } catch (e) {
-      setMessage(`清除失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`清除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setClearBusy(false);
     }
@@ -155,17 +155,6 @@ export function SettingsScreen() {
           </TVFocusable>
         </View>
 
-        {message ? (
-          <Text
-            style={[
-              styles.message,
-              { color: clearPending ? colors.error : colors.mutedForeground, fontSize: scale(16) },
-            ]}
-          >
-            {message}
-          </Text>
-        ) : null}
-
         {/* 组2：帮助与关于（对齐移动端 Sidebar 第二组） */}
         <View style={[styles.card, { backgroundColor: cardBg }]}>
           {HELP_ENTRIES.map((e) => renderRow(e))}
@@ -212,7 +201,6 @@ const styles = StyleSheet.create({
     paddingVertical: tv(18),
   },
   rowMain: { flex: 1 },
-  message: { marginTop: tv(-4), marginBottom: tv(14) },
 });
 
 export default SettingsScreen;

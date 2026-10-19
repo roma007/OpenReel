@@ -9,6 +9,7 @@ import { useAppStore, getProvider } from '../useAppStore';
 import { TVRow } from '../focus/TVRow';
 import { focusRegistry } from '../focus/registry';
 import { TVButton } from '../components/TVButton';
+import { showTVToast } from '../components/TVToast';
 import MediaCard from '../components/MediaCard';
 import { TV_CARD, TV_LAYOUT, tv } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
@@ -31,7 +32,6 @@ export function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const clearHistory = useAppStore((s) => s.clearHistory);
 
@@ -68,19 +68,19 @@ export function HistoryScreen() {
     if (busy) return;
     if (!pending) {
       setPending(true);
-      setMessage('再按一次「确认清除」以清空全部观看历史（3秒内有效）');
+      showTVToast('再按一次「确认清除」以清空全部观看历史（3秒内有效）', 'info');
       return;
     }
     setPending(false);
     setBusy(true);
-    setMessage('正在清除…');
+    showTVToast('正在清除…', 'info');
     try {
       await clearHistory();
       setPage(1);
       await load(1);
-      setMessage('已清除全部观看历史');
+      showTVToast('已清除全部观看历史', 'success');
     } catch (e) {
-      setMessage(`清除失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`清除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -116,16 +116,6 @@ export function HistoryScreen() {
           />
         ) : null}
       </View>
-      {message ? (
-        <Text
-          style={[
-            styles.message,
-            { color: pending ? colors.error : colors.mutedForeground, fontSize: scale(16) },
-          ]}
-        >
-          {message}
-        </Text>
-      ) : null}
 
       <ScrollView
         style={styles.scroll}
@@ -191,7 +181,6 @@ const styles = StyleSheet.create({
   topTitle: { marginLeft: tv(18), fontWeight: '700' },
   count: { marginLeft: tv(12) },
   scroll: { flex: 1 },
-  message: { paddingTop: tv(10), paddingHorizontal: TV_LAYOUT.paddingX },
   status: { paddingVertical: tv(40), textAlign: 'center' },
   pager: {
     flexDirection: 'row',

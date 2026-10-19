@@ -13,6 +13,7 @@ import { TVTextInput } from '../components/TVTextInput';
 import { TVSelectRow } from '../components/TVSelectRow';
 import { TVChipMultiSelect } from '../components/TVChipMultiSelect';
 import { TVFocusable } from '../focus/TVFocusable';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import {
   formatBytes,
@@ -189,7 +190,6 @@ export function VideoManagementScreen() {
   // —— 危险操作两次确认 / 提示 ——
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const refreshStats = useCallback(async () => {
     setCacheSize(getCacheSizeBytes());
@@ -207,7 +207,7 @@ export function VideoManagementScreen() {
       setMediaStats({ total: totalRow?.count || 0, byType: byType || [] });
       setHiddenCount(await getHiddenMediaCount());
     } catch (e) {
-      setMessage(`统计加载失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`统计加载失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   }, [getHiddenMediaCount]);
 
@@ -273,8 +273,8 @@ export function VideoManagementScreen() {
   useEffect(() => {
     const status = reprobePoll?.status ?? null;
     if (prevPollStatusRef.current === 'running' && status && status !== 'running') {
-      if (status === 'done') setMessage('探测任务已完成');
-      else if (status === 'failed') setMessage('探测任务失败');
+      if (status === 'done') showTVToast('探测任务已完成', 'success');
+      else if (status === 'failed') showTVToast('探测任务失败', 'error');
     }
     prevPollStatusRef.current = status;
   }, [reprobePoll?.status]);
@@ -295,24 +295,24 @@ export function VideoManagementScreen() {
     async (key: string, label: string, fn: () => Promise<string | number | void>) => {
       if (pending !== key) {
         setPending(key);
-        setMessage(`再按一次以${label}（3 秒内有效）`);
+        showTVToast(`再按一次以${label}（3 秒内有效）`, 'info');
         return;
       }
       setPending(null);
       setBusy(true);
-      setMessage(`正在${label}…`);
+      showTVToast(`正在${label}…`, 'info');
       try {
         const result = await fn();
-        setMessage(
+        const okText =
           typeof result === 'string'
             ? result
             : typeof result === 'number'
               ? `${label}完成，共处理 ${result} 条`
-              : `${label}完成`,
-        );
+              : `${label}完成`;
+        showTVToast(okText, 'success');
         await refreshStats();
       } catch (e) {
-        setMessage(`${label}失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`${label}失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
         setBusy(false);
       }
@@ -323,12 +323,12 @@ export function VideoManagementScreen() {
   const handleClearCache = useCallback(() => {
     if (pending !== 'cache') {
       setPending('cache');
-      setMessage('再按一次以清理缓存（3 秒内有效）');
+      showTVToast('再按一次以清理缓存（3 秒内有效）', 'info');
       return;
     }
     setPending(null);
     const removed = clearCache();
-    setMessage(`已清理 ${formatBytes(removed)}`);
+    showTVToast(`已清理 ${formatBytes(removed)}`, 'success');
     refreshStats().catch(() => {});
   }, [pending, refreshStats]);
 
@@ -363,15 +363,15 @@ export function VideoManagementScreen() {
   const handleHideSelected = useCallback(async () => {
     if (selectedVisibleGenres.length === 0) return;
     setBusy(true);
-    setMessage('正在隐藏所选子类型…');
+    showTVToast('正在隐藏所选子类型…', 'info');
     try {
       const r = await hideMediaByGenres(selectedVisibleGenres);
       setSelectedVisibleGenres([]);
       await loadHideGenres();
       await refreshStats();
-      setMessage(`隐藏完成：已隐藏 ${r.hidden} 部视频`);
+      showTVToast(`隐藏完成：已隐藏 ${r.hidden} 部视频`, 'success');
     } catch (e) {
-      setMessage(`隐藏失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`隐藏失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -380,15 +380,15 @@ export function VideoManagementScreen() {
   const handleUnhideSelected = useCallback(async () => {
     if (selectedHiddenGenres.length === 0) return;
     setBusy(true);
-    setMessage('正在恢复所选子类型…');
+    showTVToast('正在恢复所选子类型…', 'info');
     try {
       const r = await unhideMediaByGenres(selectedHiddenGenres);
       setSelectedHiddenGenres([]);
       await loadHideGenres();
       await refreshStats();
-      setMessage(`恢复完成：已恢复 ${r.unhidden} 部视频`);
+      showTVToast(`恢复完成：已恢复 ${r.unhidden} 部视频`, 'success');
     } catch (e) {
-      setMessage(`恢复失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`恢复失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -399,7 +399,7 @@ export function VideoManagementScreen() {
     (next: ShortDramaConfig) => {
       setLocalConfig(next);
       updateShortDramaConfig(next).catch((e) =>
-        setMessage(`保存失败：${e instanceof Error ? e.message : String(e)}`),
+        showTVToast(`保存失败：${e instanceof Error ? e.message : String(e)}`, 'error'),
       );
     },
     [updateShortDramaConfig],
@@ -463,7 +463,7 @@ export function VideoManagementScreen() {
 
   const handleResetConfig = useCallback(() => {
     applyLocalConfig(getDefaultShortDramaConfig());
-    setMessage('已恢复默认配置');
+    showTVToast('已恢复默认配置', 'success');
   }, [applyLocalConfig, getDefaultShortDramaConfig]);
 
   const handleStartReprobe = useCallback(() => {
@@ -1084,12 +1084,6 @@ export function VideoManagementScreen() {
             />
           </View>
         </View>
-
-        {message ? (
-          <Text style={{ color: colors.foreground, fontSize: scale(16), marginTop: tv(16) }}>
-            {message}
-          </Text>
-        ) : null}
       </ScrollView>
     </View>
   );

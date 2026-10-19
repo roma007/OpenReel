@@ -8,6 +8,7 @@ import { useAppStore } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
 import { TVButton } from '../components/TVButton';
 import { TVFocusable } from '../focus/TVFocusable';
+import { showTVToast } from '../components/TVToast';
 import { focusRegistry } from '../focus/registry';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
@@ -61,8 +62,19 @@ export function TaskListScreen() {
   const [visibleCount, setVisibleCount] = useState(PAGE_STEP);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  // 按任务独立记录忙碌状态（集合），避免多个任务并行操作时互相覆盖「续采中/重试中」
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const markBusy = useCallback((taskId: string) => {
+    setBusyIds((prev) => new Set(prev).add(taskId));
+  }, []);
+  const unmarkBusy = useCallback((taskId: string) => {
+    setBusyIds((prev) => {
+      if (!prev.has(taskId)) return prev;
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+  }, []);
   const [clearingAll, setClearingAll] = useState(false);
 
   const isFocused = useIsFocused();
@@ -82,12 +94,12 @@ export function TaskListScreen() {
   useEffect(() => {
     if (!isFocused) return;
     const hasActive = collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
-    if (!hasActive && !busyId) return;
+    if (!hasActive && busyIds.size === 0) return;
     const id = setInterval(() => {
       loadCollectTasks().catch(() => {});
     }, 2000);
     return () => clearInterval(id);
-  }, [isFocused, collectTasks, busyId, loadCollectTasks]);
+  }, [isFocused, collectTasks, busyIds, loadCollectTasks]);
 
   // 两次确认的 3 秒窗口
   useEffect(() => {
@@ -102,25 +114,25 @@ export function TaskListScreen() {
 
   const doDelete = useCallback(
     async (task: CollectTask) => {
-      setBusyId(task.taskId);
+      markBusy(task.taskId);
       try {
         await deleteCollectTask(task.taskId);
-        setMessage(`已删除任务（${task.sourceName || task.sourceCode}）`);
+        showTVToast(`已删除任务（${task.sourceName || task.sourceCode}）`, 'success');
         refresh();
       } catch (e) {
-        setMessage(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`删除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
-        setBusyId(null);
+        unmarkBusy(task.taskId);
       }
     },
-    [deleteCollectTask, refresh],
+    [deleteCollectTask, refresh, markBusy, unmarkBusy],
   );
 
   const pressDelete = useCallback(
     (task: CollectTask) => {
       if (pendingDelete !== task.taskId) {
         setPendingDelete(task.taskId);
-        setMessage('再按一次「确认删除」以删除该任务（3 秒内有效）');
+        showTVToast('再按一次「确认删除」以删除该任务（3 秒内有效）', 'info');
         return;
       }
       setPendingDelete(null);
@@ -131,49 +143,55 @@ export function TaskListScreen() {
 
   const pressResume = useCallback(
     async (task: CollectTask) => {
-      setBusyId(task.taskId);
-      setMessage(`正在继续「${task.sourceName || task.sourceCode}」的采集…`);
+      markBusy(task.taskId);
+      showTVToast(`正在继续「${task.sourceName || task.sourceCode}」的采集…`, 'info');
       try {
         const r = await resumeCollectTask(task.taskId);
-        setMessage(r.success ? `续采完成，新增 ${r.collected} 条` : `续采失败：${r.error || '未知错误'}`);
+        if (r.success) {
+          showTVToast(`续采完成，新增 ${r.collected} 条`, 'success');
+        } else {
+          showTVToast(`续采失败：${r.error || '未知错误'}`, 'error');
+        }
       } catch (e) {
-        setMessage(`续采失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`续采失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
-        setBusyId(null);
+        unmarkBusy(task.taskId);
         refresh();
       }
     },
-    [refresh, resumeCollectTask],
+    [refresh, resumeCollectTask, markBusy, unmarkBusy],
   );
 
   const pressRetry = useCallback(
     async (task: CollectTask) => {
-      setBusyId(task.taskId);
-      setMessage(`正在重试「${task.sourceName || task.sourceCode}」的失败条目…`);
+      markBusy(task.taskId);
+      showTVToast(`正在重试「${task.sourceName || task.sourceCode}」的失败条目…`, 'info');
       try {
         const r = await retryFailedItems(task.taskId);
-        setMessage(
-          r.success ? `重试完成：成功 ${r.successCount} 条，仍失败 ${r.failed} 条` : `重试失败：${r.error || '未知错误'}`,
-        );
+        if (r.success) {
+          showTVToast(`重试完成：成功 ${r.successCount} 条，仍失败 ${r.failed} 条`, 'success');
+        } else {
+          showTVToast(`重试失败：${r.error || '未知错误'}`, 'error');
+        }
       } catch (e) {
-        setMessage(`重试失败：${e instanceof Error ? e.message : String(e)}`);
+        showTVToast(`重试失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
-        setBusyId(null);
+        unmarkBusy(task.taskId);
         refresh();
       }
     },
-    [refresh, retryFailedItems],
+    [refresh, retryFailedItems, markBusy, unmarkBusy],
   );
 
   const clearAll = useCallback(async () => {
     setClearingAll(true);
     try {
       await deleteOldTasks(999999);
-      setMessage('已清理全部任务记录');
+      showTVToast('已清理全部任务记录', 'success');
       setVisibleCount(PAGE_STEP);
       refresh();
     } catch (e) {
-      setMessage(`清理失败：${e instanceof Error ? e.message : String(e)}`);
+      showTVToast(`清理失败：${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setClearingAll(false);
     }
@@ -232,7 +250,7 @@ export function TaskListScreen() {
           const failedItems = parseFailedItems(task);
           const isReprobe = task.type === 'REPROBE';
           const progress = task.totalPages > 0 ? Math.round((task.currentPage / task.totalPages) * 100) : 0;
-          const busy = busyId === task.taskId;
+          const busy = busyIds.has(task.taskId);
           const canRetry = failedItems.length > 0 && (task.status === 'COMPLETED' || task.status === 'FAILED');
           const canResume = task.status === 'FAILED' && (task.type === 'INCREMENTAL' || task.type === 'FULL');
 
@@ -367,10 +385,6 @@ export function TaskListScreen() {
           <Text style={{ color: colors.mutedForeground, fontSize: scale(15), textAlign: 'center', marginTop: tv(10) }}>
             已显示全部 {collectTasks.length} 条任务
           </Text>
-        ) : null}
-
-        {message ? (
-          <Text style={{ color: colors.foreground, fontSize: scale(16), marginTop: tv(18) }}>{message}</Text>
         ) : null}
       </ScrollView>
     </View>
