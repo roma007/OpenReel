@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View, StyleSheet, ScrollView } from 'react-native';
+import { Text, View, StyleSheet, ScrollView, Modal } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba, radius } from '@openreel/expo-ui';
 import type { VideoSource, CollectTask } from '@openreel/core';
@@ -29,8 +29,9 @@ function formatCheckTime(timestamp: string | null | undefined): string {
  * TV 视频源管理。
  *
  * 与手机端差异：
- *  - 手机端「手动添加 / 编辑」用 Modal + 软键盘；TV 改为**页内展开表单** + 应用内键盘，
- *    避免模态层与焦点桥互相干扰（键盘自身才是模态层）。
+ *  - 「手动添加 / 编辑」同为 Modal 弹窗 + TVKeypad 应用内键盘；焦点用 pushScope 焦点
+ *    监狱锁定在弹窗内（同 DetailScreen 隐藏弹层模式），键盘（kp: 作用域）叠在其上；
+ *    关闭后焦点还给打开弹窗前的按钮。面板底色不透明（弹窗不透明度规则）。
  *  - 删除类操作改两次确认（3 秒窗口），无触摸确认按钮。
  *  - 顶部操作行入口（手动添加 / AI 导入）均为可聚焦行。
  */
@@ -56,7 +57,10 @@ export function SourceManagerScreen() {
   const [formCode, setFormCode] = useState('');
   const [formName, setFormName] = useState('');
   const [formBaseUrl, setFormBaseUrl] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 弹窗关闭后焦点回弹目标：添加 → src-add；编辑 → 对应卡片的编辑按钮
+  const formRestoreIdRef = useRef<string>('src-add');
   const [checking, setChecking] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<Record<string, 'increment' | 'full'>>({});
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -96,6 +100,20 @@ export function SourceManagerScreen() {
     return () => clearTimeout(t);
   }, [pendingDelete]);
 
+  // 弹窗焦点监狱：打开时锁定在 src-form 前缀内（同 DetailScreen 隐藏弹层模式），
+  // 关闭后焦点还给打开弹窗前的按钮（手动添加 → src-add；编辑 → 对应卡片编辑按钮）
+  useEffect(() => {
+    if (!formMode) return;
+    focusRegistry.pushScope('src-form');
+    focusRegistry.requestInitialFocus('src-form-code');
+    const t = setTimeout(() => focusRegistry.focusNode('src-form-code'), 80);
+    return () => {
+      clearTimeout(t);
+      focusRegistry.popScope();
+      focusRegistry.requestInitialFocus(formRestoreIdRef.current);
+    };
+  }, [formMode]);
+
   const isSourceCollecting = (sourceCode: string) =>
     collectTasks.some((t: CollectTask) => t.sourceCode === sourceCode && (t.status === 'PENDING' || t.status === 'RUNNING'));
 
@@ -122,48 +140,54 @@ export function SourceManagerScreen() {
   };
 
   const openAdd = useCallback(() => {
+    formRestoreIdRef.current = 'src-add';
     setFormMode('add');
     setEditingId(null);
     setFormCode('');
     setFormName('');
     setFormBaseUrl('');
+    setFormError(null);
     setMessage('');
   }, []);
 
   const openEdit = useCallback((source: VideoSource) => {
+    formRestoreIdRef.current = `src-edit:${source.id}`;
     setFormMode('edit');
     setEditingId(source.id);
     setFormCode(source.code);
     setFormName(source.name);
     setFormBaseUrl(source.baseUrl);
+    setFormError(null);
     setMessage('');
   }, []);
 
   const closeForm = useCallback(() => {
     setFormMode(null);
     setEditingId(null);
+    setFormError(null);
   }, []);
 
   const submitForm = useCallback(async () => {
     const code = formCode.trim();
     const name = formName.trim();
     const baseUrl = formBaseUrl.trim();
+    // 校验/保存错误显示在弹窗内部（页底 message 会被弹窗遮罩盖住）
     if (!name || !baseUrl) {
-      setMessage('名称和 API 地址不能为空');
+      setFormError('名称和 API 地址不能为空');
       return;
     }
     try {
       if (formMode === 'edit' && editingId) {
         const origin = videoSources.find((s) => s.id === editingId);
         if (!origin) {
-          setMessage('视频源不存在，请刷新后重试');
+          setFormError('视频源不存在，请刷新后重试');
           return;
         }
         await addVideoSource({ ...origin, name, baseUrl });
         setMessage(`「${name}」已更新`);
       } else {
         if (!code) {
-          setMessage('请填写编码（唯一标识）');
+          setFormError('请填写编码（唯一标识）');
           return;
         }
         await addVideoSource({
@@ -180,7 +204,7 @@ export function SourceManagerScreen() {
       }
       closeForm();
     } catch (e) {
-      setMessage(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+      setFormError(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }, [addVideoSource, closeForm, editingId, formBaseUrl, formCode, formMode, formName, videoSources]);
 
@@ -331,54 +355,7 @@ export function SourceManagerScreen() {
           </View>
         </View>
 
-        {formMode ? (
-          <View style={[styles.formCard, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100), borderColor: colors.borderHighlight }]}>
-            <Text style={[styles.formTitle, { color: colors.foreground, fontSize: scale(19) }]}>
-              {formMode === 'add' ? '添加视频源' : '编辑视频源'}
-            </Text>
-            <TVTextInput
-              id="src-form-code"
-              label="编码"
-              value={formCode}
-              mode="alnum"
-              placeholder="唯一标识，如 mysite"
-              hint={formMode === 'edit' ? '编码为唯一标识，创建后不可修改' : '建议用英文小写，作为源的唯一标识'}
-              onChangeText={setFormCode}
-              testID="tv-src-form-code"
-            />
-            <TVTextInput
-              id="src-form-name"
-              label="名称"
-              value={formName}
-              mode="alnum"
-              placeholder="显示名称"
-              onChangeText={setFormName}
-              testID="tv-src-form-name"
-            />
-            <TVTextInput
-              id="src-form-url"
-              label="API 地址"
-              value={formBaseUrl}
-              mode="url"
-              placeholder="http://你的域名/api.php/provide/vod/at/xml/"
-              hint="输入框按 OK 打开电视键盘；含 : / . 符号，用键盘上的符号键或「粘贴」"
-              onChangeText={setFormBaseUrl}
-              testID="tv-src-form-url"
-            />
-            <View style={styles.formActionRow}>
-              <TVButton id="src-form-cancel" label="取消" onPress={closeForm} testID="tv-src-form-cancel" />
-              <TVButton
-                id="src-form-submit"
-                label="保存"
-                variant="primary"
-                onPress={submitForm}
-                testID="tv-src-form-submit"
-              />
-            </View>
-          </View>
-        ) : null}
-
-        {videoSources.length === 0 && formMode === null ? (
+        {videoSources.length === 0 ? (
           <Text style={{ color: colors.mutedForeground, fontSize: scale(18), marginTop: tv(30) }}>
             还没有视频源。点「手动添加」或「AI 导入」添加片源后才能采集。
           </Text>
@@ -545,6 +522,66 @@ export function SourceManagerScreen() {
           </TVFocusable>
         ) : null}
       </ScrollView>
+
+      {/* 手动添加 / 编辑弹窗。遵守「弹窗不透明度规则」：面板底色用不透明 colors.background。
+          弹窗内字段按 OK 打开 TVKeypad（自身也是 Modal，全屏不透明，叠在弹窗之上）。 */}
+      <Modal
+        visible={formMode !== null}
+        transparent
+        animationType="none"
+        onRequestClose={closeForm}
+        statusBarTranslucent
+      >
+        <View style={styles.formBackdrop}>
+          <View style={[styles.formCard, { backgroundColor: colors.background }]}>
+            <Text style={[styles.formTitle, { color: colors.foreground, fontSize: scale(22) }]}>
+              {formMode === 'add' ? '添加视频源' : '编辑视频源'}
+            </Text>
+            <TVTextInput
+              id="src-form-code"
+              label="编码"
+              value={formCode}
+              mode="alnum"
+              placeholder="唯一标识，如 mysite"
+              hint={formMode === 'edit' ? '编码为唯一标识，创建后不可修改' : '建议用英文小写，作为源的唯一标识'}
+              onChangeText={setFormCode}
+              testID="tv-src-form-code"
+            />
+            <TVTextInput
+              id="src-form-name"
+              label="名称"
+              value={formName}
+              mode="alnum"
+              placeholder="显示名称"
+              onChangeText={setFormName}
+              testID="tv-src-form-name"
+            />
+            <TVTextInput
+              id="src-form-url"
+              label="API 地址"
+              value={formBaseUrl}
+              mode="url"
+              placeholder="http://你的域名/api.php/provide/vod/at/xml/"
+              hint="输入框按 OK 打开电视键盘；含 : / . 符号，用键盘上的符号键或「粘贴」"
+              onChangeText={setFormBaseUrl}
+              testID="tv-src-form-url"
+            />
+            {formError ? (
+              <Text style={{ color: colors.error, fontSize: scale(14), marginTop: tv(4) }}>{formError}</Text>
+            ) : null}
+            <View style={styles.formActionRow}>
+              <TVButton id="src-form-cancel" label="取消" onPress={closeForm} testID="tv-src-form-cancel" />
+              <TVButton
+                id="src-form-submit"
+                label="保存"
+                variant="primary"
+                onPress={submitForm}
+                testID="tv-src-form-submit"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -559,10 +596,22 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 8 },
   actionBtn: { flex: 1, paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md, marginRight: 0 },
 
-  /* 页内表单卡片（保持 TV 原有外观，不在本次照搬范围） */
-  formCard: { padding: tv(18), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(14) },
+  /* 添加/编辑弹窗（不透明面板，数值照搬 DetailScreen modalBackdrop / modalCard） */
+  formBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formCard: {
+    width: '70%',
+    maxWidth: tv(700),
+    borderRadius: tv(16),
+    paddingHorizontal: tv(40),
+    paddingVertical: tv(32),
+  },
   formTitle: { fontWeight: '700', marginBottom: tv(12) },
-  formActionRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: tv(10) },
+  formActionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: tv(20), gap: tv(16) },
 
   /* 源卡片：数值照搬移动端 sourceCard / list */
   list: { gap: 12 },
