@@ -33,6 +33,10 @@ export interface TVButtonProps {
   sublabelFontSize?: number;
   /** 追加到标题 Text 的样式 */
   labelStyle?: any;
+  /** 钉死「向下」焦点目标（registry id），透传到 TVFocusable */
+  nextFocusDownId?: string;
+  /** 钉死「向上」焦点目标（registry id），透传到 TVFocusable */
+  nextFocusUpId?: string;
 }
 
 /**
@@ -57,6 +61,8 @@ export function TVButton({
   labelFontSize,
   sublabelFontSize,
   labelStyle,
+  nextFocusDownId,
+  nextFocusUpId,
 }: TVButtonProps) {
   const colors = useThemeColors();
   // 按钮底遵循「卡片透明度」，与移动端 ui/Button 一致（移动端也乘 cardOpacity）
@@ -86,6 +92,8 @@ export function TVButton({
       focusStyle={scaleOnFocus ? styles.focusScale : undefined}
       style={[styles.btn, { backgroundColor: bg, opacity: disabled ? 0.5 : 1 }, style]}
       focusColor={variant === 'ghost' ? colors.cardAccent : undefined}
+      nextFocusDownId={nextFocusDownId}
+      nextFocusUpId={nextFocusUpId}
     >
       <View style={styles.inner}>
         {leftIcon ? <View style={styles.iconWrap}>{leftIcon}</View> : null}

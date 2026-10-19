@@ -23,14 +23,12 @@ type LocalConfig = {
   incrementalMaxPages: string;
   maxIncrementalHours: string;
   concurrency: string;
-  autoEnabled: boolean;
-  autoIntervalHours: string;
   autoOnStartup: boolean;
 };
 
 const NUMERIC_KEYS = [
   'minYear', 'retryTimes', 'pageSize', 'maxPages',
-  'incrementalMaxPages', 'maxIncrementalHours', 'concurrency', 'autoIntervalHours',
+  'incrementalMaxPages', 'maxIncrementalHours', 'concurrency',
 ] as const;
 
 /** 字符串草稿 → 落库数值（范围收敛语义与旧「保存」按钮保持一致） */
@@ -43,8 +41,6 @@ function toPayload(c: LocalConfig) {
     incrementalMaxPages: Math.max(1, parseInt(c.incrementalMaxPages) || 100),
     maxIncrementalHours: Math.max(0, parseInt(c.maxIncrementalHours) || 720),
     concurrency: Math.min(20, Math.max(1, parseInt(c.concurrency) || 1)),
-    autoEnabled: c.autoEnabled,
-    autoIntervalHours: Math.min(8760, Math.max(1, parseInt(c.autoIntervalHours) || 24)),
     autoOnStartup: c.autoOnStartup,
   };
 }
@@ -68,8 +64,6 @@ export default function CollectConfigScreen({ navigation }: Props) {
     incrementalMaxPages: '100',
     maxIncrementalHours: '720',
     concurrency: '1',
-    autoEnabled: false,
-    autoIntervalHours: '24',
     autoOnStartup: false,
   });
   const [autoLastRunAt, setAutoLastRunAt] = useState<string | null>(null);
@@ -87,7 +81,7 @@ export default function CollectConfigScreen({ navigation }: Props) {
 
   useEffect(() => {
     if (!collectConfig) return;
-    // autoLastRunAt 由自动采集在别处更新，始终同步
+    // autoLastRunAt 由启动采集在别处更新，始终同步
     setAutoLastRunAt(collectConfig.autoLastRunAt);
     if (hydratedRef.current) return;
     hydratedRef.current = true;
@@ -99,8 +93,6 @@ export default function CollectConfigScreen({ navigation }: Props) {
       incrementalMaxPages: collectConfig.incrementalMaxPages,
       maxIncrementalHours: collectConfig.maxIncrementalHours,
       concurrency: collectConfig.concurrency,
-      autoEnabled: collectConfig.autoEnabled,
-      autoIntervalHours: collectConfig.autoIntervalHours,
       autoOnStartup: collectConfig.autoOnStartup,
     });
     setLocalConfig({
@@ -111,8 +103,6 @@ export default function CollectConfigScreen({ navigation }: Props) {
       incrementalMaxPages: String(collectConfig.incrementalMaxPages),
       maxIncrementalHours: String(collectConfig.maxIncrementalHours),
       concurrency: String(collectConfig.concurrency),
-      autoEnabled: collectConfig.autoEnabled,
-      autoIntervalHours: String(collectConfig.autoIntervalHours),
       autoOnStartup: collectConfig.autoOnStartup,
     });
   }, [collectConfig]);
@@ -127,8 +117,6 @@ export default function CollectConfigScreen({ navigation }: Props) {
       incrementalMaxPages: parseInt(localConfig.incrementalMaxPages) || 100,
       maxIncrementalHours: parseInt(localConfig.maxIncrementalHours) || 720,
       concurrency: parseInt(localConfig.concurrency) || 1,
-      autoEnabled: localConfig.autoEnabled,
-      autoIntervalHours: parseInt(localConfig.autoIntervalHours) || 24,
       autoOnStartup: localConfig.autoOnStartup,
     });
     return current !== savedConfigRef.current;
@@ -187,8 +175,6 @@ export default function CollectConfigScreen({ navigation }: Props) {
       incrementalMaxPages: '100',
       maxIncrementalHours: '720',
       concurrency: '6',
-      autoEnabled: false,
-      autoIntervalHours: '24',
       autoOnStartup: false,
     }, true);
   };
@@ -370,50 +356,15 @@ export default function CollectConfigScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>自动增量采集</Text>
+          <Text style={styles.cardTitle}>启动时自动采集</Text>
           <View style={styles.switchRow}>
             <View style={styles.switchInfo}>
-              <Text style={styles.switchTitle}>启用自动采集</Text>
-              <Text style={styles.switchDesc}>定时自动执行增量采集，与手动采集互斥，无启用源时自动跳过</Text>
-            </View>
-            <Switch
-              value={localConfig.autoEnabled}
-              onValueChange={(checked) =>
-                update({
-                  autoEnabled: checked,
-                  // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
-                  autoOnStartup: checked ? localConfig.autoOnStartup : false,
-                }, true)
-              }
-              trackColor={{ false: colors.swiftTrack, true: colors.swiftActiveTrack }}
-              thumbColor={colors.swiftThumb}
-            />
-          </View>
-
-          <View style={[styles.switchRow, { opacity: localConfig.autoEnabled ? 1 : 0.4 }]}>
-            <View style={styles.switchInfo}>
-              <Text style={styles.switchTitle}>采集间隔（小时）</Text>
-              <Text style={styles.switchDesc}>距上次自动采集达到该间隔后触发</Text>
-            </View>
-            <Input
-              size="sm"
-              style={{ width: 90 }}
-              keyboardType="numeric"
-              editable={localConfig.autoEnabled}
-              value={localConfig.autoIntervalHours}
-              onChangeText={(text) => update({ autoIntervalHours: text })}
-            />
-          </View>
-
-          <View style={[styles.switchRow, { opacity: localConfig.autoEnabled ? 1 : 0.4 }]}>
-            <View style={styles.switchInfo}>
               <Text style={styles.switchTitle}>启动时立即采集</Text>
-              <Text style={styles.switchDesc}>应用启动后自动执行一次增量采集</Text>
+              <Text style={styles.switchDesc}>APP 启动后自动执行一次增量采集</Text>
             </View>
             <Switch
               value={localConfig.autoOnStartup}
               onValueChange={(checked) => update({ autoOnStartup: checked }, true)}
-              disabled={!localConfig.autoEnabled}
               trackColor={{ false: colors.swiftTrack, true: colors.swiftActiveTrack }}
               thumbColor={colors.swiftThumb}
             />

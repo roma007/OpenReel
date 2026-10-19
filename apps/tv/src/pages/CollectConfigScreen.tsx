@@ -51,7 +51,6 @@ function toDraft(cfg: Record<string, any> | null): Draft {
     incrementalMaxPages: pick('incrementalMaxPages', 100),
     maxIncrementalHours: pick('maxIncrementalHours', 720),
     concurrency: pick('concurrency', 6),
-    autoIntervalHours: pick('autoIntervalHours', 24),
   };
 }
 
@@ -64,12 +63,11 @@ const isDigits = (v: string | undefined) => /^\d+$/.test((v ?? '').trim());
 const draftReady = (d: Draft) => ALL_FIELDS.every((f) => isDigits(d[f.key]));
 
 /** 草稿 → 落库载荷（范围收敛语义与旧「保存配置」按钮一致） */
-function buildPayload(d: Draft, autoEnabled: boolean, autoOnStartup: boolean) {
+function buildPayload(d: Draft, autoOnStartup: boolean) {
   const num = (k: string, min: number, max: number, fallback: number) => {
     const n = parseInt(d[k] ?? '', 10);
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
   };
-  const interval = parseInt(d.autoIntervalHours ?? '', 10);
   return {
     minYear: num('minYear', 1900, 2100, 2025),
     retryTimes: num('retryTimes', 0, 10, 3),
@@ -78,9 +76,7 @@ function buildPayload(d: Draft, autoEnabled: boolean, autoOnStartup: boolean) {
     incrementalMaxPages: num('incrementalMaxPages', 1, 10000, 100),
     maxIncrementalHours: num('maxIncrementalHours', 0, 87600, 720),
     concurrency: num('concurrency', 1, 20, 6),
-    autoEnabled,
-    autoIntervalHours: Number.isFinite(interval) ? Math.min(8760, Math.max(1, interval)) : 24,
-    autoOnStartup: autoOnStartup && autoEnabled,
+    autoOnStartup,
   };
 }
 
@@ -103,7 +99,6 @@ export function CollectConfigScreen() {
   const updateCollectConfig = useAppStore((s) => s.updateCollectConfig);
 
   const [draft, setDraft] = useState<Draft>(() => toDraft(null));
-  const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoOnStartup, setAutoOnStartup] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [savedTip, setSavedTip] = useState(false);
@@ -124,7 +119,6 @@ export function CollectConfigScreen() {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
     setDraft(toDraft(collectConfig as unknown as Record<string, any>));
-    setAutoEnabled(!!collectConfig.autoEnabled);
     setAutoOnStartup(!!collectConfig.autoOnStartup);
   }, [collectConfig]);
 
@@ -141,8 +135,6 @@ export function CollectConfigScreen() {
       const n = parseInt(draft[f.key] ?? '', 10);
       out[f.key] = Number.isFinite(n) ? Math.min(f.max, Math.max(f.min, n)) : f.fallback;
     }
-    const interval = parseInt(draft.autoIntervalHours ?? '', 10);
-    out.autoIntervalHours = Number.isFinite(interval) ? Math.min(8760, Math.max(1, interval)) : 24;
     return out;
   }, [draft]);
 
@@ -152,9 +144,9 @@ export function CollectConfigScreen() {
   }, [draft, parsed]);
 
   /** 即时保存唯一写入口：落库 + 轻提示（页面已无手动保存按钮） */
-  const persist = useCallback(async (d: Draft, en: boolean, startup: boolean) => {
+  const persist = useCallback(async (d: Draft, startup: boolean) => {
     try {
-      await updateCollectConfig(buildPayload(d, en, startup));
+      await updateCollectConfig(buildPayload(d, startup));
       setMessage(null);
       setSavedTip(true);
       if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
@@ -165,43 +157,34 @@ export function CollectConfigScreen() {
   }, [updateCollectConfig]);
 
   /** 数值输入：500ms debounce 写库；输入中间态（空串/非纯数字）暂不写库 */
-  const scheduleSave = useCallback((d: Draft, en: boolean, startup: boolean) => {
+  const scheduleSave = useCallback((d: Draft, startup: boolean) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      void persist(d, en, startup);
+      void persist(d, startup);
     }, 500);
   }, [persist]);
 
   /** 立即写库（开关 / 恢复默认参数） */
-  const saveNow = useCallback((d: Draft, en: boolean, startup: boolean) => {
+  const saveNow = useCallback((d: Draft, startup: boolean) => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    void persist(d, en, startup);
+    void persist(d, startup);
   }, [persist]);
 
   const updateField = (key: string, value: string) => {
     const next = { ...draft, [key]: value };
     setDraft(next);
     if (!draftReady(next)) return;
-    scheduleSave(next, autoEnabled, autoOnStartup);
-  };
-
-  const toggleAutoEnabled = () => {
-    const next = !autoEnabled;
-    // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
-    const nextStartup = next ? autoOnStartup : false;
-    setAutoEnabled(next);
-    setAutoOnStartup(nextStartup);
-    saveNow(draft, next, nextStartup);
+    scheduleSave(next, autoOnStartup);
   };
 
   const toggleAutoOnStartup = () => {
     const next = !autoOnStartup;
     setAutoOnStartup(next);
-    saveNow(draft, autoEnabled, next);
+    saveNow(draft, next);
   };
 
   const resetDefaults = () => {
@@ -213,10 +196,9 @@ export function CollectConfigScreen() {
       incrementalMaxPages: '100',
       maxIncrementalHours: '720',
       concurrency: '6',
-      autoIntervalHours: '24',
     };
     setDraft(next);
-    saveNow(next, autoEnabled, autoOnStartup);
+    saveNow(next, autoOnStartup);
   };
 
   const renderField = (f: FieldDef) => (
@@ -257,75 +239,28 @@ export function CollectConfigScreen() {
           {LIMIT_FIELDS.map(renderField)}
         </View>
 
-        <Text style={[styles.section, { color: colors.foreground, fontSize: scale(19) }]}>自动增量采集</Text>
+        <Text style={[styles.section, { color: colors.foreground, fontSize: scale(19) }]}>启动时自动采集</Text>
         <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
-          <Text style={[styles.note, { color: colors.warning, fontSize: scale(15) }]}>
-            电视端不启动后台自动采集调度（盒子长期待机，定时采集会持续占用网络与内存）。
-            下列开关与间隔仍会保存到数据库，但电视端不会自动执行，请手动点「增量采集」。
-          </Text>
-
-          <TVFocusable
-            id="cfg:autoEnabled"
-            onPress={toggleAutoEnabled}
-            style={[styles.switchRow, { borderColor: colors.border }]}
-            testID="tv-cfg-auto-enabled"
-          >
-            <View style={styles.switchInfo}>
-              <Text style={{ color: colors.foreground, fontSize: scale(17), fontWeight: '600' }}>启用自动采集</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: scale(14), marginTop: tv(3) }}>
-                仅记录配置，电视端不自动触发
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.switchBox,
-                { backgroundColor: autoEnabled ? colors.swiftActiveTrack : colors.swiftTrack },
-              ]}
-            >
-              <Text style={{ color: colors.foreground, fontSize: scale(15), fontWeight: '700' }}>
-                {autoEnabled ? '开' : '关'}
-              </Text>
-            </View>
-          </TVFocusable>
-
-          <TVTextInput
-            id="cfg:autoIntervalHours"
-            label="采集间隔（小时）"
-            value={draft.autoIntervalHours}
-            mode="digits"
-            maxLength={6}
-            placeholder="24（1~8760）"
-            hint="距上次自动采集达到该间隔后触发（电视端仅记录）"
-            onChangeText={(v) => updateField('autoIntervalHours', v)}
-            testID="tv-cfg-auto-interval"
-          />
-
           <TVFocusable
             id="cfg:autoOnStartup"
-            onPress={() => {
-              if (!autoEnabled) {
-                setMessage('需先开启「启用自动采集」');
-                return;
-              }
-              toggleAutoOnStartup();
-            }}
-            style={[styles.switchRow, { borderColor: colors.border, opacity: autoEnabled ? 1 : 0.5 }]}
+            onPress={toggleAutoOnStartup}
+            style={[styles.switchRow, { borderColor: colors.border }]}
             testID="tv-cfg-auto-startup"
           >
             <View style={styles.switchInfo}>
               <Text style={{ color: colors.foreground, fontSize: scale(17), fontWeight: '600' }}>启动时立即采集</Text>
               <Text style={{ color: colors.mutedForeground, fontSize: scale(14), marginTop: tv(3) }}>
-                仅记录配置，电视端不自动触发
+                APP 启动后延迟数秒自动执行一次增量采集
               </Text>
             </View>
             <View
               style={[
                 styles.switchBox,
-                { backgroundColor: autoOnStartup && autoEnabled ? colors.swiftActiveTrack : colors.swiftTrack },
+                { backgroundColor: autoOnStartup ? colors.swiftActiveTrack : colors.swiftTrack },
               ]}
             >
               <Text style={{ color: colors.foreground, fontSize: scale(15), fontWeight: '700' }}>
-                {autoOnStartup && autoEnabled ? '开' : '关'}
+                {autoOnStartup ? '开' : '关'}
               </Text>
             </View>
           </TVFocusable>

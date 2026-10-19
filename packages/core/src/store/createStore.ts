@@ -222,10 +222,6 @@ export interface AppState {
   resumeCollectTask: (taskId: string) => Promise<{ success: boolean; taskId: string; collected: number; pages: number; error?: string }>;
   retryFailedItems: (taskId: string) => Promise<{ success: boolean; taskId: string; retried: number; successCount: number; failed: number; error?: string }>;
 
-  startAutoCollect: () => Promise<void>;
-  stopAutoCollect: () => void;
-  maybeRunAutoCollect: (reason: 'startup' | 'interval' | 'resume') => Promise<boolean>;
-
   loadCollectTasks: () => Promise<void>;
   loadRunningCollectTasks: () => Promise<CollectTask[]>;
   getRunningTaskBySourceCode: (sourceCode: string) => CollectTask | null;
@@ -279,7 +275,6 @@ hasShortDrama: (type?: string) => Promise<boolean>;
 import { SystemConfigService } from '../services/systemConfigService';
 import { CollectorService } from '../services/collectorService';
 import { SourceImportService } from '../services/sourceImportService';
-import { AutoCollectScheduler } from '../services/autoCollectScheduler';
 import { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from '../services/recommendationService';
 
 /**
@@ -291,8 +286,6 @@ export function createAppStore(db: DatabaseProvider) {
   const collectorService = new CollectorService(db);
   const sourceImportService = new SourceImportService(db);
   const recommendationService = new RecommendationService(db);
-  let autoCollectScheduler: AutoCollectScheduler | null = null;
-
   const store = create<AppState>((set, get) => ({
     mediaList: [],
     mediaMeta: null,
@@ -713,8 +706,6 @@ export function createAppStore(db: DatabaseProvider) {
       try {
         await configService.setCollectConfig(config);
         await get().loadCollectConfig();
-        // 配置变更后重新挂载自动采集调度器（开关/间隔变化即时生效）
-        await get().startAutoCollect();
       } catch (err: any) {
         set({ error: err.message });
       }
@@ -789,26 +780,6 @@ export function createAppStore(db: DatabaseProvider) {
       } finally {
         set({ isCollecting: false, collectSourceProgress: null, collectTrigger: null });
       }
-    },
-
-    startAutoCollect: async () => {
-      autoCollectScheduler?.stop();
-      autoCollectScheduler = new AutoCollectScheduler(
-        configService,
-        db,
-        () => get().collectLatest('auto'),
-        () => get().isCollecting
-      );
-      await autoCollectScheduler.start();
-    },
-
-    stopAutoCollect: () => {
-      autoCollectScheduler?.stop();
-    },
-
-    maybeRunAutoCollect: async (reason: 'startup' | 'interval' | 'resume') => {
-      if (!autoCollectScheduler) return false;
-      return autoCollectScheduler.maybeRun(reason);
     },
 
     collectByKeyword: async (keyword: string) => {

@@ -235,18 +235,32 @@ export async function initApp(
       }
       report(`Step 4b: 清理完成（${staleCount} 个僵尸任务）`);
 
-      report('Step 4c: 启动自动增量采集调度器...');
+      report('Step 4c: 检查启动时自动采集...');
       try {
-        await _store.getState().startAutoCollect();
         // 延迟触发启动采集，等待网络与界面稳定
-        setTimeout(() => {
-          _store?.getState().maybeRunAutoCollect('startup').catch(err => {
+        setTimeout(async () => {
+          try {
+            const cfgService = new (await import('@openreel/core')).SystemConfigService(_provider!);
+            const config = await cfgService.getCollectConfig();
+            if (!config.autoOnStartup) {
+              console.log('[AutoCollect] 启动时自动采集未开启，跳过');
+              return;
+            }
+            const sources = await _provider!.getEnabledVideoSources();
+            if (sources.length === 0) {
+              console.log('[AutoCollect] 无启用视频源，跳过启动自动采集');
+              return;
+            }
+            await cfgService.setString('collect.autoLastRunAt', new Date().toISOString());
+            await _store!.getState().collectLatest('auto');
+            console.log('[AutoCollect] 启动时自动采集完成');
+          } catch (err: any) {
             console.error('[AutoCollect] 启动自动采集失败:', err);
-          });
+          }
         }, 5000);
-        report('Step 4c: 自动增量采集调度器已启动');
+        report('Step 4c: 启动时自动采集已调度');
       } catch (err) {
-        const errMsg = `启动自动增量采集失败: ${err instanceof Error ? err.message : String(err)}`;
+        const errMsg = `启动时自动采集检查失败: ${err instanceof Error ? err.message : String(err)}`;
         console.error(errMsg);
         await logToDb(errMsg, 'error');
       }

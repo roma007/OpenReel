@@ -3,6 +3,7 @@ import { DevSettings } from 'react-native';
 import {
   createAppStore,
   CollectorService,
+  SystemConfigService,
   getCurrentStoreApiVersion,
   getStoreApiVersion,
   type AppStore,
@@ -13,9 +14,8 @@ import { initialsOfMedia } from './services/initials';
 /**
  * TV 端单例容器。
  *
- * 与手机端 apps/mobile/src/init.ts 同结构，但**不启动后台自动采集调度**
- * （用户 2026-10-05 明确砍掉 TV 端后台自动采集：电视常驻待机，调度器常驻会拖高盒子功耗/内存）。
- * 采集改为：用户在 TV 端手动发起（Collect 页），或应用启动时由用户显式触发。
+ * 与手机端 apps/mobile/src/init.ts 同结构。启动时自动采集逻辑已在三端统一
+ * （延迟 5s 检查 autoOnStartup，开启则执行一次增量采集，无常驻定时器）。
  */
 const SINGLETONS_KEY = '__OPENREEL_TV_SINGLETONS__';
 
@@ -71,6 +71,29 @@ export async function initApp(options?: {
       if (staleCount > 0) console.log(`[TV] 清理了 ${staleCount} 个僵尸采集任务`);
     } catch (err) {
       console.error('[TV] 清理僵尸任务失败:', err);
+    }
+
+    // 启动时自动采集检查
+    try {
+      const cfgService = new SystemConfigService(provider);
+      const config = await cfgService.getCollectConfig();
+      if (config.autoOnStartup) {
+        const sources = await provider.getEnabledVideoSources();
+        if (sources.length > 0) {
+          // 延迟触发启动采集，等待网络与界面稳定
+          setTimeout(async () => {
+            try {
+              await cfgService.setString('collect.autoLastRunAt', new Date().toISOString());
+              await store.getState().collectLatest('auto');
+              console.log('[TV] 启动时自动采集完成');
+            } catch (err) {
+              console.error('[TV] 启动时自动采集失败:', err);
+            }
+          }, 5000);
+        }
+      }
+    } catch (err) {
+      console.error('[TV] 启动时自动采集检查失败:', err);
     }
 
     // 「越看越懂你」：有变化或无推荐快照时后台重建一次（沿用手机端逻辑，仍属用户可见功能）

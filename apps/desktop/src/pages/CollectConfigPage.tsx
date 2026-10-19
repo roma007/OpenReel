@@ -22,8 +22,6 @@ export default function CollectConfigPage() {
     incrementalMaxPages: 100,
     maxIncrementalHours: 720,
     concurrency: 1,
-    autoEnabled: false,
-    autoIntervalHours: 24,
     autoOnStartup: false,
   });
   const [autoLastRunAt, setAutoLastRunAt] = useState<string | null>(null);
@@ -40,7 +38,7 @@ export default function CollectConfigPage() {
 
   useEffect(() => {
     if (collectConfig) {
-      // autoLastRunAt 可能由自动采集在别处更新，始终同步
+      // autoLastRunAt 可能由启动采集在别处更新，始终同步
       setAutoLastRunAt(collectConfig.autoLastRunAt);
       if (hydratedRef.current) return;
       hydratedRef.current = true;
@@ -52,8 +50,6 @@ export default function CollectConfigPage() {
         incrementalMaxPages: collectConfig.incrementalMaxPages,
         maxIncrementalHours: collectConfig.maxIncrementalHours,
         concurrency: collectConfig.concurrency,
-        autoEnabled: collectConfig.autoEnabled,
-        autoIntervalHours: collectConfig.autoIntervalHours,
         autoOnStartup: collectConfig.autoOnStartup,
       });
       setLocalConfig({
@@ -64,8 +60,6 @@ export default function CollectConfigPage() {
         incrementalMaxPages: collectConfig.incrementalMaxPages,
         maxIncrementalHours: collectConfig.maxIncrementalHours,
         concurrency: collectConfig.concurrency,
-        autoEnabled: collectConfig.autoEnabled,
-        autoIntervalHours: collectConfig.autoIntervalHours,
         autoOnStartup: collectConfig.autoOnStartup,
       });
     }
@@ -81,8 +75,6 @@ export default function CollectConfigPage() {
       incrementalMaxPages: localConfig.incrementalMaxPages,
       maxIncrementalHours: Math.max(0, localConfig.maxIncrementalHours),
       concurrency: localConfig.concurrency,
-      autoEnabled: localConfig.autoEnabled,
-      autoIntervalHours: localConfig.autoIntervalHours,
       autoOnStartup: localConfig.autoOnStartup,
     });
     return current !== savedConfigRef.current;
@@ -148,8 +140,6 @@ export default function CollectConfigPage() {
       incrementalMaxPages: 100,
       maxIncrementalHours: 720,
       concurrency: 6,
-      autoEnabled: false,
-      autoIntervalHours: 24,
       autoOnStartup: false,
     }, true);
   };
@@ -278,58 +268,29 @@ export default function CollectConfigPage() {
         <div>
           <div className="flex items-center gap-3">
             <RefreshCw className="size-4 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">自动增量采集</h2>
+            <h2 className="text-lg font-semibold">启动时自动采集</h2>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            满足条件自动执行增量采集，有启用视频源且无手动采集任务时才执行。
+            APP 启动后自动执行一次增量采集。有启用视频源且无手动采集任务时才执行。
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 gap-6">
           <div className="space-y-2">
-            <div className="text-sm font-medium">启用自动采集</div>
-            <Switch
-              checked={localConfig.autoEnabled}
-              onCheckedChange={(checked) =>
-                update({
-                  autoEnabled: checked,
-                  // 关闭总开关时联动关闭「启动时立即采集」；重新打开不联动打开（保持原值）
-                  autoOnStartup: checked ? localConfig.autoOnStartup : false,
-                }, true)
-              }
-            />
-            <p className="text-xs text-muted-foreground">关闭后定时与启动触发均不执行</p>
-          </div>
-
-          <div className={`space-y-2 transition-opacity ${localConfig.autoEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
             <div className="text-sm font-medium">启动时立即采集</div>
             <Switch
               checked={localConfig.autoOnStartup}
               onCheckedChange={(checked) => update({ autoOnStartup: checked }, true)}
-              disabled={!localConfig.autoEnabled}
             />
             <p className="text-xs text-muted-foreground">应用启动后延迟数秒自动执行一次增量采集</p>
           </div>
 
-          <div className={`space-y-2 transition-opacity ${localConfig.autoEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
-            <Label htmlFor="autoIntervalHours">定时采集间隔（小时）</Label>
-            <Input
-              id="autoIntervalHours"
-              type="number"
-              min="1"
-              max="8760"
-              value={localConfig.autoIntervalHours}
-              onChange={(e) => update({ autoIntervalHours: Math.min(8760, Math.max(1, parseInt(e.target.value) || 24)) })}
-            />
-            <p className="text-xs text-muted-foreground">距上次自动采集达到该间隔后触发</p>
-          </div>
-
-          <div className={`space-y-2 transition-opacity ${localConfig.autoEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
+          <div className="space-y-2">
             <div className="text-sm font-medium">上次自动采集时间</div>
             <div className="h-9 px-3 py-2 text-sm text-muted-foreground bg-muted/40 rounded-md border border-transparent">
               {autoLastRunAt ? new Date(autoLastRunAt).toLocaleString() : '从未执行'}
             </div>
-            <p className="text-xs text-muted-foreground">用于跨启动判断间隔与断点追溯</p>
+            <p className="text-xs text-muted-foreground">启动时采集执行后记录此时间</p>
           </div>
         </div>
       </Card>

@@ -81,6 +81,11 @@ jobs:
 
       - name: Build Tauri app
         run: pnpm --filter @openreel/desktop tauri build --target ${{ matrix.target }}
+        env:
+          # 在线升级签名私钥（tauri.conf.json createUpdaterArtifacts 需要）；
+          # 未配置 secrets 时变量为空，tauri 会跳过 .sig 生成，不影响普通产物。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -243,11 +248,89 @@ jobs:
           path: apps/mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
 
+  build-tv-android:
+    name: Build TV APK
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Verify app identifiers unchanged
+        shell: bash
+        run: |
+          set -e
+          # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
+          tv_pkg=$(node -p "require('./apps/tv/app.json').expo.android.package")
+          [ "$tv_pkg" = "com.movie.app.tv" ] || { echo "IDENTIFIER CHANGED: tv package=$tv_pkg"; exit 1; }
+          echo "Identifiers OK (tv=$tv_pkg)"
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 与 build-mobile-android 保持一致（同 monorepo 同一套 RN/Expo 原生依赖）
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1'
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: |
+          set -e
+          for i in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              exit 0
+            fi
+            echo "pnpm install failed (attempt $i/3), cleaning store and retrying..."
+            rm -rf node_modules
+            pnpm store prune || true
+          done
+          exit 1
+
+      - name: Build release APK
+        run: |
+          cd apps/tv/android
+          ./gradlew :app:assembleRelease --no-daemon
+
+      # 与手机端 APK 同名（都是 app-release-v<ver>.apk），同 Release 发布会冲突，
+      # 上传前重命名为 openreel-tv-release-v<ver>.apk（TV 应用内按此前缀匹配更新资产）。
+      - name: Rename APK to avoid mobile name clash
+        shell: bash
+        run: |
+          set -e
+          ver=$(node -p "require('./apps/tv/app.json').expo.version")
+          dir=apps/tv/android/app/build/outputs/apk/release
+          src="$dir/app-release-v${ver}.apk"
+          dst="$dir/openreel-tv-release-v${ver}.apk"
+          [ -f "$src" ] || { echo "APK not found: $src"; exit 1; }
+          mv "$src" "$dst"
+          echo "Renamed: $dst"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenReel-TV-Android
+          path: apps/tv/android/app/build/outputs/apk/release/openreel-tv-release-v*.apk
+          if-no-files-found: warn
+
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
     # 必须包含两个 Android job：此前只 needs [build]，实测 v1.0.173 的 create-release
     # 06:55:49 跑完，而 Build Android 06:57:41 才结束，APK 尚未上传，Release 里被静默漏掉。
-    needs: [build, build-android, build-mobile-android]
+    needs: [build, build-android, build-mobile-android, build-tv-android]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -255,6 +338,27 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      # 生成 Tauri updater 清单 latest.json（仅 Windows；macOS 不在在线升级范围）。
+      # 需要 secrets TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) 配置后构建才会产出 .sig；
+      # 未产出时跳过生成，不影响 Release 本身。
+      - name: Generate latest.json for updater
+        shell: bash
+        run: |
+          set -e
+          ver="${GITHUB_REF_NAME#v}"
+          sig_file=$(find artifacts -name "*_x64-setup.nsis.zip.sig" | head -n1)
+          if [ -z "$sig_file" ]; then
+            echo "No updater signature found, skip latest.json (signing secrets not configured?)"
+            exit 0
+          fi
+          zip_name="OpenReel_${ver}_x64-setup.nsis.zip"
+          sig=$(cat "$sig_file")
+          pub_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{\n  "version": "%s",\n  "notes": "See the assets below to download and install.",\n  "pub_date": "%s",\n  "platforms": {\n    "windows-x86_64": {\n      "signature": "%s",\n      "url": "https://github.com/roma007/openreel/releases/download/%s/%s"\n    }\n  }\n}\n' \
+            "$ver" "$pub_date" "$sig" "$GITHUB_REF_NAME" "$zip_name" > latest.json
+          echo "Generated latest.json:"
+          cat latest.json
 
       # 按扩展名白名单取件：此前用 artifacts/**/*，会把 macOS bundle 里 OpenReel.app
       # 目录内部的 Info.plist / icon.icns / *.applescript 等中间产物全部展开成 Release 资产。
@@ -265,8 +369,10 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.exe
             artifacts/**/*.msi
+            artifacts/**/*.nsis.zip
             artifacts/**/*.apk
             artifacts/**/*.aab
+            latest.json
           name: OpenReel ${{ github.ref_name }}
           body: "See the assets below to download and install."
           draft: false

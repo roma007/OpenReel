@@ -16,8 +16,6 @@ export interface CollectConfig {
   incrementalMaxPages: number;
   maxIncrementalHours: number;
   concurrency: number;
-  autoEnabled: boolean;
-  autoIntervalHours: number;
   autoOnStartup: boolean;
   autoLastRunAt: string | null;
   /** 1=忽略「源更新时间未变跳过」逻辑，强制全量处理每一条（应对源侧 vod_time 漏刷导致的漏更新） */
@@ -146,8 +144,6 @@ const DEFAULT_COLLECT_CONFIG: CollectConfig = {
   incrementalMaxPages: 10000,
   maxIncrementalHours: 720,
   concurrency: 20,
-  autoEnabled: false,
-  autoIntervalHours: 24,
   autoOnStartup: false,
   autoLastRunAt: null,
   ignoreSourceSkip: false,
@@ -161,10 +157,8 @@ const CONFIG_REMARKS: Record<string, string> = {
   'collect.incrementalMaxPages': '增量采集最大页数',
   'collect.maxIncrementalHours': '增量最大追溯时间（小时）',
   'collect.concurrency': '并发处理数量',
-  'collect.autoEnabled': '自动增量采集开关',
-  'collect.autoIntervalHours': '自动增量采集间隔（小时）',
-  'collect.autoOnStartup': '启动时自动增量采集',
-  'collect.autoLastRunAt': '上次自动增量采集时间',
+  'collect.autoOnStartup': '启动APP时自动执行增量采集',
+  'collect.autoLastRunAt': '上次启动时自动采集时间',
   'collect.ignoreSourceSkip': '忽略「源更新时间未变跳过」（0=开启跳过，1=全部处理）',
 };
 
@@ -251,8 +245,6 @@ export class SystemConfigService {
       incrementalMaxPages: await this.getNumber('collect.incrementalMaxPages', DEFAULT_COLLECT_CONFIG.incrementalMaxPages),
       maxIncrementalHours: await this.getNumber('collect.maxIncrementalHours', DEFAULT_COLLECT_CONFIG.maxIncrementalHours),
       concurrency: await this.getNumber('collect.concurrency', DEFAULT_COLLECT_CONFIG.concurrency),
-      autoEnabled: (await this.getNumber('collect.autoEnabled', DEFAULT_COLLECT_CONFIG.autoEnabled ? 1 : 0)) === 1,
-      autoIntervalHours: await this.getNumber('collect.autoIntervalHours', DEFAULT_COLLECT_CONFIG.autoIntervalHours),
       autoOnStartup: (await this.getNumber('collect.autoOnStartup', DEFAULT_COLLECT_CONFIG.autoOnStartup ? 1 : 0)) === 1,
       autoLastRunAt: await this.getString('collect.autoLastRunAt', DEFAULT_COLLECT_CONFIG.autoLastRunAt || '') || null,
       ignoreSourceSkip: (await this.getNumber('collect.ignoreSourceSkip', DEFAULT_COLLECT_CONFIG.ignoreSourceSkip ? 1 : 0)) === 1,
@@ -260,12 +252,9 @@ export class SystemConfigService {
   }
 
   async setCollectConfig(config: Partial<CollectConfig>): Promise<void> {
-    // 不变式：总开关关闭时，「启动时立即采集」必须同为关闭（重新打开总开关不联动打开，保持原值）
-    const effective: Partial<CollectConfig> =
-      config.autoEnabled === false ? { ...config, autoOnStartup: false } : config;
-    for (const [key, value] of Object.entries(effective)) {
+    for (const [key, value] of Object.entries(config)) {
       const fullKey = `collect.${key}`;
-      if (key === 'autoEnabled' || key === 'autoOnStartup' || key === 'ignoreSourceSkip') {
+      if (key === 'autoOnStartup' || key === 'ignoreSourceSkip') {
         await this.setNumber(fullKey, value ? 1 : 0);
       } else if (key === 'autoLastRunAt') {
         await this.setString(fullKey, value ? String(value) : '');

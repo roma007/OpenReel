@@ -172,16 +172,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // 移动端后台定时器会被挂起，回前台时补一次自动增量采集检查
-    if (!ready) return;
     // 启动静默检查：若词表升级或残留 NULL，自动全量重标（isBackfilled 幂等，无进度 UI）
+    if (!ready) return;
     getKidLockService().backfillKidSafe().catch(() => {});
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        getStore().getState().maybeRunAutoCollect('resume').catch(() => {});
-      }
-    });
-    return () => sub.remove();
   }, [ready]);
 
   const navTheme = themeName === 'dark' ? DarkTheme : DefaultTheme;

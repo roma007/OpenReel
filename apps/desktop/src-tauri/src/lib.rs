@@ -82,7 +82,9 @@ pub fn run() {
         ]);
 
     #[cfg(desktop)]
-    let app = app.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    let app = app
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
     app
         .run(tauri::generate_context!())

@@ -36,12 +36,19 @@ export { CMSAdapter } from './services/cmsAdapter';
 export { CollectorService } from './services/collectorService';
 export { SystemConfigService, BUILTIN_AD_FLOAT_CONFIG, getAdOrientation, filterAdsByOrientation, type AdOrientation, type CollectConfig, type ShortDramaConfig, type AdFloatConfig, type AdFloatItem } from './services/systemConfigService';
 export { AdFloatScheduler } from './services/adFloatScheduler';
-export { AutoCollectScheduler } from './services/autoCollectScheduler';
 export { KidLockService } from './services/kidLockService';
 export { VideoDurationService, setVideoFetchFn, getVideoFetchFn } from './services/videoDurationService';
 export { SourceImportService } from './services/sourceImportService';
 export { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from './services/recommendationService';
 export { resolveDefaultPlayTarget, type DefaultPlayTarget } from './services/playbackTarget';
+export {
+  fetchLatestRelease,
+  compareVersions,
+  pickApkAsset,
+  GITHUB_REPO,
+  type LatestRelease,
+  type ReleaseAsset,
+} from './services/updateService';
 
 // 数据库抽象层
 export { PRAGMA_SQL, SCHEMA_SQL, DROP_SYNC_REMNANTS_SQL, FAVORITE_UNIQUE_MIGRATE_SQL, splitSqlStatements } from './db/schema';

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba, radius } from '@openreel/expo-ui';
-import { Pencil, Ban, Trash2, Database } from 'lucide-react-native';
 import type { VideoSource, CollectTask } from '@openreel/core';
 
 import { useAppStore, getProvider } from '../useAppStore';
@@ -64,6 +63,10 @@ export function SourceManagerScreen() {
   const [message, setMessage] = useState<string | null>(null);
 
   const hasRunningTaskRef = useRef(false);
+
+  // 顶部操作行「向下」焦点钉死目标：首个源卡片的第一个按钮（增量采集）。
+  // 无源时不设，FocusFinder 走几何兜底（自然落到表单或提示）。
+  const firstSourceFirstBtnId = videoSources.length > 0 ? `src-inc:${videoSources[0].id}` : undefined;
 
   useEffect(() => {
     loadVideoSources().catch(() => {});
@@ -296,13 +299,14 @@ export function SourceManagerScreen() {
         <View style={[styles.actionCard, { backgroundColor: hexToRgba(colors.card, cardOpacity / 100) }]}>
           <View style={styles.actionRow}>
             <TVButton
-              id="src-add"
-              label="手动添加"
+              id="src-tasks"
+              label="任务列表"
               variant="primary"
               labelFontSize={scale(14)}
               style={styles.actionBtn}
-              onPress={openAdd}
-              testID="tv-src-add"
+              onPress={() => nav.navigate('TaskList')}
+              testID="tv-src-tasks"
+              nextFocusDownId={firstSourceFirstBtnId}
             />
             <TVButton
               id="src-ai"
@@ -312,14 +316,17 @@ export function SourceManagerScreen() {
               style={styles.actionBtn}
               onPress={() => nav.navigate('AiSourceImport')}
               testID="tv-src-ai"
+              nextFocusDownId={firstSourceFirstBtnId}
             />
             <TVButton
-              id="src-tasks"
-              label="任务列表"
+              id="src-add"
+              label="手动添加"
+              variant="primary"
               labelFontSize={scale(14)}
               style={styles.actionBtn}
-              onPress={() => nav.navigate('TaskList')}
-              testID="tv-src-tasks"
+              onPress={openAdd}
+              testID="tv-src-add"
+              nextFocusDownId={firstSourceFirstBtnId}
             />
           </View>
         </View>
@@ -379,13 +386,19 @@ export function SourceManagerScreen() {
 
         {/* 源卡片列表：结构与尺寸照搬移动端 sourceCard / list（gap 12） */}
         <View style={styles.list}>
-          {videoSources.map((source: VideoSource) => {
+          {videoSources.map((source: VideoSource, sourceIndex: number) => {
             const health = healthLabel(source);
             const collecting = isSourceCollecting(source.code);
             const progress = getProgress(source.code);
             const checkingNow = checking === source.code;
             const busy = !!submitting[source.code];
             const busyType = submitting[source.code];
+            // 「进入卡片落第一个按钮（增量采集）」的钉死目标：
+            // 上/下一卡片存在时，本卡所有按钮把 上/下 方向钉到邻卡 src-inc。
+            const prevSource = sourceIndex > 0 ? videoSources[sourceIndex - 1] : null;
+            const nextSource = sourceIndex < videoSources.length - 1 ? videoSources[sourceIndex + 1] : null;
+            const focusUpId = prevSource ? `src-inc:${prevSource.id}` : undefined;
+            const focusDownId = nextSource ? `src-inc:${nextSource.id}` : undefined;
 
             return (
               <View
@@ -407,67 +420,7 @@ export function SourceManagerScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.sourceControls}>
-                  <TVButton
-                    id={`src-edit:${source.id}`}
-                    label="编辑"
-                    variant="ghost"
-                    leftIcon={<Pencil size={14} color={colors.textSecondary} />}
-                    labelColor={colors.textSecondary}
-                    labelFontSize={scale(12)}
-                    style={styles.ghostBtn}
-                    onPress={() => openEdit(source)}
-                    testID={`tv-src-edit-${source.id}`}
-                  />
-                  <TVButton
-                    id={`src-toggle:${source.id}`}
-                    label={source.isEnabled ? '禁用' : '启用'}
-                    variant="ghost"
-                    leftIcon={<Ban size={14} color={colors.textSecondary} />}
-                    labelColor={colors.textSecondary}
-                    labelFontSize={scale(12)}
-                    style={styles.ghostBtn}
-                    onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
-                    testID={`tv-src-toggle-${source.id}`}
-                  />
-                  <TVButton
-                    id={`src-del:${source.id}`}
-                    label={pendingDelete === `src:${source.id}` ? '确认删源？' : '删源'}
-                    variant="ghost"
-                    leftIcon={<Trash2 size={14} color={colors.error} />}
-                    labelColor={colors.error}
-                    labelFontSize={scale(12)}
-                    style={styles.ghostBtn}
-                    onPress={() => pressDeleteSource(source)}
-                    testID={`tv-src-del-${source.id}`}
-                  />
-                  <TVButton
-                    id={`src-delp:${source.id}`}
-                    label={pendingDelete === `data:${source.id}` ? '确认删视频？' : '删视频'}
-                    variant="ghost"
-                    leftIcon={<Database size={14} color={colors.textSecondary} />}
-                    labelColor={colors.textSecondary}
-                    labelFontSize={scale(12)}
-                    style={styles.ghostBtn}
-                    onPress={() => pressDeletePlaySources(source)}
-                    testID={`tv-src-delp-${source.id}`}
-                  />
-                </View>
-
                 <View style={styles.sourceActions}>
-                  <TVButton
-                    id={`src-check:${source.id}`}
-                    label={checkingNow ? '检测中…' : '检测'}
-                    sublabel={source.lastCheckAt ? formatCheckTime(source.lastCheckAt) : '从未'}
-                    variant="secondary"
-                    labelFontSize={scale(12)}
-                    sublabelFontSize={scale(11)}
-                    sublabelColor={colors.disabledForeground}
-                    disabled={checkingNow}
-                    style={styles.sourceActionBtn}
-                    onPress={() => doCheck(source)}
-                    testID={`tv-src-check-${source.id}`}
-                  />
                   <TVButton
                     id={`src-inc:${source.id}`}
                     label={busyType === 'increment' ? '建任务中…' : '增量采集'}
@@ -482,6 +435,8 @@ export function SourceManagerScreen() {
                     style={styles.sourceActionBtn}
                     onPress={() => doCollect(source, 'increment')}
                     testID={`tv-src-inc-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
                   />
                   <TVButton
                     id={`src-full:${source.id}`}
@@ -495,6 +450,69 @@ export function SourceManagerScreen() {
                     style={styles.sourceActionBtn}
                     onPress={() => doCollect(source, 'full')}
                     testID={`tv-src-full-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
+                  />
+                  <TVButton
+                    id={`src-check:${source.id}`}
+                    label={checkingNow ? '检测中…' : '检测'}
+                    sublabel={source.lastCheckAt ? formatCheckTime(source.lastCheckAt) : '从未'}
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    sublabelFontSize={scale(11)}
+                    sublabelColor={colors.disabledForeground}
+                    disabled={checkingNow}
+                    style={styles.sourceActionBtn}
+                    onPress={() => doCheck(source)}
+                    testID={`tv-src-check-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
+                  />
+                  <TVButton
+                    id={`src-edit:${source.id}`}
+                    label="编辑"
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    style={styles.sourceActionBtn}
+                    onPress={() => openEdit(source)}
+                    testID={`tv-src-edit-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
+                  />
+                  <TVButton
+                    id={`src-toggle:${source.id}`}
+                    label={source.isEnabled ? '禁用' : '启用'}
+                    variant="secondary"
+                    labelFontSize={scale(12)}
+                    style={styles.sourceActionBtn}
+                    onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
+                    testID={`tv-src-toggle-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
+                  />
+                  <TVButton
+                    id={`src-delp:${source.id}`}
+                    label={pendingDelete === `data:${source.id}` ? '确认删视频？' : '删视频'}
+                    variant="secondary"
+                    labelColor={colors.warning}
+                    labelFontSize={scale(12)}
+                    style={styles.sourceActionBtn}
+                    onPress={() => pressDeletePlaySources(source)}
+                    testID={`tv-src-delp-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
+                  />
+                  <TVButton
+                    id={`src-del:${source.id}`}
+                    label={pendingDelete === `src:${source.id}` ? '确认删源？' : '删源'}
+                    variant="secondary"
+                    labelColor={colors.error}
+                    labelFontSize={scale(12)}
+                    style={styles.sourceActionBtn}
+                    onPress={() => pressDeleteSource(source)}
+                    testID={`tv-src-del-${source.id}`}
+                    nextFocusUpId={focusUpId}
+                    nextFocusDownId={focusDownId}
                   />
                 </View>
 
@@ -557,14 +575,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     marginLeft: 8,
   },
-  sourceControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 8,
-  },
-  ghostBtn: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: radius.sm, marginRight: 0 },
   sourceActions: { flexDirection: 'row', gap: 6 },
   sourceActionBtn: {
     flex: 1,

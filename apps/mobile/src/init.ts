@@ -1,6 +1,6 @@
 import { ExpoSqliteProvider, type MigrationProgress } from './db/expoSqliteProvider';
 import { DevSettings } from 'react-native';
-import { createAppStore, CollectorService, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState } from '@openreel/core';
+import { createAppStore, CollectorService, SystemConfigService, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState } from '@openreel/core';
 
 /**
  * 单例容器挂在 globalThis 上，保证 RN Fast Refresh（模块重执行）后单例不丢失。
@@ -51,14 +51,27 @@ export async function initApp(options?: { onMigrationProgress?: (p: MigrationPro
       console.error('[INIT] 清理僵尸任务失败:', err);
     }
 
-    // 启动自动增量采集调度器（移动端定时器在后台会被挂起，额外依赖 AppState 回前台触发）
+    // 启动时自动采集检查
     try {
-      await store.getState().startAutoCollect();
-      store.getState().maybeRunAutoCollect('startup').catch((err) => {
-        console.error('[INIT] 启动自动采集失败:', err);
-      });
+      const cfgService = new SystemConfigService(provider);
+      const config = await cfgService.getCollectConfig();
+      if (config.autoOnStartup) {
+        const sources = await provider.getEnabledVideoSources();
+        if (sources.length > 0) {
+          // 延迟触发启动采集，等待网络与界面稳定
+          setTimeout(async () => {
+            try {
+              await cfgService.setString('collect.autoLastRunAt', new Date().toISOString());
+              await store.getState().collectLatest('auto');
+              console.log('[INIT] 启动时自动采集完成');
+            } catch (err) {
+              console.error('[INIT] 启动时自动采集失败:', err);
+            }
+          }, 5000);
+        }
+      }
     } catch (err) {
-      console.error('[INIT] 启动自动增量采集调度器失败:', err);
+      console.error('[INIT] 启动时自动采集检查失败:', err);
     }
 
     // 「越看越懂你」：仅当有变化或尚无推荐快照时才在后台重建一次，

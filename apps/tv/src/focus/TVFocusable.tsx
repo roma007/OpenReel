@@ -68,6 +68,14 @@ export interface TVFocusableProps {
    * 解析不到时不设原生属性，回落几何搜索（与旧行为一致）。
    */
   nextFocusDownId?: string;
+  /**
+   * 「向上」焦点目标（registry id，非必填）。机制与 `nextFocusDownId` 对称。
+   *
+   * 典型场景：源卡片列表要求「进入卡片时焦点落在卡片第一个按钮」，下方卡片
+   * 的所有按钮都需把「向上」钉死为上一卡片的首按钮，避免 FocusFinder 按
+   * 几何 x 就近选到上一卡片中间的按钮。
+   */
+  nextFocusUpId?: string;
 }
 
 let seq = 0;
@@ -88,6 +96,7 @@ export function TVFocusable({
   onLayout,
   onKeyDown,
   nextFocusDownId,
+  nextFocusUpId,
 }: TVFocusableProps) {
   const colors = useThemeColors();
   const nodeRef = useRef<React.ElementRef<typeof Pressable> | null>(null);
@@ -102,6 +111,8 @@ export function TVFocusable({
   // 「向下」目标的原生 reactTag：nextFocusDown 需要数字 tag，而目标节点可能
   // 与自身同帧挂载（渲染期 registry 里还没有），故挂载后订阅 registry 延迟解析。
   const [nextFocusDownTag, setNextFocusDownTag] = useState<number | undefined>(undefined);
+  // 「向上」目标的原生 reactTag，机制同 nextFocusDownTag。
+  const [nextFocusUpTag, setNextFocusUpTag] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!nextFocusDownId) {
@@ -117,6 +128,20 @@ export function TVFocusable({
     // 目标 register/unregister 时 registry 会 emit，借机补解析/清失效 tag
     return focusRegistry.subscribe(resolve);
   }, [nextFocusDownId]);
+
+  useEffect(() => {
+    if (!nextFocusUpId) {
+      setNextFocusUpTag(undefined);
+      return;
+    }
+    const resolve = () => {
+      const node = focusRegistry.node(nextFocusUpId);
+      const tag = node ? findNodeHandle(node as unknown as React.Component) : null;
+      setNextFocusUpTag(tag ?? undefined);
+    };
+    resolve();
+    return focusRegistry.subscribe(resolve);
+  }, [nextFocusUpId]);
 
   useEffect(() => {
     focusRegistry.register({
@@ -159,6 +184,7 @@ export function TVFocusable({
       // Android TV：focusable 声明该节点可被方向键聚焦
       focusable={!disabled}
       nextFocusDown={nextFocusDownTag}
+      nextFocusUp={nextFocusUpTag}
       onLayout={onLayout}
       onFocus={handleFocus}
       onBlur={handleBlur}
