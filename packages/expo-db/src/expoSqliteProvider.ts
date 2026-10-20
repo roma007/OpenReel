@@ -1071,7 +1071,7 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await exec('DROP TRIGGER IF EXISTS media_ad');
     await exec('DROP TABLE IF EXISTS media_fts');
 
-    // AGENTS「重建表标准流程」第 1 步：关闭外键校验，此前遗漏导致迁移硬失败。
+    // 项目规则「重建表标准流程」第 1 步：关闭外键校验，此前遗漏导致迁移硬失败。
     // 1) *_pkv2 已带真实 FK 约束（episode.media_id / play_source.episode_id，对齐 SCHEMA_SQL），
     //    而旧库本就残留悬空 play_source（历史缺陷），开着 FK 时
     //    「INSERT INTO play_source_pkv2 SELECT ... FROM play_source」被约束当场拒绝：
@@ -1253,7 +1253,7 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await exec('DROP TABLE ep_map');
     await exec('DROP TABLE ps_map');
 
-    // AGENTS「重建表标准流程」收尾：恢复外键校验并自查残留违规。
+    // 项目规则「重建表标准流程」收尾：恢复外键校验并自查残留违规。
     // 放在 finalizePkRebuild() 之前，使 VACUUM 与后续 SCHEMA_SQL 补跑都在 FK 生效下进行。
     await exec('PRAGMA foreign_keys = ON');
     try {

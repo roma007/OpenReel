@@ -5,7 +5,7 @@
 // TV 端不需要的：PiP 相关全部补丁（TV 版已砍画中画）、CPU 采样浮窗（诊断用桌面/手机专用）、
 // 所有 iOS 补丁（TV 端仅 Android）。任何异常不抛出，避免阻断安装。
 //
-// 依据：AGENTS.md「移动端构建同步铁律」——依赖 node_modules 补丁的能力在重装/重编时有丢失风险，
+// 依据：项目规则「移动端构建同步铁律」——依赖 node_modules 补丁的能力在重装/重编时有丢失风险，
 // 故 TV 端同样在 postinstall 自动重打。
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync } from 'fs';

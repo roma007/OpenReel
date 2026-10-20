@@ -94,7 +94,7 @@ cd apps/mobile/android && ./gradlew :app:assembleRelease
 # Output: app/build/outputs/apk/release/app-release-v<version>.apk
 ```
 
-> Deploying to a physical iPhone requires Xcode 26.6 — see the "移动端真机部署" section of `AGENTS.md`.
+> Deploying to a physical iPhone requires Xcode 26.6 — see the "移动端真机部署" section of the project rules.
 
 ## Project layout
 

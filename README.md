@@ -94,7 +94,7 @@ cd apps/mobile/android && ./gradlew :app:assembleRelease
 # 产物：app/build/outputs/apk/release/app-release-v<version>.apk
 ```
 
-> iOS 真机部署需要 Xcode 26.6，详见 `AGENTS.md`「移动端真机部署」一节。
+> iOS 真机部署需要 Xcode 26.6，详见项目规则中「移动端真机部署」一节。
 
 ## 项目结构
 

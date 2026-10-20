@@ -92,8 +92,8 @@ android {
         applicationId 'com.movie.app.tv'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 196
-        versionName "1.0.196"
+        versionCode 197
+        versionName "1.0.197"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -130,7 +130,7 @@ android {
             crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
-    // 产物文件名带应用版本号：app-release-v<versionName>.apk（AGENTS「安卓 release 产物命名规则」）
+    // 产物文件名带应用版本号：app-release-v<versionName>.apk（项目规则「安卓 release 产物命名规则」）
     def apkVariantVersionName = defaultConfig.versionName
     androidComponents {
         onVariants(selector().all()) { variant ->

@@ -40,6 +40,8 @@ MOBILE_DESKTOP_DIFF.md
 docs/
 # 根目录悬空截屏（无任何引用，不入库）
 screenshot_app.png
+# 项目规则文件（仅本地保留，代码/README 引用已改为不指向文件）
+AGENTS.md
 
 # 离线 vendored 框架 tar 包（由 withLocalVendored 插件在 prebuild 时拷入 ios/）
 apps/mobile/plugins/local_vendored/

@@ -104,7 +104,7 @@ export function CollectProgressDialog() {
   const failedCount = collectSourceProgress.filter((s) => s.status === 'failed').length;
   const runningCount = collectSourceProgress.filter((s) => s.status === 'running').length;
 
-  const panelBg = colors.card; // 弹窗主体必须不透明（AGENTS 弹窗不透明度规则）
+  const panelBg = colors.card; // 弹窗主体必须不透明（项目规则：弹窗不透明度规则）
   const headerTitle = allDone
     ? '采集完成'
     : runningCount > 0

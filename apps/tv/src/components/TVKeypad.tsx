@@ -39,7 +39,7 @@ const SYMBOLS: Record<TVKeypadMode, string[]> = {
  *
  * 焦点：每个键都是 TVFocusable，方向键导航交给原生 FocusFinder；打开时 pushScope 开启
  * 焦点监狱，方向键不会跳出键盘落到下层页面；Android BACK 优先关键盘而非退出页面。
- * 不透明度：面板底色为不透明 colors.background（AGENTS 弹窗不透明度规则）。
+ * 不透明度：面板底色为不透明 colors.background（项目规则：弹窗不透明度规则）。
  */
 export interface TVKeypadProps {
   visible: boolean;

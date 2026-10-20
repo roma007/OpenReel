@@ -6,7 +6,7 @@ import type { MediaNavState } from '@openreel/core';
  * 与手机端差异：
  *  - 播放页用 modal 表现（电视上「全屏」即当前层）
  *  - 每页 state 均携带 MediaNavState，保证 BACK 返回时还原同一页码/筛选/搜索词
- *    （AGENTS「导航返回铁律」在 TV 端同样生效，且遥控 BACK 是主要返回手段）
+ *    （项目规则「导航返回铁律」在 TV 端同样生效，且遥控 BACK 是主要返回手段）
  */
 export type RootStackParamList = {
   Home: undefined;
