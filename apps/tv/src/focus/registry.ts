@@ -40,6 +40,8 @@ class FocusRegistry {
   private listeners = new Set<Listener>();
   /** 元素注册后主动申请焦点的标记（首个可聚焦元素 / 页面切换后的初始焦点） */
   private pendingFocusId: string | null = null;
+  /** 声明时间戳：初始焦点声明有时效，防止重试链变成「焦点劫持」（2026-10-21 实测） */
+  private pendingFocusAt: number = 0;
   /** 焦点监狱：模态层（键盘/面板）打开期间，焦点不得落到 id 不以栈顶前缀开头的元素 */
   private scopes: Array<{ prefix: string; focusId: string | null }> = [];
 
@@ -125,7 +127,18 @@ class FocusRegistry {
   /** 页面挂载时请求初始焦点（页面级第一个可聚焦元素） */
   requestInitialFocus(id: string) {
     this.pendingFocusId = id;
+    this.pendingFocusAt = Date.now();
     this.emit();
+  }
+
+  /**
+   * 初始焦点声明是否已超时（2.5s）。
+   * 背景：声明被设计为「被抢后保留、重试链继续追」，但用户按 DPAD 合法移动焦点时，
+   * 重试链会把新焦点误判为「被抢」把焦点拉回声明目标 —— 表现为「方向键按下后
+   * 焦点弹回原位」。声明只在约 2.5s 内有效，超时由 TVFocusBridge 放弃。
+   */
+  isPendingFocusStale(): boolean {
+    return this.pendingFocusId !== null && Date.now() - this.pendingFocusAt > 2500;
   }
 
   /**

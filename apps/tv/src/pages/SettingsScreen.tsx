@@ -7,7 +7,7 @@ import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@op
 
 import { TVFocusable } from '../focus/TVFocusable';
 import { focusRegistry } from '../focus/registry';
-import { TV_LAYOUT, tv } from '../theme/tokens';
+import { TV_FIXED, TV_LAYOUT, tv } from '../theme/tokens';
 import { useAppStore } from '../useAppStore';
 import { showTVToast } from '../components/TVToast';
 import type { RootStackParamList } from '../navigation/types';
@@ -189,10 +189,14 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingTop: tv(20), paddingBottom: tv(44) },
   // 组卡片：对齐移动端 Sidebar section（纯背景色+圆角，无边框、行间无分隔线）
+  // padding 取焦点环宽度：行是卡片直接子节点且卡片 overflow:hidden，
+  // 若不留白，TVFocusable 外扩 3dp 的焦点环会被卡片边缘裁掉左右竖边，
+  // 组内首/末行还会丢上/下边（2026-10-21 模拟器实测，与 tv-launcher 修法一致）。
   card: {
     borderRadius: tv(12),
     overflow: 'hidden',
     marginBottom: tv(16),
+    padding: TV_FIXED.focusRingWidth,
   },
   row: {
     flexDirection: 'row',

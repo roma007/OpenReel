@@ -6,8 +6,25 @@ const monorepoRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// monorepo: 监听根目录，解析 workspace 包（@openreel/core、@openreel/expo-db）
-config.watchFolders = [...(config.watchFolders || []), monorepoRoot];
+// 关键修复：显式设置 server root 为当前 app 目录。
+// Expo monorepo 下 Metro 默认用 monorepo 根作为 server root，index.bundle 会
+// 被解析成 mobile 的入口（因为 Expo 在根目录放了 .virtual-metro-entry）。
+// 必须显式设 server.root = projectRoot，让 index.bundle 指向当前 app 的 index.ts。
+config.server = config.server || {};
+config.server.root = projectRoot;
+
+// 关键修复：覆盖 Expo 默认的 watchFolders。
+// getDefaultConfig 在 monorepo 下会把所有 workspace 的 expo app（mobile、tv-launcher、desktop）
+// 都加进 watchFolders，导致 Metro 默认入口被解析成 mobile 的 index.bundle！
+// 显式限制为当前 app + 共享 workspace 包（不含其他 app）。
+config.watchFolders = [
+  projectRoot,
+  monorepoRoot,
+  path.resolve(monorepoRoot, 'packages/core'),
+  path.resolve(monorepoRoot, 'packages/expo-db'),
+  path.resolve(monorepoRoot, 'packages/expo-ui'),
+  path.resolve(monorepoRoot, 'packages/expo-dlna-cast'),
+];
 
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),

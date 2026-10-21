@@ -71,13 +71,20 @@ export function TVFocusBridge() {
     };
 
     const ensureFocus = () => {
-      // 待生效的初始焦点优先于「当前焦点」：页面挂载后原生 FocusFinder 会先给某个
-      // 可聚焦元素，此时 focusedId 已非空，若直接返回，页面声明的初始焦点永不生效。
       const pending = focusRegistry.getPendingFocusId();
+      const curFocused = focusRegistry.getFocusedId();
       if (pending && focusRegistry.has(pending)) {
-        // 声明超龄即放弃（2026-10-21 实测）：否则用户按 DPAD 合法移动焦点后，
-        // 重试链会把新焦点误判为「被抢」，60ms 内拉回声明目标（焦点劫持）。
-        if (focusRegistry.isPendingFocusStale()) {
+        // 关键修复（logcat 实锤）：用户合法移走焦点时放弃 pending。
+        // 17:20:10.439 外观设置页：用户按 DOWN 后焦点从 appearance-back 移到
+        // colorMode:system（handleBlur→handleFocus 已记录），但 pending='appearance-back'
+        // 仍未清，pending branch 立刻 tryFocus('appearance-back') 把焦点拉回。
+        // 这里先检查是否已有其他合法焦点接管 → 有就放弃 pending。
+        const curF = focusRegistry.getFocusedId();
+        if (curF && curF !== pending && focusRegistry.has(curF)) {
+          focusRegistry.clearPendingFocus();
+          stopRetry();
+          // 不 return：让 retryTarget 块或 curFocused 检查正常接管
+        } else if (focusRegistry.isPendingFocusStale()) {
           focusRegistry.clearPendingFocus();
           stopRetry();
         } else {
@@ -91,15 +98,19 @@ export function TVFocusBridge() {
         }
       }
 
-      // 重试链还在跑：继续追同一个目标，不被其他元素的焦点变化打断
       if (retryTarget) {
-        if (focusRegistry.has(retryTarget) && !focusRegistry.isFocused(retryTarget)) tryFocus(retryTarget);
-        else stopRetry();
+        const curF = focusRegistry.getFocusedId();
+        if (curF && curF !== retryTarget && focusRegistry.has(curF)) {
+          stopRetry();
+        } else if (focusRegistry.has(retryTarget) && !focusRegistry.isFocused(retryTarget)) {
+          tryFocus(retryTarget);
+        } else {
+          stopRetry();
+        }
         return;
       }
 
       const cur = focusRegistry.getFocusedId();
-      // 已有有效焦点：不干预（原生焦点才是唯一事实来源）
       if (cur && focusRegistry.has(cur)) return;
       const target = focusRegistry.recoverFocus();
       if (!target) return;

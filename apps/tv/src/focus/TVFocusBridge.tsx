@@ -75,19 +75,40 @@ export function TVFocusBridge() {
       // 可聚焦元素，此时 focusedId 已非空，若直接返回，页面声明的初始焦点永不生效。
       const pending = focusRegistry.getPendingFocusId();
       if (pending && focusRegistry.has(pending)) {
-        if (pending !== retryTarget) {
-          clearRetry();
-          retryTarget = pending;
-          attempts = 0;
+        // 关键修复（tv-launcher 设置页 logcat 实锤）：用户合法移走焦点时放弃 pending。
+        // pending 会一直 tryFocus(pending)，不管当前焦点是不是用户刚合法移过去的。
+        // 只有 curFocused 没被其他已注册元素接管时才继续追 pending。
+        const curF = focusRegistry.getFocusedId();
+        if (curF && curF !== pending && focusRegistry.has(curF)) {
+          focusRegistry.clearPendingFocus();
+          stopRetry();
+        } else if (focusRegistry.isPendingFocusStale()) {
+          focusRegistry.clearPendingFocus();
+          stopRetry();
+        } else {
+          if (pending !== retryTarget) {
+            clearRetry();
+            retryTarget = pending;
+            attempts = 0;
+          }
+          tryFocus(pending);
+          return;
         }
-        tryFocus(pending);
-        return;
       }
 
       // 重试链还在跑：继续追同一个目标，不被其他元素的焦点变化打断
       if (retryTarget) {
-        if (focusRegistry.has(retryTarget) && !focusRegistry.isFocused(retryTarget)) tryFocus(retryTarget);
-        else stopRetry();
+        // 核心修复（设置页实测）：如果 registry 当前持有「其他元素」的有效焦点，
+        // 说明用户按 DPAD 或原生 FocusFinder 已经正确把焦点移走了，别再追 retryTarget
+        // 拉回原位（这就是「按 DOWN 后焦点弹回返回按钮」的根因）。
+        const curFocused = focusRegistry.getFocusedId();
+        if (curFocused && curFocused !== retryTarget && focusRegistry.has(curFocused)) {
+          stopRetry();
+        } else if (focusRegistry.has(retryTarget) && !focusRegistry.isFocused(retryTarget)) {
+          tryFocus(retryTarget);
+        } else {
+          stopRetry();
+        }
         return;
       }
 

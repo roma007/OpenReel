@@ -98,10 +98,8 @@ class FocusRegistry {
     });
     this.focusedId = id;
     this.lastFocusedId = id;
-    // 只有「待生效目标真的拿到焦点」才清声明。若被别的元素（原生 FocusFinder 在页面
-    // 挂载时会先给 search-back 这类元素）抢走就清掉，声明会永久失效 —— 2026-10-05
-    // 实测搜索页初始焦点 search-input 因此从未生效。剩余声明由 TVFocusBridge 的
-    // 重试链负责：拿到焦点、或元素消失、或重试超限时才清。
+    // 只有「待生效目标真的拿到焦点」才清声明。若被别的元素抢走就清掉，
+    // 声明会永久失效 —— 剩余声明由 TVFocusBridge 的重试链负责。
     if (!this.pendingFocusId || this.pendingFocusId === id) this.pendingFocusId = null;
     if (scope) scope.focusId = id;
     e.onFocus?.();
