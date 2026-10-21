@@ -36,36 +36,6 @@ export interface ShortDramaConfig {
   probeEpisodeCount: number;
 }
 
-/** 播放中浮窗广告：模拟广告位配置（配置驱动，未来可替换为真实广告源）。 */
-export interface AdFloatItem {
-  /** 广告标题/文案（本地模拟广告主要用于展示）。 */
-  title: string;
-  /** 广告素材图片 URL；缺省用渐变色块。 */
-  imageUrl?: string;
-  /** 广告素材目标宽高（等比例放大缩小，决定浮窗大小）。 */
-  width: number;
-  height: number;
-  /** 广告商要求的展示时长（ms）；缺省 5000。 */
-  durationMs?: number;
-  /** 点击广告跳转链接（桌面用 openUrl，移动用 Linking）。 */
-  linkUrl?: string;
-}
-
-export interface AdFloatConfig {
-  /** 总开关。 */
-  enabled: boolean;
-  /** 广告位列表。 */
-  ads: AdFloatItem[];
-  /** 单次播放最多展示次数。 */
-  maxShowsPerSession: number;
-  /** 两次展示最小间隔（秒）。 */
-  minIntervalSeconds: number;
-  /** 首个展示点所在时间范围（秒），在此范围内随机选点出现。 */
-  firstShowRandomRangeSeconds: [number, number];
-  /** 浮窗占播放器宽的最大比例（自适应缩放上限）。 */
-  maxWidthRatio: number;
-}
-
 const DEFAULT_SHORT_DRAMA_CONFIG: ShortDramaConfig = {
   summaryPatterns: [
     '{N}分钟',
@@ -88,52 +58,6 @@ const DEFAULT_SHORT_DRAMA_CONFIG: ShortDramaConfig = {
     '重生为', '末世之', '全球', '玄幻', '修仙', '开局', '终结',
   ],
   probeEpisodeCount: 8,
-};
-
-/** 广告位方向：由宽高比推导（宽≥高=横版 landscape，宽<高=竖版 portrait）。 */
-export type AdOrientation = 'landscape' | 'portrait';
-
-/** 按广告宽高推导广告位方向。 */
-export function getAdOrientation(ad: AdFloatItem): AdOrientation {
-  return ad.width >= ad.height ? 'landscape' : 'portrait';
-}
-
-/** 按方向过滤广告池；池中无匹配方向时返回全部（保底展示，不跳过）。 */
-export function filterAdsByOrientation(ads: AdFloatItem[], orientation: AdOrientation): AdFloatItem[] {
-  const matched = ads.filter((a) => getAdOrientation(a) === orientation);
-  return matched.length > 0 ? matched : ads;
-}
-
-/** 广告内置配置（恒启用，不依赖 system_config，素材内置示例广告）。 */
-export const BUILTIN_AD_FLOAT_CONFIG: AdFloatConfig = {
-  enabled: true,
-  maxShowsPerSession: 1,
-  minIntervalSeconds: 300,
-  firstShowRandomRangeSeconds: [30, 180],
-  maxWidthRatio: 0.35,
-  ads: [
-    {
-      title: '示例广告 · 横版海报位',
-      width: 360,
-      height: 240,
-      durationMs: 5000,
-      linkUrl: 'https://example.com',
-    },
-    {
-      title: '示例广告 · 通栏位',
-      width: 640,
-      height: 300,
-      durationMs: 5000,
-      linkUrl: 'https://example.com',
-    },
-    {
-      title: '示例广告 · 竖版大图位',
-      width: 360,
-      height: 640,
-      durationMs: 5000,
-      linkUrl: 'https://example.com',
-    },
-  ],
 };
 
 const DEFAULT_COLLECT_CONFIG: CollectConfig = {

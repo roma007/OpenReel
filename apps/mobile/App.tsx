@@ -192,7 +192,7 @@ export default function App() {
           <RootNavigator />
         </NavigationContainer>
       )}
-      {/* 欢迎页 + 全屏广告覆盖层（主应用渲染在其下层，首页数据后台加载）。升级进行中（未 ready）时全屏展示进度条/引导页 */}
+      {/* 欢迎页覆盖层（主应用渲染在其下层，首页数据后台加载）。升级进行中（未 ready）时全屏展示进度条/引导页 */}
       <SplashOverlay ready={ready} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />
       {/* 安卓模拟器资源监控悬浮层（诊断用，右上角 x 可关） */}
       <ResourceOverlay routeRef={routeRef} />

@@ -15,7 +15,7 @@ import { ArrowLeft, Star, Settings, ChevronRight, X, Play } from 'lucide-react-n
 // 2026-10-04按用户要求「图标用白色实心」实施：原 lucide 图标为描边风格，
 // 给其加 fill 会因路径开放而畸形（Maximize 4 条开放 path、EyeOff 3 弧+斜线、Cast 3 path+line 等），故换图标集。
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@openreel/core';
+import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget } from '@openreel/core';
 import { clearCategoryFilterCache } from '../categoryFilterCache';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +35,6 @@ import { radius } from '../themes/radiusTokens';
 import { SegmentProgress } from '../components/SegmentProgress';
 import { createSegmentSnapshotBuilder, type SegmentProgressSnapshot } from '../services/segmentProgress';
 import { FullscreenControlBar } from '../components/FullscreenControlBar';
-import { AdFloatOverlay } from '../components/AdFloatOverlay';
 import PosterImage from '../components/PosterImage';
 import { Image } from 'expo-image';
 import { useScrubPreview } from '../hooks/useScrubPreview';
@@ -283,13 +282,6 @@ export default function PlayScreen({ route, navigation }: Props) {
 
   // 功能3: 影片信息
   const [media, setMedia] = useState<Media | null>(null);
-
-  // 播放中横幅广告（配置驱动，随机出现一次，不打断播放）
-  const [activeAd, setActiveAd] = useState<AdFloatItem | null>(null);
-  const adSchedulerRef = useRef<AdFloatScheduler | null>(null);
-  const lastAdShownRef = useRef<AdFloatItem | null>(null);
-  const activeAdRef = useRef<AdFloatItem | null>(null);
-  activeAdRef.current = activeAd;
 
   // 待应用的恢复位置：source 真正就绪后再 seek，避免一次性赋值被丢弃
   const pendingSeekRef = useRef(0);
@@ -835,11 +827,6 @@ export default function PlayScreen({ route, navigation }: Props) {
           appendPlayTrace('[trace] mainLoad noSources');
           setError('无可播放的线路');
         }
-
-        // 播放中横幅广告：内置恒启用，换集/重进时重置调度器
-        adSchedulerRef.current = new AdFloatScheduler(BUILTIN_AD_FLOAT_CONFIG);
-        lastAdShownRef.current = null;
-        setActiveAd(null);
       } catch (e) {
         appendPlayTrace('[trace] mainLoad error', String(e));
         setError('加载失败');
@@ -1003,20 +990,6 @@ export default function PlayScreen({ route, navigation }: Props) {
 
   // 功能6: 进度保存节流 (10s + 接近片尾)
   const handleTimeUpdate = (currentTime: number, duration: number) => {
-    // 播放中横幅广告：随机触发，不打断播放
-    const adScheduler = adSchedulerRef.current;
-    if (
-      adScheduler &&
-      !activeAdRef.current &&
-      adScheduler.shouldShow(currentTime)
-    ) {
-      const orientation = screenW >= screenH ? ('landscape' as const) : ('portrait' as const);
-      const ad = adScheduler.pickRandomExclude(lastAdShownRef.current, orientation);
-      if (ad) {
-        lastAdShownRef.current = ad;
-        setActiveAd(ad);
-      }
-    }
     if (duration > 0 && mediaId) {
       const now = Date.now();
       const nearEnd = Math.floor(currentTime) >= duration - 2;
@@ -2468,13 +2441,6 @@ if (st.phase === 'longpress' && (st.zone === 'left' || st.zone === 'right')) {
           </View>
         )}
 
-        {activeAd && (
-          <AdFloatOverlay
-            ad={activeAd}
-            topOffset={0}
-            onDismissed={() => setActiveAd(null)}
-          />
-        )}
         {showSegmentProgress && videoUrl && (
           <SegmentProgress
             snapshot={segmentSnapshot}

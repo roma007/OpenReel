@@ -40,7 +40,7 @@ import LicensePage from './pages/LicensePage';
 import DbToolPage from './pages/DbToolPage';
 
 interface AppProps {
-  /** 本次页面加载是否为刷新（reload）。刷新属页面级操作，不播欢迎页与初始广告。 */
+  /** 本次页面加载是否为刷新（reload）。刷新属页面级操作，不播欢迎页。 */
   isReload?: boolean;
 }
 
@@ -155,7 +155,7 @@ function MainApp({ isReload }: { isReload: boolean }) {
           </ThemeProvider>
         )}
       </div>
-      {/* 欢迎页 + 初始广告属于应用启动序列：刷新时（isReload）不重播 */}
+      {/* 欢迎页属于应用启动序列：刷新时（isReload）不重播 */}
       {!isReload && <SplashOverlay ready={ready} />}
       {/* 数据库升级/磁盘不足占位层不属于启动序列，刷新时同样显示 */}
       <MigrationOverlay migrating={migrating} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />

@@ -8,10 +8,9 @@ import { currentMonitor } from '@tauri-apps/api/window';
 import { emit, listen } from '@tauri-apps/api/event';
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
 import { Loader2 } from 'lucide-react';
-import { SystemConfigService, AdFloatScheduler, BUILTIN_AD_FLOAT_CONFIG, type AdFloatItem } from '@openreel/core';
+import { SystemConfigService } from '@openreel/core';
 import { VideoPlayer } from './VideoPlayer';
 import { PlayerOverlays } from './PlayerOverlays';
-import { AdFloatOverlay } from './AdFloatOverlay';
 import { usePlayerStore, buildPipPayload, isPipSwitching } from '../../stores/playerStore';
 import { ensurePipWindow, nextOpenSeq, writePipPayload, PIP_MIN_SIZE } from '../../pip/pipWindowManager';
 import { getProvider } from '../../init';
@@ -112,11 +111,6 @@ export function PlayerHost() {
   const skipEligibleRef = useRef(false);
   const lastTimeRef = useRef(0);
 
-  // ── 播放中横幅广告（内置恒启用，随机出现一次，不打断播放）──
-  const [activeAd, setActiveAd] = useState<AdFloatItem | null>(null);
-  const adSchedulerRef = useRef<AdFloatScheduler | null>(null);
-  const lastAdShownRef = useRef<AdFloatItem | null>(null);
-
   const getVideoMeta = useCallback(() => {
     const v = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null | undefined;
     const m = getVideoMetaFromElement(v);
@@ -129,9 +123,6 @@ export function PlayerHost() {
   }, []);
 
   useEffect(() => {
-    adSchedulerRef.current = new AdFloatScheduler(BUILTIN_AD_FLOAT_CONFIG);
-    lastAdShownRef.current = null;
-    setActiveAd(null);
     videoMetaRef.current = {};
   }, [session?.episodeId]);
 
@@ -515,16 +506,6 @@ export function PlayerHost() {
   };
 
   const handlePlayerTimeUpdate = (currentTime: number, duration: number) => {
-    // 播放中横幅广告：随机触发一次，不打断播放（pip 激活时主窗口不播，不触发）
-    const scheduler = adSchedulerRef.current;
-    if (scheduler && !pipActive && !activeAd && scheduler.shouldShow(currentTime)) {
-      const orientation = window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait';
-      const ad = scheduler.pickRandomExclude(lastAdShownRef.current, orientation);
-      if (ad) {
-        lastAdShownRef.current = ad;
-        setActiveAd(ad);
-      }
-    }
     handleTimeUpdate(currentTime, duration);
     const threshold = (session.outroThresholdMinutes ?? 10) * 60;
     // 短片（时长 ≤ 预热阈值）在剩余 60s 内触发；长片沿用阈值窗口
@@ -615,12 +596,6 @@ export function PlayerHost() {
                   onSkipForward={handleSkipForward}
                   onSkipForwardClose={handleSkipForwardClose}
                 />
-                {activeAd && (
-                  <AdFloatOverlay
-                    ad={activeAd}
-                    onDismissed={() => setActiveAd(null)}
-                  />
-                )}
               </>
             }
           />

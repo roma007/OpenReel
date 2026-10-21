@@ -258,60 +258,53 @@ export function TaskListScreen() {
               key={task.taskId || String(task.id)}
               style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100) }]}
             >
-              {/* 头部行：源名 + 类型 + 日期（右对齐）——排列对齐移动端 taskHeader */}
-              <View style={styles.headerRow}>
-                <Text style={[styles.source, { color: colors.foreground, fontSize: scale(19) }]} numberOfLines={1}>
+              {/* 单行任务行：源名 / 采集类型 / 进度条+进度值 / 开始时间 / 状态 / 继续 / 删除 */}
+              <View style={styles.taskRow}>
+                <Text
+                  style={[styles.source, { color: colors.foreground, fontSize: scale(18) }]}
+                  numberOfLines={1}
+                >
                   {task.sourceName || task.sourceCode}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>{typeLabel(task.type)}</Text>
-                <Text style={[styles.date, { color: colors.mutedForeground, fontSize: scale(14) }]}>
-                  {new Date(task.createdAt).toLocaleString()}
+                <Text
+                  style={[styles.typeText, { color: colors.textSecondary, fontSize: scale(14) }]}
+                  numberOfLines={1}
+                >
+                  {typeLabel(task.type)}
                 </Text>
-              </View>
 
-              {((task.status === 'RUNNING' || task.status === 'PENDING') || isReprobe) && (
-                <View style={styles.progressWrap}>
-                  <View style={[styles.progressBar, { backgroundColor: colors.trackBg }]}>
-                    <View
-                      style={[styles.progressFill, { width: `${Math.min(100, progress)}%`, backgroundColor: st.color }]}
-                    />
-                  </View>
-                  {/* 进度文字右对齐、去百分比——排列与文案对齐移动端 progressText */}
-                  <Text style={[styles.progressText, { color: colors.mutedForeground, fontSize: scale(14) }]}>
-                    {task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}
-                  </Text>
-                </View>
-              )}
-
-              {/* 统计 + 状态徽章 + 操作按钮 同一行、按钮靠右——排列对齐移动端 taskMeta/taskRight */}
-              <View style={styles.metaRow}>
-                {isReprobe ? (
-                  <>
-                    <Text style={{ color: colors.success, fontSize: scale(15) }}>短剧: {task.shortDramaCount || 0}</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>长剧: {task.longDramaCount || 0}</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>成功: {task.collectedCount}</Text>
-                    <Text style={{ color: task.failedCount > 0 ? colors.error : colors.textSecondary, fontSize: scale(15) }}>
-                      失败: {task.failedCount}
+                {(task.status === 'RUNNING' || task.status === 'PENDING' || isReprobe) && (
+                  <View style={styles.progressWrap}>
+                    <View style={[styles.progressBar, { backgroundColor: colors.trackBg }]}>
+                      <View
+                        style={[styles.progressFill, { width: `${Math.min(100, progress)}%`, backgroundColor: st.color }]}
+                      />
+                    </View>
+                    <Text
+                      style={[styles.progressText, { color: colors.mutedForeground, fontSize: scale(13) }]}
+                      numberOfLines={1}
+                    >
+                      {task.currentPage}/{task.totalPages} {isReprobe ? '部' : '页'}
                     </Text>
-                  </>
-                ) : null}
+                  </View>
+                )}
+
                 <View style={styles.rightGroup}>
+                  <Text
+                    style={[styles.date, { color: colors.mutedForeground, fontSize: scale(13) }]}
+                    numberOfLines={1}
+                  >
+                    {new Date(task.createdAt).toLocaleString()}
+                  </Text>
                   <Text style={[styles.badge, { borderColor: st.color }]}>
                     <Text style={{ color: st.color, fontSize: scale(14), fontWeight: '600' }}>{st.label}</Text>
                   </Text>
-                  {canRetry ? (
-                    <TVButton
-                      id={`task-retry:${task.taskId}`}
-                      label={busy ? '重试中…' : `重试失败项(${failedItems.length})`}
-                      disabled={busy}
-                      onPress={() => pressRetry(task)}
-                      testID={`tv-task-retry-${task.taskId}`}
-                    />
-                  ) : null}
                   {canResume ? (
                     <TVButton
                       id={`task-resume:${task.taskId}`}
                       label={busy ? '续采中…' : '继续'}
+                      labelFontSize={scale(15)}
+                      style={styles.rowBtn}
                       disabled={busy}
                       onPress={() => pressResume(task)}
                       testID={`tv-task-resume-${task.taskId}`}
@@ -320,6 +313,8 @@ export function TaskListScreen() {
                   <TVButton
                     id={`task-delete:${task.taskId}`}
                     label={pendingDelete === task.taskId ? '确认删除？' : '删除'}
+                    labelFontSize={scale(15)}
+                    style={styles.rowBtn}
                     variant="danger"
                     disabled={busy}
                     onPress={() => pressDelete(task)}
@@ -327,6 +322,18 @@ export function TaskListScreen() {
                   />
                 </View>
               </View>
+
+              {/* 长短剧探测统计：不在单行列举项内，保留为副行 */}
+              {isReprobe ? (
+                <View style={styles.reprobeStats}>
+                  <Text style={{ color: colors.success, fontSize: scale(15) }}>短剧: {task.shortDramaCount || 0}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>长剧: {task.longDramaCount || 0}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>成功: {task.collectedCount}</Text>
+                  <Text style={{ color: task.failedCount > 0 ? colors.error : colors.textSecondary, fontSize: scale(15) }}>
+                    失败: {task.failedCount}
+                  </Text>
+                </View>
+              ) : null}
 
               {/* 失败明细区：仅 INCREMENTAL/FULL；统计「有失败才显示」规则照搬移动端 failedRow */}
               {task.type === 'INCREMENTAL' || task.type === 'FULL' ? (
@@ -340,16 +347,27 @@ export function TaskListScreen() {
                         <Text style={{ color: colors.textSecondary, fontSize: scale(15) }}>
                           失败: {task.failedCount}
                         </Text>
-                        <TVFocusable
-                          id={`task-failed-toggle:${task.taskId}`}
-                          onPress={() => setExpanded(expanded === task.taskId ? null : task.taskId)}
-                          style={styles.failedToggle}
-                          testID={`tv-task-failed-toggle-${task.taskId}`}
-                        >
-                          <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>
-                            {expanded === task.taskId ? '▾ 收起失败明细' : `▸ 查看失败明细（${failedItems.length} 条）`}
-                          </Text>
-                        </TVFocusable>
+                        <View style={styles.rightGroup}>
+                          {canRetry ? (
+                            <TVButton
+                              id={`task-retry:${task.taskId}`}
+                              label={busy ? '重试中…' : `重试失败项(${failedItems.length})`}
+                              disabled={busy}
+                              onPress={() => pressRetry(task)}
+                              testID={`tv-task-retry-${task.taskId}`}
+                            />
+                          ) : null}
+                          <TVFocusable
+                            id={`task-failed-toggle:${task.taskId}`}
+                            onPress={() => setExpanded(expanded === task.taskId ? null : task.taskId)}
+                            style={styles.failedToggle}
+                            testID={`tv-task-failed-toggle-${task.taskId}`}
+                          >
+                            <Text style={{ color: colors.mutedForeground, fontSize: scale(15) }}>
+                              {expanded === task.taskId ? '▾ 收起失败明细' : `▸ 查看失败明细（${failedItems.length} 条）`}
+                            </Text>
+                          </TVFocusable>
+                        </View>
                       </View>
                       {expanded === task.taskId ? (
                         <View style={styles.failedList}>
@@ -395,21 +413,27 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingTop: tv(16), paddingBottom: tv(44) },
   card: { padding: tv(18), borderRadius: tv(10), marginBottom: tv(14) },
-  // 头部行：源名 + 类型 + 日期（日期靠右）——对齐移动端 taskHeader
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: tv(10), marginBottom: tv(8) },
-  source: { fontWeight: '700', flexShrink: 1 },
-  date: { marginLeft: 'auto' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: tv(8) },
-  // 状态徽章 + 操作按钮靠右成组——对齐移动端 taskRight
-  rightGroup: { flexDirection: 'row', alignItems: 'center', gap: tv(8), marginLeft: 'auto' },
-  badge: { borderWidth: 1, borderRadius: tv(6), paddingHorizontal: tv(8), paddingVertical: tv(2) },
-  progressWrap: { marginTop: tv(10) },
-  progressBar: { height: tv(6), borderRadius: tv(3), overflow: 'hidden' },
+  // 单行任务行：源名 / 类型 / 进度条+进度值 / 开始时间 / 状态 / 操作按钮
+  taskRow: { flexDirection: 'row', alignItems: 'center', gap: tv(10) },
+  source: { fontWeight: '700', flexShrink: 1, minWidth: tv(80), maxWidth: tv(170) },
+  typeText: { flexShrink: 0 },
+  date: { flexShrink: 1 },
+  // 状态徽章 + 操作按钮靠右成组
+  rightGroup: { flexDirection: 'row', alignItems: 'center', gap: tv(8), marginLeft: 'auto', flexShrink: 0 },
+  badge: { borderWidth: 1, borderRadius: tv(6), paddingHorizontal: tv(8), paddingVertical: tv(2), flexShrink: 0 },
+  // 行内紧凑按钮：清掉 TVButton 默认右侧外边距，间距交给父级 gap
+  rowBtn: { paddingHorizontal: tv(12), paddingVertical: tv(8), marginRight: 0 },
+  // 长短剧探测统计副行
+  reprobeStats: { flexDirection: 'row', alignItems: 'center', gap: tv(12), marginTop: tv(8) },
+  // 进度条 + 进度值同一行
+  progressWrap: { flexDirection: 'row', alignItems: 'center', gap: tv(8), flexShrink: 0 },
+  progressBar: { width: tv(96), height: tv(6), borderRadius: tv(3), overflow: 'hidden' },
   progressFill: { height: '100%' },
-  progressText: { marginTop: tv(4), textAlign: 'right' },
+  progressText: { width: tv(56), textAlign: 'right' },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: tv(12) },
   // 失败明细区（对齐移动端 failedRow）：顶部分隔线 + 统计/开关同行
   failedRow: { marginTop: tv(10), borderTopWidth: 1, paddingTop: tv(8) },
-  failedToggle: { paddingVertical: tv(8), marginLeft: 'auto' },
+  failedToggle: { paddingVertical: tv(8) },
   failedList: { marginTop: tv(6), maxHeight: tv(220) },
   failedItem: { paddingVertical: tv(4) },
 });

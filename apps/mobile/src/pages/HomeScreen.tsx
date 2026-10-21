@@ -273,27 +273,6 @@ export default function HomeScreen() {
       });
   }, []);
 
-  // 首页四大板块数据加载完成标记（决定欢迎页全屏广告消失时机）
-  const homeReadyLatestRef = useRef(false);
-  const homeReadyFavRef = useRef(false);
-  const homeReadyHistoryRef = useRef(false);
-  const homeReadyTvDetailRef = useRef(false);
-  const homeSignaledRef = useRef(false);
-
-  const maybeSignalHomeReady = () => {
-    if (homeSignaledRef.current) return;
-    if (
-      homeReadyLatestRef.current &&
-      homeReadyFavRef.current &&
-      homeReadyHistoryRef.current &&
-      homeReadyTvDetailRef.current
-    ) {
-      homeSignaledRef.current = true;
-      // 图片渲染缓冲：四大板块数据就绪后再等 800ms（首页图片在此期间渲染）
-      setTimeout(() => getSplashStore().getState().setHomeReady(true), 800);
-    }
-  };
-
   useEffect(() => {
     loadVideoSources().then(() => setSourcesChecked(true));
   }, []);
@@ -341,43 +320,36 @@ export default function HomeScreen() {
   useEffect(() => {
     if (userUsageTypes.includes('NEW_MOVIES')) {
       provider.listMedia({ type: 'MOVIE', page: 1, pageSize: 5, sort: 'latest' })
-        .then((r) => { setLatestMedia(r.items); homeReadyLatestRef.current = true; maybeSignalHomeReady(); })
-        .catch(() => { homeReadyLatestRef.current = true; maybeSignalHomeReady(); });
-    } else {
-      homeReadyLatestRef.current = true;
-      maybeSignalHomeReady();
+        .then((r) => setLatestMedia(r.items))
+        .catch(() => {});
     }
   }, [userUsageTypes, provider]);
 
   useEffect(() => {
-    if (favorites.length === 0) { setFavMediaList([]); homeReadyFavRef.current = true; maybeSignalHomeReady(); return; }
+    if (favorites.length === 0) { setFavMediaList([]); return; }
     let cancelled = false;
     Promise.all(
       favorites.slice(0, 10).map(f => provider.getMediaById(f.mediaId).catch(() => null))
     ).then(list => {
       if (!cancelled) setFavMediaList(list.filter(Boolean) as Media[]);
-      homeReadyFavRef.current = true;
-      maybeSignalHomeReady();
     });
     return () => { cancelled = true; };
   }, [favorites, provider]);
 
   useEffect(() => {
-    if (watchHistory.length === 0) { setHistoryMediaList([]); homeReadyHistoryRef.current = true; maybeSignalHomeReady(); return; }
+    if (watchHistory.length === 0) { setHistoryMediaList([]); return; }
     let cancelled = false;
     Promise.all(
       watchHistory.slice(0, 10).map(h => provider.getMediaById(h.mediaId).catch(() => null))
     ).then(list => {
       if (!cancelled) setHistoryMediaList(list.filter(Boolean) as Media[]);
-      homeReadyHistoryRef.current = true;
-      maybeSignalHomeReady();
     });
     return () => { cancelled = true; };
   }, [watchHistory, provider]);
 
   useEffect(() => {
     const tvList = historyMediaList.filter((m) => m.type === 'TV' || m.type === 'VARIETY');
-    if (tvList.length === 0) { setWatchedHistoryMap({}); setEpisodeTotalMap({}); setSourceTotalMap({}); setEpisodeMap({}); homeReadyTvDetailRef.current = true; maybeSignalHomeReady(); return; }
+    if (tvList.length === 0) { setWatchedHistoryMap({}); setEpisodeTotalMap({}); setSourceTotalMap({}); setEpisodeMap({}); return; }
     let cancelled = false;
     Promise.all(
       tvList.map(async (m) => {
@@ -407,8 +379,6 @@ export default function HomeScreen() {
       const map: Record<string, Episode> = {};
       epEntries.forEach((ep) => { if (ep) map[ep.id] = ep; });
       setEpisodeMap(map);
-      homeReadyTvDetailRef.current = true;
-      maybeSignalHomeReady();
     });
     return () => { cancelled = true; };
   }, [historyMediaList, provider]);
@@ -440,17 +410,17 @@ export default function HomeScreen() {
     }
   }, [hintVisible]);
 
-  const splashAdGone = useMemo(() => getSplashStore().getState().phase === 'done', [splashPhase]);
+  const splashGone = useMemo(() => getSplashStore().getState().phase === 'done', [splashPhase]);
 
   useEffect(() => {
-    if (splashAdGone && watchHistory.length > 0) maybeShowDeleteHint();
+    if (splashGone && watchHistory.length > 0) maybeShowDeleteHint();
     else setHintVisible(false);
-  }, [splashAdGone, watchHistory.length, maybeShowDeleteHint]);
+  }, [splashGone, watchHistory.length, maybeShowDeleteHint]);
 
   useFocusEffect(
     useCallback(() => {
-      if (splashAdGone && watchHistory.length > 0) maybeShowDeleteHint();
-    }, [splashAdGone, watchHistory.length, maybeShowDeleteHint]),
+      if (splashGone && watchHistory.length > 0) maybeShowDeleteHint();
+    }, [splashGone, watchHistory.length, maybeShowDeleteHint]),
   );
 
   const renderSearchFirstCard = () => (

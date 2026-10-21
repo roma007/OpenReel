@@ -34,8 +34,7 @@ export {
 // 服务
 export { CMSAdapter } from './services/cmsAdapter';
 export { CollectorService } from './services/collectorService';
-export { SystemConfigService, BUILTIN_AD_FLOAT_CONFIG, getAdOrientation, filterAdsByOrientation, type AdOrientation, type CollectConfig, type ShortDramaConfig, type AdFloatConfig, type AdFloatItem } from './services/systemConfigService';
-export { AdFloatScheduler } from './services/adFloatScheduler';
+export { SystemConfigService, type CollectConfig, type ShortDramaConfig } from './services/systemConfigService';
 export { KidLockService } from './services/kidLockService';
 export { VideoDurationService, setVideoFetchFn, getVideoFetchFn } from './services/videoDurationService';
 export { SourceImportService } from './services/sourceImportService';

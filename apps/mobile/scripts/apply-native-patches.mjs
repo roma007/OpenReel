@@ -1194,6 +1194,28 @@ function patchAndroidTrueCpu() {
   console.log('[patch] Android expo-video-cache 已打功能19 CPU 采样补丁');
 }
 
+// ---------- iOS: react-airplay podspec 补 AVFoundation ----------
+// 根因：ReactAirplay.podspec 只声明 s.frameworks = "AVKit"，但 NativeAirplay.mm 引用
+// AVAudioSession/AVRouteDetector（AVFoundation 符号），Release 链接时 ld 报 symbol(s) not found。
+// 修复：podspec 追加 AVFoundation。幂等：已含 AVFoundation 则跳过。
+function patchIOSReactAirplayPodspec() {
+  const ra = resolvePkg('react-airplay');
+  if (!ra) return;
+  const podspec = join(ra, 'ReactAirplay.podspec');
+  if (!existsSync(podspec)) return;
+  let content = readFileSync(podspec, 'utf8');
+  if (content.includes('AVFoundation')) {
+    console.log('[patch] iOS react-airplay AVFoundation 已存在，跳过');
+    return;
+  }
+  content = content.replace(
+    's.frameworks = "AVKit"',
+    's.frameworks = "AVKit", "AVFoundation"'
+  );
+  writeFileSync(podspec, content);
+  console.log('[patch] iOS react-airplay podspec 已补 AVFoundation');
+}
+
 withPatchLock(() => {
   try {
     patchAndroid();
@@ -1205,6 +1227,7 @@ withPatchLock(() => {
     patchIOSTrace();
     patchIOStopServer();
     patchIOSTrueCpu();
+    patchIOSReactAirplayPodspec();
   } catch (e) {
     console.log('[patch] 原生补丁脚本异常（已忽略，不阻断安装）: ' + (e && e.message));
   }

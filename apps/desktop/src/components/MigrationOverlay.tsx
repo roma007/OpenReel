@@ -12,7 +12,7 @@ interface MigrationOverlayProps {
 /**
  * 数据库升级占位层（桌面端）。
  *
- * 与欢迎页/初始广告（应用启动序列，SplashOverlay）**分离**：本组件不属于启动序列，
+ * 与欢迎页（应用启动序列，SplashOverlay）**分离**：本组件不属于启动序列，
  * 任何时候只要处于迁移中或磁盘空间不足都必须显示，刷新（reload）也不例外。
  */
 export function MigrationOverlay({ migrating = false, migrationProgress, diskBlocked }: MigrationOverlayProps) {

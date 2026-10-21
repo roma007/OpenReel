@@ -2,7 +2,7 @@
  * 本次页面加载是否为「刷新」（reload）。
  *
  * 判据取浏览器标准导航类型（Navigation Timing）：
- * - 'navigate'     全新加载（应用冷启动）→ 属于启动序列，播欢迎页 + 广告
+ * - 'navigate'     全新加载（应用冷启动）→ 属于启动序列，播欢迎页
  * - 'reload'       location.reload() / 右键刷新 → 属页面级操作，与启动序列无关
  * - 'back_forward' 历史前进后退恢复 → 同上，非启动
  *

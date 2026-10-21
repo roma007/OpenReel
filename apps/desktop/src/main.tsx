@@ -75,7 +75,7 @@ function captureWebviewErrors() {
 
 captureWebviewErrors();
 
-// 必须在首帧渲染前同步求值：刷新（reload）不是应用启动，不播欢迎页与初始广告
+// 必须在首帧渲染前同步求值：刷新（reload）不是应用启动，不播欢迎页
 const isReload = isReloadNavigation();
 
 createRoot(document.getElementById('root')!).render(<App isReload={isReload} />);

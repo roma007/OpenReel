@@ -1,12 +1,10 @@
 import { create } from 'zustand';
 
-export type SplashPhase = 'logo' | 'ad' | 'done';
+export type SplashPhase = 'logo' | 'done';
 
 interface SplashState {
   phase: SplashPhase;
-  homeReady: boolean;
   setPhase: (p: SplashPhase) => void;
-  setHomeReady: (ready: boolean) => void;
   reset: () => void;
 }
 
@@ -15,10 +13,8 @@ let _singleton: ReturnType<typeof createSplashStore> | null = null;
 function createSplashStore() {
   return create<SplashState>((set) => ({
     phase: 'logo',
-    homeReady: false,
     setPhase: (p) => set({ phase: p }),
-    setHomeReady: (ready) => set({ homeReady: ready }),
-    reset: () => set({ phase: 'logo', homeReady: false }),
+    reset: () => set({ phase: 'logo' }),
   }));
 }
 
