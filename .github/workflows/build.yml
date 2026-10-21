@@ -326,11 +326,89 @@ jobs:
           path: apps/tv/android/app/build/outputs/apk/release/openreel-tv-release-v*.apk
           if-no-files-found: warn
 
+  build-tv-launcher-android:
+    name: Build TV Launcher APK
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Verify app identifiers unchanged
+        shell: bash
+        run: |
+          set -e
+          # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
+          tv_launcher_pkg=$(node -p "require('./apps/tv-launcher/app.json').expo.android.package")
+          [ "$tv_launcher_pkg" = "com.movie.app.launcher" ] || { echo "IDENTIFIER CHANGED: tv-launcher package=$tv_launcher_pkg"; exit 1; }
+          echo "Identifiers OK (tv-launcher=$tv_launcher_pkg)"
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 与 build-mobile-android 保持一致（同 monorepo 同一套 RN/Expo 原生依赖）
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1'
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: |
+          set -e
+          for i in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              exit 0
+            fi
+            echo "pnpm install failed (attempt $i/3), cleaning store and retrying..."
+            rm -rf node_modules
+            pnpm store prune || true
+          done
+          exit 1
+
+      - name: Build release APK
+        run: |
+          cd apps/tv-launcher/android
+          ./gradlew :app:assembleRelease --no-daemon
+
+      # 与 TV 端/手机端 APK 同名（都是 app-release-v<ver>.apk），同 Release 发布会冲突，
+      # 上传前重命名为 openreel-tv-launcher-release-v<ver>.apk（Launcher 应用内按此前缀匹配更新资产）。
+      - name: Rename APK to avoid mobile name clash
+        shell: bash
+        run: |
+          set -e
+          ver=$(node -p "require('./apps/tv-launcher/app.json').expo.version")
+          dir=apps/tv-launcher/android/app/build/outputs/apk/release
+          src="$dir/app-release-v${ver}.apk"
+          dst="$dir/openreel-tv-launcher-release-v${ver}.apk"
+          [ -f "$src" ] || { echo "APK not found: $src"; exit 1; }
+          mv "$src" "$dst"
+          echo "Renamed: $dst"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenReel-TV-Launcher-Android
+          path: apps/tv-launcher/android/app/build/outputs/apk/release/openreel-tv-launcher-release-v*.apk
+          if-no-files-found: warn
+
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
     # 必须包含两个 Android job：此前只 needs [build]，实测 v1.0.173 的 create-release
     # 06:55:49 跑完，而 Build Android 06:57:41 才结束，APK 尚未上传，Release 里被静默漏掉。
-    needs: [build, build-android, build-mobile-android, build-tv-android]
+    needs: [build, build-android, build-mobile-android, build-tv-android, build-tv-launcher-android]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

@@ -190,6 +190,11 @@ class FocusRegistry {
     return this.entries.has(id);
   }
 
+  /** 该 id 当前是否 disabled（TVFocusable 解析 nextFocusDown/Up 钉死目标时据此跳过） */
+  isDisabled(id: string): boolean {
+    return this.entries.get(id)?.disabled === true;
+  }
+
   /** 取某 id 的原生节点（滚动跟随用；不存在返回 null） */
   node(id: string): FocusNodeHandle | null {
     return this.entries.get(id)?.getNode?.() ?? null;

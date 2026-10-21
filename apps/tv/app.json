@@ -2,15 +2,10 @@
   "expo": {
     "name": "OpenReel TV",
     "slug": "openreel-tv",
-    "version": "1.0.197",
+    "version": "1.0.198",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f0f0f"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],

@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import type { MigrationProgress, MigrationDiskError } from '@openreel/expo-db';
 import { useThemeColors } from '@openreel/expo-ui';
 import { TV_SCALE, tv } from '../theme/tokens';
@@ -7,9 +7,10 @@ import { TV_SCALE, tv } from '../theme/tokens';
 /**
  * TV 端启动覆盖层。
  *
- * 与手机端 SplashOverlay 的差异（均为 TV 端有意为之）：
+ * 与 TV 启动桌面端保持一致：
+ *  - 首屏只显示 APP 小 logo（与移动端图标一致的绿色方块，112×112 圆角）+ 下方 OpenReel TV版。
+ *  - 仅在数据库升级时展示阶段文案与进度条。
  *  - **不含全屏广告**：用户 2026-10-05 确认 TV 版砍掉广告浮层，电视端不做开屏广告。
- *  - 进度条更粗、字号更大（电视观看距离远），并直接展示阶段文案。
  *  - 磁盘空间不足引导页沿用手机端语义（共享 expoSqliteProvider 的 MigrationDiskError）。
  */
 export interface TVStartupOverlayProps {
@@ -18,21 +19,8 @@ export interface TVStartupOverlayProps {
   diskBlocked?: MigrationDiskError | null;
 }
 
-export function TVStartupOverlay({ ready, migrationProgress, diskBlocked }: TVStartupOverlayProps) {
+export function TVStartupOverlay({ migrationProgress, diskBlocked }: TVStartupOverlayProps) {
   const colors = useThemeColors();
-  const pulse = useRef(new Animated.Value(0.4)).current;
-
-  useEffect(() => {
-    if (ready || diskBlocked) return;
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [pulse, ready, diskBlocked]);
 
   if (diskBlocked) {
     return (
@@ -52,33 +40,36 @@ export function TVStartupOverlay({ ready, migrationProgress, diskBlocked }: TVSt
   }
 
   const percent = migrationProgress?.percent ?? null;
-  const label = migrationProgress?.label ?? '正在启动…';
+  const label = migrationProgress?.label ?? '';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Animated.Text style={[styles.logo, { color: colors.buttonPrimaryBg, opacity: pulse, fontSize: tv(40) }]}>
-        OpenReel
-      </Animated.Text>
-      <Text style={[styles.subtitle, { color: colors.mutedForeground, fontSize: tv(18) }]}>
-        TV 版
-      </Text>
+      {/* logo 固定在屏幕中心，与原生启动页的位置/尺寸一致；文字在其下方淡入，避免 logo 位移 */}
+      <View style={styles.centerAnchor}>
+        <View style={styles.logoBox} />
+        <Text style={styles.logoText}>OpenReel TV版</Text>
 
-      <View style={[styles.barTrack, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View
-          style={[
-            styles.barFill,
-            {
-              backgroundColor: colors.buttonPrimaryBg,
-              width: percent != null ? `${Math.max(2, Math.min(100, percent))}%` : '35%',
-            },
-          ]}
-        />
+        {percent != null && (
+          <>
+            <View style={[styles.barTrack, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: colors.buttonPrimaryBg,
+                    width: `${Math.max(2, Math.min(100, percent))}%`,
+                  },
+                ]}
+              />
+            </View>
+
+            <Text style={[styles.label, { color: colors.foreground, fontSize: tv(18) }]}>
+              {label}
+              {` ${percent}%`}
+            </Text>
+          </>
+        )}
       </View>
-
-      <Text style={[styles.label, { color: colors.foreground, fontSize: tv(18) }]}>
-        {label}
-        {percent != null ? ` ${percent}%` : ''}
-      </Text>
     </View>
   );
 }
@@ -98,13 +89,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: TV_SCALE ? undefined : undefined,
   },
-  logo: {
-    fontWeight: '800',
-    letterSpacing: 2,
+  centerAnchor: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -56,
+    alignItems: 'center',
   },
-  subtitle: {
-    marginTop: 8,
-    letterSpacing: 6,
+  logoBox: {
+    width: 112,
+    height: 112,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,255,0,0.5)',
+  },
+  logoText: {
+    marginTop: tv(14),
+    fontSize: tv(20),
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
+    letterSpacing: 1,
   },
   barTrack: {
     marginTop: 40,

@@ -120,12 +120,20 @@ export function TVFocusable({
       return;
     }
     const resolve = () => {
+      // 目标 disabled 时不设原生 nextFocusDown：Android 对指向不可聚焦视图的
+      // 钉死会拒绝移动且不回落几何搜索（实测：视频源管理页采集中「任务列表」
+      // 向下卡死）。置 undefined 让原生 FocusFinder 走几何兜底，自然落到下一
+      // 个 enabled 按钮。
+      if (focusRegistry.isDisabled(nextFocusDownId)) {
+        setNextFocusDownTag(undefined);
+        return;
+      }
       const node = focusRegistry.node(nextFocusDownId);
       const tag = node ? findNodeHandle(node as unknown as React.Component) : null;
       setNextFocusDownTag(tag ?? undefined);
     };
     resolve();
-    // 目标 register/unregister 时 registry 会 emit，借机补解析/清失效 tag
+    // 目标 register/unregister/setDisabled 时 registry 会 emit，借机补解析/清失效 tag
     return focusRegistry.subscribe(resolve);
   }, [nextFocusDownId]);
 
@@ -135,6 +143,11 @@ export function TVFocusable({
       return;
     }
     const resolve = () => {
+      // 同上：disabled 目标不设原生 nextFocusUp，回落几何搜索。
+      if (focusRegistry.isDisabled(nextFocusUpId)) {
+        setNextFocusUpTag(undefined);
+        return;
+      }
       const node = focusRegistry.node(nextFocusUpId);
       const tag = node ? findNodeHandle(node as unknown as React.Component) : null;
       setNextFocusUpTag(tag ?? undefined);

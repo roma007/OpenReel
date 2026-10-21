@@ -1,0 +1,6 @@
+<resources>
+  <color name="splashscreen_background">#0f0f0f</color>
+  <color name="startup_logo_green">#7F00FF00</color>
+  <color name="iconBackground">#0f0f0f</color>
+  <color name="colorPrimary">#023c69</color>
+</resources>

@@ -123,6 +123,21 @@ const entries = [
     pattern: /versionCode \d+\n(\s*)versionName "\d+\.\d+\.\d+"/,
     replacement: `versionCode ${androidVersionCode}\n$1versionName "${newVersion}"`,
   },
+  {
+    path: 'apps/tv-launcher/package.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'apps/tv-launcher/app.json',
+    pattern: /"version": "\d+\.\d+\.\d+"/,
+    replacement: `"version": "${newVersion}"`,
+  },
+  {
+    path: 'apps/tv-launcher/android/app/build.gradle',
+    pattern: /versionCode \d+\n(\s*)versionName "\d+\.\d+\.\d+"/,
+    replacement: `versionCode ${androidVersionCode}\n$1versionName "${newVersion}"`,
+  },
 ];
 
 const changedFiles = [];

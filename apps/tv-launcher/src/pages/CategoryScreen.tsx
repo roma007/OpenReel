@@ -1,0 +1,576 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { Media } from '@openreel/core';
+import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
+
+import { getProvider, getStore } from '../useAppStore';
+import { TVGrid } from '../focus/TVGrid';
+import { TVScrollContainer } from '../focus/TVScrollContainer';
+import { focusRegistry } from '../focus/registry';
+import { TVButton } from '../components/TVButton';
+import MediaCard from '../components/MediaCard';
+import { TVNavBar } from '../components/TVNavBar';
+import { useBackgroundImageStore } from '../stores/backgroundImageStore';
+import { TV_GRID_CARD, TV_LAYOUT, tv } from '../theme/tokens';
+import type { RootStackParamList } from '../navigation/types';
+
+/**
+ * TV 分类页（电影/剧集/动漫/综艺/纪录片）。
+ *
+ * 遵守「导航返回铁律」：页码、类型、年份等筛选写入 route.params（由上游 Detail 返回时带回），
+ * 本页从 route 恢复初始值，不硬编码回第 1 页。
+ *
+ * 遥控交互：筛选条是一排可聚焦项；结果区是 X 排 Y 列网格（TVGrid），
+ * 同排左右移动、跨排上下移动，焦点落到最后一排时自动加载下一页（对齐手机端 onEndReached）。
+ */
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Rt = RouteProp<RootStackParamList, 'Category'>;
+
+// 排序仅保留「推荐/最新」，对齐移动端/桌面端分类页
+const SORTS: Array<{ key: 'recommend' | 'latest'; label: string }> = [
+  { key: 'recommend', label: '推荐' },
+  { key: 'latest', label: '最新' },
+];
+
+/**
+ * 分类页网格：6 列，卡片沿用 2:3 海报比例（尺寸与首页行内海报共享 TV_GRID_CARD）。
+ * 卡片总高不再固定（行高由内容自适应，对齐移动端）；GRID_CARD_HEIGHT 仅用于
+ * 传给 MediaCard 计算海报高（posterHeight = height*0.76，保持海报比例不变）。
+ */
+// 每页卡片数（首屏与触底追加共用，loadPage 的提前终止判断也依赖此值，禁止分开硬编码）
+const CATEGORY_PAGE_SIZE = 18;
+
+const GRID_COLUMNS = TV_GRID_CARD.columns ?? 6;
+const GRID_GAP = TV_GRID_CARD.gap;
+const GRID_CARD_WIDTH = TV_GRID_CARD.width;
+const GRID_CARD_HEIGHT = TV_GRID_CARD.height;
+
+export function CategoryScreen() {
+  const nav = useNavigation<Nav>();
+  const route = useRoute<Rt>();
+  const colors = useThemeColors();
+  const scale = useScaledFontSize();
+
+  const initialType = route.params?.type;
+  const initialTitle = route.params?.title;
+
+  // 筛选状态全部来自 route.params（可被返回还原），缺省才用本地默认值
+  const [page, setPage] = useState(route.params?.page ?? 1);
+  const [sort, setSort] = useState<'latest' | 'recommend'>(route.params?.sort ?? 'recommend');
+  const [subType, setSubType] = useState<string | undefined>(route.params?.subType);
+  const [year, setYear] = useState<number | undefined>(route.params?.year);
+  const [area, setArea] = useState<string | undefined>(route.params?.area);
+  const [episodeType, setEpisodeType] = useState<'short' | 'long' | undefined>(
+    route.params?.episodeType === 'short' || route.params?.episodeType === 'long'
+      ? route.params.episodeType
+      : undefined,
+  );
+
+  const [subTypes, setSubTypes] = useState<string[]>([]);
+  const [years, setYears] = useState<number[]>([]);
+  const [areas, setAreas] = useState<string[]>([]);
+  const [showShortDramaFilter, setShowShortDramaFilter] = useState(false);
+  const [items, setItems] = useState<Media[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  // 对齐移动端：分类取「每个视频的第一个子类型」（不展开组合标签）；
+  // 地区参与筛选；「剧集（短剧/长剧）」仅在电视剧分类且库内存在短剧时提供。
+  const loadFilters = useCallback(async () => {
+    const store = getStore();
+    const [subs, ys, as] = await Promise.all([
+      store.getState().getSubTypesByType(initialType, undefined, true),
+      store.getState().getYearsByType(initialType),
+      store.getState().getAreasByType(initialType),
+    ]);
+    setSubTypes((subs || []) as string[]);
+    setYears((ys || []) as number[]);
+    setAreas((as || []) as string[]);
+    if (initialType === 'TV') {
+      try {
+        setShowShortDramaFilter(await store.getState().hasShortDrama('TV'));
+      } catch {
+        setShowShortDramaFilter(false);
+      }
+    } else {
+      setShowShortDramaFilter(false);
+    }
+  }, [initialType]);
+
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const hasMore = items.length < total;
+
+  // 背景图：聚焦时用列表第一条海报，失焦清空回落到默认背景图（对齐移动端 bgImageUrl）
+  const setBackgroundImage = useBackgroundImageStore((s) => s.setImageUrl);
+  useFocusEffect(
+    useCallback(() => {
+      setBackgroundImage(items[0]?.posterUrl ?? null);
+      return () => setBackgroundImage(null);
+    }, [items, setBackgroundImage]),
+  );
+
+  /**
+   * 替换式加载前 N 页（首次进入 / 筛选变更 / 从详情返回）。
+   *
+   * 结果区是网格 + 触底自动加载，「返回时恢复」需把回来前的页数 1..N 一次性补齐
+   * （只加载第 N 页会让网格顶部缺页）。restorePageRef 由路由参数初始化，用完归 1，
+   * 后续筛选变更只加载第 1 页。
+   */
+  const restorePageRef = useRef(Math.max(1, Number(route.params?.page) || 1));
+
+  const loadPage = useCallback(
+    async (target: number, opts?: { silent?: boolean }) => {
+      const silent = opts?.silent ?? false;
+      if (!silent) setLoading(true);
+      try {
+        const pages = Math.max(1, target);
+        const collected: Media[] = [];
+        let next = 0;
+        for (let p = 1; p <= pages; p += 1) {
+          const r = await getProvider().listMedia({
+            page: p,
+            pageSize: CATEGORY_PAGE_SIZE,
+            sort,
+            type: initialType,
+            subType,
+            year,
+            area,
+            isShortDrama:
+              episodeType === 'short' ? true : episodeType === 'long' ? false : undefined,
+          });
+          collected.push(...(r.items as Media[]));
+          next = r.meta.total;
+          if (r.items.length < CATEGORY_PAGE_SIZE) break; // 已到最后一页
+        }
+        setItems(collected);
+        setTotal(next);
+      } catch {
+        if (!silent) {
+          setItems([]);
+          setTotal(0);
+        }
+        // 静默重查失败保持现状，下次返回本页再试
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [sort, initialType, subType, year, area, episodeType],
+  );
+
+  /** 触底加载下一页（追加，不替换），对应手机端 onEndReached */
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || items.length >= total) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const r = await getProvider().listMedia({
+        page: page + 1,
+        pageSize: CATEGORY_PAGE_SIZE,
+        sort,
+        type: initialType,
+        subType,
+        year,
+        area,
+        isShortDrama:
+          episodeType === 'short' ? true : episodeType === 'long' ? false : undefined,
+      });
+      setItems((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...(r.items as Media[]).filter((x: Media) => !seen.has(x.id))];
+      });
+      setTotal(r.meta.total);
+      setPage((p) => p + 1);
+    } catch {
+      // 失败保持现状，下次触底再试
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [page, items.length, total, sort, initialType, subType, year, area, episodeType]);
+
+  useEffect(() => {
+    loadFilters();
+  }, [loadFilters]);
+
+  // 顶部导航栏可在各大分类间直接切换：类型变化时清空上一个分类的子类型/年份/地区/剧集筛选，回到第 1 页
+  const prevTypeRef = useRef(initialType);
+  useEffect(() => {
+    if (prevTypeRef.current === initialType) return;
+    prevTypeRef.current = initialType;
+    setSubType(undefined);
+    setYear(undefined);
+    setArea(undefined);
+    setEpisodeType(undefined);
+    setPage(1);
+  }, [initialType]);
+
+  useEffect(() => {
+    const target = restorePageRef.current;
+    restorePageRef.current = 1;
+    loadPage(target);
+  }, [loadPage]);
+
+  // 页码镜像：focus 重查时读取当前页码（重查 1..page 页，保持「返回还原」语义）
+  const pageRef = useRef(page);
+  pageRef.current = page;
+
+  // 返回本页（从详情/播放/视频管理等）时静默重查：隐藏/取消隐藏/采集入库后数据立即可见。
+  // 不闪加载态、不重置页码与筛选；首次 focus 交给上方 useEffect(restorePage) 处理，避免双跑。
+  // loadFilters 同步重查：筛选 chips 仅在挂载时加载，隐藏/取消隐藏子类型后返回必须刷新（对齐移动端 0cc1d8f）。
+  const didInitFocusRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!didInitFocusRef.current) {
+        didInitFocusRef.current = true;
+        return;
+      }
+      loadFilters();
+      loadPage(pageRef.current, { silent: true });
+    }, [loadFilters, loadPage]),
+  );
+
+  // 折叠筛选：默认全部收缩，同一时刻只展开一个筛选类
+  const [expandedFilter, setExpandedFilter] = useState<
+    'sort' | 'subType' | 'year' | 'area' | 'episode' | null
+  >(null);
+
+  const toggleFilter = useCallback(
+    (key: 'sort' | 'subType' | 'year' | 'area' | 'episode') => {
+      setExpandedFilter((prev) => (prev === key ? null : key));
+    },
+    [],
+  );
+
+  /**
+   * 收起面板后把焦点还原到刚操作的触发器。
+   *
+   * 只需声明一次：页面「初始焦点」effect 已改为仅首次生效（见 didInitFocus），
+   * 不会再因列表重载把焦点抢回「排序」。
+   */
+  const restoreFocus = useCallback((id: string) => {
+    focusRegistry.requestInitialFocus(id);
+  }, []);
+
+  // 页面数据就绪后给初始焦点（默认收缩 → 指向排序触发器）。
+  // 只做一次：筛选变更也会触发 loading 变化，若每次都跑会把焦点从触发器抢回「排序」。
+  const didInitFocus = useRef(false);
+  useEffect(() => {
+    if (loading || didInitFocus.current) return;
+    didInitFocus.current = true;
+    const t = setTimeout(() => focusRegistry.requestInitialFocus('cat-filter:sort'), 120);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // 筛选变更 → 页码回到第 1（与手机端一致：换筛选不应停留在旧页）；收起面板并把焦点还给触发器
+  const applySort = useCallback((s: 'recommend' | 'latest') => {
+    setSort(s);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:sort');
+  }, [restoreFocus]);
+  const applySubType = useCallback((s?: string) => {
+    setSubType(s);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:subType');
+  }, [restoreFocus]);
+  const applyYear = useCallback((y?: number) => {
+    setYear(y);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:year');
+  }, [restoreFocus]);
+  const applyArea = useCallback((a?: string) => {
+    setArea(a);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:area');
+  }, [restoreFocus]);
+  const applyEpisodeType = useCallback((e?: 'short' | 'long') => {
+    setEpisodeType(e);
+    setPage(1);
+    setExpandedFilter(null);
+    restoreFocus('cat-filter:episode');
+  }, [restoreFocus]);
+
+  const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? '推荐';
+  const subTypeLabel = subType ?? '全部';
+  const yearLabel = year != null ? String(year) : '全部';
+  const areaLabel = area ?? '全部';
+  const episodeLabel = episodeType === 'short' ? '短剧' : episodeType === 'long' ? '长剧' : '全部';
+
+  const openDetail = useCallback(
+    (m: Media) => {
+      nav.navigate('Detail', {
+        mediaId: m.id,
+        title: m.title,
+        from: 'category',
+        page,
+        sort,
+        type: initialType,
+        subType,
+        year,
+        area,
+        episodeType,
+        subtypePage: !!subType,
+      });
+    },
+    [nav, page, sort, initialType, subType, year, area, episodeType],
+  );
+
+  const header = useMemo(
+    () => (
+      <View style={styles.headerRow}>
+        <Text style={[styles.pageTitle, { color: colors.foreground, fontSize: scale(26) }]}>
+          {initialTitle || '全部'}
+        </Text>
+        <Text style={[styles.count, { color: colors.mutedForeground, fontSize: scale(16) }]}>
+          共 {total} 部
+        </Text>
+      </View>
+    ),
+    [initialTitle, total, colors, scale],
+  );
+
+  const navItems = [
+    { key: 'home', label: '首页', onPress: () => nav.navigate('Home') },
+    { key: 'movie', label: '电影', onPress: () => nav.navigate('Category', { type: 'MOVIE', title: '电影' }) },
+    { key: 'tv', label: '电视剧', onPress: () => nav.navigate('Category', { type: 'TV', title: '电视剧' }) },
+    { key: 'anime', label: '动漫', onPress: () => nav.navigate('Category', { type: 'ANIME', title: '动漫' }) },
+    { key: 'variety', label: '综艺', onPress: () => nav.navigate('Category', { type: 'VARIETY', title: '综艺' }) },
+    { key: 'doc', label: '纪录片', onPress: () => nav.navigate('Category', { type: 'DOCUMENTARY', title: '纪录片' }) },
+    { key: 'settings', label: '设置', onPress: () => nav.navigate('Settings') },
+  ];
+
+  return (
+    <View style={[styles.container, { backgroundColor: 'transparent' }]}>
+      {/* 与首页一致的顶部导航栏：可直达各分类 / 返回首页 */}
+      <TVNavBar items={navItems} title="OpenReel TV桌面版" onSearch={() => nav.navigate('Search', {})} />
+
+      <View style={[styles.topBar, { paddingHorizontal: TV_LAYOUT.paddingX }]}>
+        {header}
+      </View>
+
+      {/* 折叠筛选条 + 结果区：整体可滚动；原生在 TV 上不可靠，用 TVScrollContainer 主动跟随焦点 */}
+      <TVScrollContainer
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: TV_LAYOUT.paddingX }]}
+      >
+        {/* 筛选条：默认全部收缩；点某个触发器只展开该类，其余自动收缩 */}
+        <View style={styles.filterBar}>
+          <View style={styles.filterRow}>
+            <TVButton
+              id="cat-filter:sort"
+              label={`排序：${sortLabel}`}
+              variant={expandedFilter === 'sort' ? 'primary' : 'ghost'}
+              onPress={() => toggleFilter('sort')}
+              testID="tv-category-filter-sort"
+            />
+            {subTypes.length > 0 ? (
+              <TVButton
+                id="cat-filter:subType"
+                label={`分类：${subTypeLabel}`}
+                variant={expandedFilter === 'subType' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('subType')}
+                testID="tv-category-filter-subtype"
+              />
+            ) : null}
+            {years.length > 0 ? (
+              <TVButton
+                id="cat-filter:year"
+                label={`年份：${yearLabel}`}
+                variant={expandedFilter === 'year' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('year')}
+                testID="tv-category-filter-year"
+              />
+            ) : null}
+            {areas.length > 0 ? (
+              <TVButton
+                id="cat-filter:area"
+                label={`地区：${areaLabel}`}
+                variant={expandedFilter === 'area' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('area')}
+                testID="tv-category-filter-area"
+              />
+            ) : null}
+            {showShortDramaFilter ? (
+              <TVButton
+                id="cat-filter:episode"
+                label={`剧集：${episodeLabel}`}
+                variant={expandedFilter === 'episode' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('episode')}
+                testID="tv-category-filter-episode"
+              />
+            ) : null}
+          </View>
+
+          {expandedFilter === 'sort' ? (
+            <View style={styles.optionRow}>
+              {SORTS.map((s) => (
+                <TVButton
+                  key={s.key}
+                  id={`cat-sort:${s.key}`}
+                  label={s.label}
+                  variant={sort === s.key ? 'primary' : 'ghost'}
+                  onPress={() => applySort(s.key)}
+                  testID={`tv-category-sort-${s.key}`}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'subType' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-sub:all"
+                label="全部"
+                variant={!subType ? 'primary' : 'ghost'}
+                onPress={() => applySubType(undefined)}
+              />
+              {subTypes.map((s) => (
+                <TVButton
+                  key={s}
+                  id={`cat-sub:${s}`}
+                  label={s}
+                  variant={subType === s ? 'primary' : 'ghost'}
+                  onPress={() => applySubType(s)}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'year' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-year:all"
+                label="全部"
+                variant={year == null ? 'primary' : 'ghost'}
+                onPress={() => applyYear(undefined)}
+              />
+              {years.map((y) => (
+                <TVButton
+                  key={y}
+                  id={`cat-year:${y}`}
+                  label={String(y)}
+                  variant={year === y ? 'primary' : 'ghost'}
+                  onPress={() => applyYear(y)}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'area' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-area:all"
+                label="全部"
+                variant={!area ? 'primary' : 'ghost'}
+                onPress={() => applyArea(undefined)}
+              />
+              {areas.map((a) => (
+                <TVButton
+                  key={a}
+                  id={`cat-area:${a}`}
+                  label={a}
+                  variant={area === a ? 'primary' : 'ghost'}
+                  onPress={() => applyArea(a)}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          {expandedFilter === 'episode' ? (
+            <View style={styles.optionRow}>
+              <TVButton
+                id="cat-ep:all"
+                label="全部"
+                variant={!episodeType ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType(undefined)}
+              />
+              <TVButton
+                id="cat-ep:short"
+                label="短剧"
+                variant={episodeType === 'short' ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType('short')}
+              />
+              <TVButton
+                id="cat-ep:long"
+                label="长剧"
+                variant={episodeType === 'long' ? 'primary' : 'ghost'}
+                onPress={() => applyEpisodeType('long')}
+              />
+            </View>
+          ) : null}
+        </View>
+
+        {/* 结果区：X 排 Y 列网格；焦点落到最后一排时自动加载下一页（对齐手机端 onEndReached） */}
+        {loading ? (
+          <Text style={[styles.status, { color: colors.mutedForeground, fontSize: scale(18) }]}>正在加载…</Text>
+        ) : items.length === 0 ? (
+          <Text style={[styles.status, { color: colors.mutedForeground, fontSize: scale(18) }]}>
+            没有符合条件的影片
+          </Text>
+        ) : (
+          <TVGrid
+            idPrefix="cat-items"
+            data={items}
+            keyExtractor={(m) => String(m.id)}
+            columns={GRID_COLUMNS}
+            itemWidth={GRID_CARD_WIDTH}
+            gap={GRID_GAP}
+            onItemPress={openDetail}
+            onItemFocus={(index) => {
+              if (index >= items.length - GRID_COLUMNS) loadMore();
+            }}
+            renderItem={(m) => (
+              <MediaCard media={m} width={GRID_CARD_WIDTH} height={GRID_CARD_HEIGHT} />
+            )}
+          />
+        )}
+
+        {/* 「加载更多」由焦点触底自动触发，这里只给状态反馈 */}
+        {!loading && items.length > 0 ? (
+          <Text style={[styles.statusSmall, { color: colors.mutedForeground, fontSize: scale(16) }]}>
+            {loadingMore ? '正在加载更多…' : hasMore ? '继续向下浏览可加载更多' : '没有更多了'}
+          </Text>
+        ) : null}
+      </TVScrollContainer>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: tv(14),
+    // 分类页标题栏底边线已去除（需求：分类名下方横贯左右的线去掉）
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginLeft: tv(20),
+  },
+  pageTitle: { fontWeight: '800' },
+  count: { marginLeft: tv(14) },
+  filterBar: { paddingVertical: tv(10) },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  optionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: tv(10),
+  },
+  scroll: { flex: 1 },
+  scrollContent: { paddingTop: tv(8), paddingBottom: tv(40) },
+  status: { paddingVertical: tv(36), textAlign: 'center' },
+  statusSmall: { paddingVertical: tv(18), textAlign: 'center' },
+});
+
+export default CategoryScreen;
