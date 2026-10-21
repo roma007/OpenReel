@@ -1436,8 +1436,12 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     return rowToMedia(row);
   }
 
-  async getMediaByFingerprint(fingerprint: string): Promise<Media | null> {
-    const row = await this.db!.getFirstAsync<any>('SELECT * FROM media WHERE fingerprint = ?', [fingerprint]);
+  async getMediaByFingerprint(fingerprint: string, opts?: { withinTransaction?: boolean }): Promise<Media | null> {
+    // 事务内必须走写连接（readDb 快照看不到本事务未提交的写入，如 upsertMedia 后回读 id）；
+    // 事务外走独立读连接：WAL 下读已提交快照，不被其他源 commit 的独占写事务阻塞
+    // （多源并行采集时 prepare 阶段读不再全局串行，这是 TV 端采集吞吐的关键）。
+    const conn = opts?.withinTransaction ? this.db! : (this.readDb ?? this.db!);
+    const row = await conn.getFirstAsync<any>('SELECT * FROM media WHERE fingerprint = ?', [fingerprint]);
     return row ? rowToMedia(row) : null;
   }
 
@@ -1705,14 +1709,16 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async getMediaByVodId(vodId: string): Promise<Media | null> {
-    const rows = await this.db!.getAllAsync<any[]>('SELECT * FROM media WHERE vod_id = ? LIMIT 1', [vodId]);
+    // 采集跳过判定读（事务外）：走独立读连接，不被写事务阻塞
+    const rows = await (this.readDb ?? this.db!).getAllAsync<any[]>('SELECT * FROM media WHERE vod_id = ? LIMIT 1', [vodId]);
     return rows[0] ? rowToMedia(rows[0]) : null;
   }
 
   async getMediaByVodIdSet(vodIds: string[]): Promise<Media[]> {
     const ids = vodIds.filter((v) => v != null && v !== '');
     if (ids.length === 0) return [];
-    const rows = await this.db!.getAllAsync<any[]>(
+    // C2 页级批量去重读（事务外）：走独立读连接
+    const rows = await (this.readDb ?? this.db!).getAllAsync<any[]>(
       `SELECT * FROM media WHERE vod_id IN (${ids.map(() => '?').join(',')})`,
       ids
     );
@@ -2472,7 +2478,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async getHiddenGenres(): Promise<string[]> {
-    const rows = await this.db!.getAllAsync<{ sub_type: string }>(
+    // 采集 prepare 每条新片都会读（事务外）：走独立读连接，不被写事务阻塞
+    const rows = await (this.readDb ?? this.db!).getAllAsync<{ sub_type: string }>(
       'SELECT sub_type FROM hidden_genre ORDER BY sub_type'
     );
     return rows.map(row => row.sub_type);

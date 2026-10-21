@@ -221,7 +221,6 @@ export function TaskListScreen() {
         backId="task-back"
         right={
           <>
-            <TVButton id="task-refresh" label="刷新" onPress={refresh} testID="tv-task-refresh" />
             <TVButton
               id="task-clear-all"
               label="清空全部"

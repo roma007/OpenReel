@@ -71,7 +71,12 @@ export interface DatabaseProvider {
   // —— Media DAO ——
   getMediaById(id: number): Promise<Media | null>;
   getMediaBySeriesGroup(groupKey: string): Promise<Media[]>;
-  getMediaByFingerprint(fingerprint: string): Promise<Media | null>;
+  /**
+   * 按指纹查片。opts.withinTransaction=true 表示调用处于写事务内（如采集 commitItem），
+   * 实现必须走写连接以读到本事务未提交的写入（如 upsertMedia 后回读自增 id）；
+   * 缺省时实现可走独立读连接（WAL 快照读，不被写事务阻塞）。
+   */
+  getMediaByFingerprint(fingerprint: string, opts?: { withinTransaction?: boolean }): Promise<Media | null>;
   listMedia(params?: ListParams): Promise<PaginatedResponse<Media>>;
   upsertMedia(media: Media): Promise<void>;
   updateMediaStatusAndEpisodes(

@@ -13,6 +13,7 @@ import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
 import CollectProgressDialog from './src/components/CollectProgressDialog';
 import { TVToast } from './src/components/TVToast';
+import { TVExitConfirm } from './src/components/TVExitConfirm';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
@@ -82,6 +83,8 @@ function RootNavigator() {
       <CollectProgressDialog />
       {/* 全局 Toast：顶部靠右，自动消失，不抢焦点。任意页面 showTVToast(...) 即可 */}
       <TVToast />
+      {/* 全局「再按一次退出」：栈底（首页）按返回键时提示，2 秒内再按退出，超时重新提示 */}
+      <TVExitConfirm />
     </>
   );
 }

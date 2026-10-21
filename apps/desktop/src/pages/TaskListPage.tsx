@@ -14,7 +14,6 @@ import {
   XCircle,
   Play,
   Trash2,
-  RefreshCw,
   RotateCcw,
   RefreshCcw,
   ListX,
@@ -100,7 +99,6 @@ export default function TaskListPage() {
   const { collectTasks, loadCollectTasks, deleteCollectTask, deleteOldTasks, resumeCollectTask, retryFailedItems } = useAppStore();
   const confirm = useConfirm();
   const toast = useToast();
-  const [refreshing, setRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -144,12 +142,6 @@ export default function TaskListPage() {
       setRetryingId(null);
     }
   }, [collectTasks, retryingId]);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await loadCollectTasks();
-    setRefreshing(false);
-  };
 
   const handleDelete = async (task: CollectTask) => {
     const isRunning = task.status === 'RUNNING' || task.status === 'PENDING';
@@ -225,9 +217,6 @@ export default function TaskListPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap shrink-0">
-            <Button variant="ghost" onClick={handleRefresh} disabled={refreshing}>
-              {refreshing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />} 刷新
-            </Button>
             <Button variant="ghost" onClick={handleClearOld}>
               <Trash2 className="size-4 mr-2" /> 清除7天前任务
             </Button>

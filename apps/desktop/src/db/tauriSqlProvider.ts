@@ -1113,7 +1113,8 @@ export class TauriSqlProvider implements DatabaseProvider {
     return rowToMedia(rows[0]);
   }
 
-  async getMediaByFingerprint(fingerprint: string): Promise<Media | null> {
+  async getMediaByFingerprint(fingerprint: string, _opts?: { withinTransaction?: boolean }): Promise<Media | null> {
+    // 桌面端无原生事务（withTransactionAsync 仅 JS 写锁），读写本就经连接池分离，无需分支
     const rows = await this.db!.select<any[]>('SELECT * FROM media WHERE fingerprint = ?', [fingerprint]);
     return rows[0] ? rowToMedia(rows[0]) : null;
   }

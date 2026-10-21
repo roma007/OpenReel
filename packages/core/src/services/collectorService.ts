@@ -458,7 +458,7 @@ sourceUpdatedAt,
       // 会自行 upsertMedia 建行，无需校验。
       const existingRow = prep.existing;
       if (existingRow) {
-        const alive = await trace('dbLookup.parent', () => this.db.getMediaByFingerprint(existingRow.fingerprint));
+        const alive = await trace('dbLookup.parent', () => this.db.getMediaByFingerprint(existingRow.fingerprint, { withinTransaction: true }));
         if (!alive) {
           console.warn(`[Collector] 目标 media 已被并发合并删除，跳过「${media.title}」本次写入`);
           return media;
@@ -491,7 +491,10 @@ sourceUpdatedAt,
       if (mergeInto) {
         writeMediaId = mergeInto;
       } else {
-        const actualMedia = await trace('dbLookup', () => this.db.getMediaByFingerprint(media.fingerprint));
+        // withinTransaction=true：本读处于写事务内，必须走写连接才能看到
+        // upsertMedia 刚写入（未提交）的行——新入库 media 靠这里回读自增 id，
+        // 若误走读连接快照将回读 null，episodes 会写到 media_id=0。
+        const actualMedia = await trace('dbLookup', () => this.db.getMediaByFingerprint(media.fingerprint, { withinTransaction: true }));
         if (actualMedia) {
           writeMediaId = actualMedia.id;
           media.id = actualMedia.id;

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
-import { ArrowLeft, RefreshCw, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Trash2 } from 'lucide-react-native';
 import { useAppStore } from '../useAppStore';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
@@ -34,7 +34,6 @@ export default function TaskListScreen({ navigation }: Props) {
   const cardBg = hexToRgba(colors.card, cardOpacity / 100);
   const surfaceBg = hexToRgba(colors.surface, cardOpacity / 100);
   const s = useScaledFontSize();
-  const [isLoading, setIsLoading] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
   // 按任务独立记录忙碌状态（集合），避免多个任务并行操作时互相覆盖「续采中/重试中/删除中」
   const [resumingIds, setResumingIds] = useState<Set<string>>(new Set());
@@ -304,16 +303,11 @@ export default function TaskListScreen({ navigation }: Props) {
                 <Trash2 size={16} color={colors.text} />
               )}
             </Button>
-            <Button variant="primary" size="sm" onPress={() => { setIsLoading(true); loadCollectTasks().finally(() => setIsLoading(false)); }}>
-              <RefreshCw size={16} color={colors.text} />
-            </Button>
           </View>
         </View>
       </View>
 
-      {isLoading ? (
-        <ActivityIndicator size="large" color={colors.mutedForeground} style={{ marginTop: 40 }} />
-      ) : collectTasks.length === 0 ? (
+      {collectTasks.length === 0 ? (
         <Text style={styles.empty}>暂无采集任务</Text>
       ) : (
         <View style={styles.taskList}>
