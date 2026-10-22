@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View, StyleSheet, ScrollView, Modal } from 'react-native';
+import { Text, View, StyleSheet, ScrollView, Modal, Clipboard } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba, radius } from '@openreel/expo-ui';
 import type { VideoSource, CollectTask } from '@openreel/core';
+import { exportSourcesToJson } from '@openreel/core';
 
 import { useAppStore, getProvider } from '../useAppStore';
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -307,6 +308,20 @@ export function SourceManagerScreen() {
     [doRemovePlaySources, pendingDelete],
   );
 
+  const doExportAll = useCallback(() => {
+    if (videoSources.length === 0) {
+      showTVToast('当前无视频源可导出', 'error');
+      return;
+    }
+    const json = exportSourcesToJson(videoSources);
+    Clipboard.setString(json);
+    let msg = `已复制 ${videoSources.length} 个视频源到剪贴板`;
+    if (videoSources.length > 20) {
+      msg += '（注意：AI 导入单次上限 20 个）';
+    }
+    showTVToast(msg, 'success');
+  }, [videoSources]);
+
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
       <TVPageHeader title="视频源管理" backId="src-back" />
@@ -338,6 +353,16 @@ export function SourceManagerScreen() {
               style={styles.actionBtn}
               onPress={() => nav.navigate('AiSourceImport')}
               testID="tv-src-ai"
+              nextFocusDownId={firstSourceFirstBtnId}
+            />
+            <TVButton
+              id="src-export"
+              label="导出全部"
+              variant="primary"
+              labelFontSize={scale(14)}
+              style={styles.actionBtn}
+              onPress={doExportAll}
+              testID="tv-src-export"
               nextFocusDownId={firstSourceFirstBtnId}
             />
             <TVButton

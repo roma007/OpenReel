@@ -576,6 +576,8 @@ export function createAppStore(db: DatabaseProvider) {
           db.getAllWatchHistory(page),
           db.getWatchHistoryCount(),
         ]);
+        // 去重后必须按 updatedAt 降序重排：Object.values 对整数键（mediaId）按数值升序枚举，
+        // 会抹掉 SQL 的 ORDER BY updated_at DESC 顺序，导致重启后最后观看的剧不排第一。
         const deduped = Object.values(
           history.reduce((acc, h) => {
             if (!acc[h.mediaId] || h.updatedAt > acc[h.mediaId].updatedAt) {
@@ -583,7 +585,7 @@ export function createAppStore(db: DatabaseProvider) {
             }
             return acc;
           }, {} as Record<string, WatchHistory>)
-        );
+        ).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         set({ watchHistory: deduped, watchHistoryCount: count });
       } catch (err: any) {
         set({ error: err.message });

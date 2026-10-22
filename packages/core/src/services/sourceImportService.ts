@@ -3,6 +3,17 @@ import type { ImportSourceItem, ParsedImportSource, VideoSource } from '../types
 
 const CODE_REGEX = /^[a-zA-Z0-9_]{2,50}$/;
 
+/** 将 VideoSource[] 序列化为 AI 导入兼容的 JSON 字符串。
+ *  仅导出 name/code/baseUrl 三个可移植字段，运行时内部字段（id、健康状态等）不包含。 */
+export function exportSourcesToJson(sources: VideoSource[]): string {
+  const items: ImportSourceItem[] = sources.map((s) => ({
+    name: s.name,
+    code: s.code,
+    baseUrl: s.baseUrl,
+  }));
+  return JSON.stringify(items, null, 2);
+}
+
 function generateId(code: string): string {
   return `source_${code}`;
 }

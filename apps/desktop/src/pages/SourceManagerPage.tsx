@@ -16,6 +16,7 @@ import {
   Plus,
   ClipboardList,
   Search,
+  Copy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -32,7 +33,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '../useAppStore';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useToast } from '@/components/Layout';
-import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
+import { SourceImportService, exportSourcesToJson, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
 import type { VideoSource, CollectTask, CollectPreviewItem, ImportSourceItem, ParsedImportSource } from '@openreel/core';
 import { useBackgroundStore } from '../themes/backgroundStore';
 import { KeywordCollectDialog } from '@/components/KeywordCollectDialog';
@@ -344,6 +345,24 @@ export default function SourceManagerPage() {
     setAiResult(null);
   };
 
+  const handleExportAll = async () => {
+    if (videoSources.length === 0) {
+      toast('当前无视频源可导出', 'error');
+      return;
+    }
+    const json = exportSourcesToJson(videoSources);
+    try {
+      await navigator.clipboard.writeText(json);
+      let msg = `已复制 ${videoSources.length} 个视频源到剪贴板`;
+      if (videoSources.length > 20) {
+        msg += '（注意：AI 导入单次上限 20 个）';
+      }
+      toast(msg);
+    } catch {
+      toast('复制失败，请检查浏览器剪贴板权限', 'error');
+    }
+  };
+
   const toggleExpand = (sourceCode: string) => {
     setExpandedSources(prev => {
       const next = new Set(prev);
@@ -387,7 +406,7 @@ export default function SourceManagerPage() {
             <p className="text-sm text-muted-foreground mt-1">管理视频源配置和采集任务</p>
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-5 gap-3 mt-4">
           <Button
             variant="default"
             onClick={() => setShowKeywordDialog(true)}
@@ -411,6 +430,14 @@ export default function SourceManagerPage() {
           >
             <Plus className="size-4 mr-2" />
             AI 导入
+          </Button>
+          <Button
+            variant="default"
+            onClick={handleExportAll}
+            disabled={videoSources.length === 0}
+          >
+            <Copy className="size-4 mr-2" />
+            导出全部
           </Button>
           <Button
             variant="default"

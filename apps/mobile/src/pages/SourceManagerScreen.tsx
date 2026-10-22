@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Modal, TextInput, Clipboard } from 'react-native';
 import { useAppStore, getProvider } from '../useAppStore';
-import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
+import { SourceImportService, exportSourcesToJson, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
 import type { VideoSource, CollectTask, ImportSourceItem, ParsedImportSource } from '@openreel/core';
 import Toast, { showToast } from '../components/Toast';
 import { useThemeColors } from '../themes/useThemeColors';
@@ -355,6 +355,20 @@ export default function SourceManagerScreen({ navigation }: Props) {
     setAiResult(null);
   };
 
+  const handleExportAll = () => {
+    if (videoSources.length === 0) {
+      showToast('当前无视频源可导出', 'error');
+      return;
+    }
+    const json = exportSourcesToJson(videoSources);
+    Clipboard.setString(json);
+    let msg = `已复制 ${videoSources.length} 个视频源到剪贴板`;
+    if (videoSources.length > 20) {
+      msg += '（注意：AI 导入单次上限 20 个）';
+    }
+    showToast(msg);
+  };
+
   return (
     <BlurredBackground imageUrl={null}>
     <View style={styles.container}>
@@ -388,6 +402,9 @@ export default function SourceManagerScreen({ navigation }: Props) {
             </Button>
             <Button variant="secondary" size="md" style={styles.actionBtn} onPress={() => navigation.navigate('KeywordCollect')}>
               搜索采集
+            </Button>
+            <Button variant="secondary" size="md" style={styles.actionBtn} onPress={handleExportAll}>
+              导出全部
             </Button>
           </View>
         </View>

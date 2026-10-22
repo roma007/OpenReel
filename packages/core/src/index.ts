@@ -37,7 +37,7 @@ export { CollectorService } from './services/collectorService';
 export { SystemConfigService, type CollectConfig, type ShortDramaConfig } from './services/systemConfigService';
 export { KidLockService } from './services/kidLockService';
 export { VideoDurationService, setVideoFetchFn, getVideoFetchFn } from './services/videoDurationService';
-export { SourceImportService } from './services/sourceImportService';
+export { SourceImportService, exportSourcesToJson } from './services/sourceImportService';
 export { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from './services/recommendationService';
 export { resolveDefaultPlayTarget, type DefaultPlayTarget } from './services/playbackTarget';
 export {
