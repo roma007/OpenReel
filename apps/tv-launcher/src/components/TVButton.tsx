@@ -91,7 +91,6 @@ export function TVButton({
       testID={testID}
       focusStyle={scaleOnFocus ? styles.focusScale : undefined}
       style={[styles.btn, { backgroundColor: bg, opacity: disabled ? 0.5 : 1 }, style]}
-      focusColor={variant === 'ghost' ? colors.cardAccent : undefined}
       nextFocusDownId={nextFocusDownId}
       nextFocusUpId={nextFocusUpId}
     >
