@@ -418,27 +418,27 @@ jobs:
           merge-multiple: true
 
       # 生成 Tauri updater 清单 latest.json（仅 Windows；macOS 不在在线升级范围）。
-      # tauri.conf.json 设 createUpdaterArtifacts: true（v2 默认），Windows 产物为
-      # OpenReel-setup.exe + OpenReel-setup.exe.sig（不再打包成 .nsis.zip）。
-      # 需要 secrets TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) 配置后构建才会产出 .sig；
-      # 未产出时跳过生成，不影响 Release 本身。
+      # tauri.conf.json 设 createUpdaterArtifacts: true（v2 默认），Windows NSIS 产物
+      # 命名为 OpenReel_<版本>_x64-setup.exe + 同名 .sig（版本号在文件名里，禁止硬编码）。
+      # 需要 secrets TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) 配置后构建才会产出 .sig。
       - name: Generate latest.json for updater
         shell: bash
         run: |
           set -e
           ver="${GITHUB_REF_NAME#v}"
-          # download-artifact + merge-multiple 会平铺所有文件到 artifacts/，子目录结构丢失
-          sig_file=$(find artifacts -name "OpenReel-setup.exe.sig" | head -n1)
+          # download-artifact + merge-multiple 后目录结构不定，按名匹配；
+          # 从 sig 文件名反推安装包名，保证 latest.json 的 url 与实际上传资产一致
+          sig_file=$(find artifacts -name "*-setup.exe.sig" | head -n1)
           if [ -z "$sig_file" ]; then
-            echo "No updater signature found, skip latest.json (signing secrets not configured?)"
+            echo "::error::No *-setup.exe.sig in artifacts — TAURI_SIGNING_PRIVATE_KEY secrets 未生效？本次 Release 将缺少 latest.json，Windows 检查更新会 404"
             exit 0
           fi
-          exe_name="OpenReel-setup.exe"
+          exe_name=$(basename "$sig_file" .sig)
           sig=$(cat "$sig_file")
           pub_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           printf '{\n  "version": "%s",\n  "notes": "See the assets below to download and install.",\n  "pub_date": "%s",\n  "platforms": {\n    "windows-x86_64": {\n      "signature": "%s",\n      "url": "https://github.com/roma007/openreel/releases/download/%s/%s"\n    }\n  }\n}\n' \
             "$ver" "$pub_date" "$sig" "$GITHUB_REF_NAME" "$exe_name" > latest.json
-          echo "Generated latest.json:"
+          echo "Generated latest.json (installer: $exe_name):"
           cat latest.json
 
       # 按扩展名白名单取件：此前用 artifacts/**/*，会把 macOS bundle 里 OpenReel.app
