@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Animated, Alert,
+  Animated, Alert, Platform,
 } from 'react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
@@ -13,10 +13,12 @@ import { hexToRgba } from '../themes/colorUtils';
 import { useSidebarStore } from '../stores/sidebarStore';
 import { useAppStore } from '../useAppStore';
 import { radius } from '../themes/radiusTokens';
+import { getUpdateBadgeStore } from '@openreel/core';
 
 const SIDEBAR_WIDTH = 280;
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const IS_ANDROID = Platform.OS === 'android';
 
 export default function Sidebar() {
   const { isOpen, close } = useSidebarStore();
@@ -29,6 +31,7 @@ export default function Sidebar() {
   const insets = useSafeAreaInsets();
   const { clearHistory } = useAppStore();
   const anim = useRef(new Animated.Value(0)).current;
+  const hasUpdate = getUpdateBadgeStore()((s) => s.hasUpdate);
 
   useEffect(() => {
     Animated.timing(anim, {
@@ -118,6 +121,13 @@ export default function Sidebar() {
       paddingVertical: 14,
       paddingHorizontal: 15,
     },
+    badgeDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: '#ef4444',
+      marginLeft: 6,
+    },
   }), [colors, cardBg, insets.top, s]);
 
   return (
@@ -165,6 +175,12 @@ export default function Sidebar() {
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('HelpCenter')}>
               <Text style={styles.menuText}>帮助中心</Text>
             </TouchableOpacity>
+            {IS_ANDROID && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('Update')}>
+                <Text style={styles.menuText}>版本更新</Text>
+                {hasUpdate && <View style={styles.badgeDot} />}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('About')}>
               <Text style={styles.menuText}>关于我们</Text>
             </TouchableOpacity>

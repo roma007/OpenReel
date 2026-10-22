@@ -41,6 +41,7 @@ export type RootStackParamList = {
   UsagePreferences: undefined;
   RecommendationSettings: undefined;
   About: undefined;
+  Update: undefined;
   License: undefined;
   HelpCenter: undefined;
   CollectGuide: undefined;

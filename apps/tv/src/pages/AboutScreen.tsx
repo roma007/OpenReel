@@ -2,10 +2,6 @@ import React from 'react';
 import { Linking, Text, View, StyleSheet, ScrollView } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
-import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
-import { fetchLatestRelease, compareVersions, pickApkAsset, type ReleaseAsset } from '@openreel/core';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 
 import { TVPageHeader } from '../components/TVPageHeader';
@@ -13,18 +9,6 @@ import { TVFocusable } from '../focus/TVFocusable';
 import { TV_LAYOUT, tv } from '../theme/tokens';
 
 const REPO_URL = 'https://github.com/roma007/OpenReel';
-
-/** 在线升级 APK 资产匹配前缀（CI 重命名：openreel-tv-release-v<version>.apk，避免与手机端同名冲突） */
-const APK_ASSET_PREFIX = 'openreel-tv-release-v';
-
-type UpdateState =
-  | { phase: 'idle' }
-  | { phase: 'checking' }
-  | { phase: 'up-to-date' }
-  | { phase: 'available'; version: string; notes: string; asset: ReleaseAsset }
-  | { phase: 'downloading'; percent: number }
-  | { phase: 'installing' }
-  | { phase: 'error'; message: string };
 
 const PRINCIPLES: Array<{ title: string; desc: string }> = [
   { title: '片源自备', desc: '应用不内置、不分发任何内容资源。片源由使用者自行添加和管理。' },
@@ -44,60 +28,6 @@ export function AboutScreen() {
   // 卡片/行底遵循「卡片透明度」，与移动端 AboutScreen 一致（按钮不套，移动端按钮亦未套）
   const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const [copyNote, setCopyNote] = React.useState<string | null>(null);
-
-  const currentVersion = Constants.expoConfig?.version ?? '';
-  const [updateState, setUpdateState] = React.useState<UpdateState>({ phase: 'idle' });
-
-  const handleCheckUpdate = async () => {
-    setUpdateState({ phase: 'checking' });
-    try {
-      const release = await fetchLatestRelease();
-      if (compareVersions(release.version, currentVersion) <= 0) {
-        setUpdateState({ phase: 'up-to-date' });
-        return;
-      }
-      const asset = pickApkAsset(release, APK_ASSET_PREFIX);
-      if (!asset) {
-        setUpdateState({ phase: 'error', message: `新版本 v${release.version} 未找到安装包` });
-        return;
-      }
-      setUpdateState({ phase: 'available', version: release.version, notes: release.notes, asset });
-    } catch (e) {
-      setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
-    }
-  };
-
-  const handleDownloadAndInstall = async (asset: ReleaseAsset) => {
-    try {
-      setUpdateState({ phase: 'downloading', percent: 0 });
-      const targetUri = `${FileSystem.documentDirectory}${asset.name}`;
-      const resumable = FileSystem.createDownloadResumable(
-        asset.downloadUrl,
-        targetUri,
-        {},
-        (progress) => {
-          const total = progress.totalBytesExpectedToWrite;
-          if (total > 0) {
-            const percent = Math.min(99, Math.round((progress.totalBytesWritten / total) * 100));
-            setUpdateState((prev) => (prev.phase === 'downloading' ? { phase: 'downloading', percent } : prev));
-          }
-        },
-      );
-      const result = await resumable.downloadAsync();
-      if (!result?.uri) throw new Error('下载失败');
-      setUpdateState({ phase: 'installing' });
-      const contentUri = await FileSystem.getContentUriAsync(result.uri);
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
-        type: 'application/vnd.android.package-archive',
-        flags: 1 | 268435456, // GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
-      });
-      // 系统安装器已调起，回到应用后重置为 idle 允许重新检查
-      setUpdateState({ phase: 'idle' });
-    } catch (e) {
-      setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
-    }
-  };
 
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
@@ -135,56 +65,6 @@ export function AboutScreen() {
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             桌面端、手机端与电视端共用同一套业务逻辑，但各自独立存储数据：任一端建立的片库不会自动同步到其它端，如需在电视端观看请在电视端自行采集一次。
           </Text>
-        </View>
-
-        <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>版本更新</Text>
-          <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
-            当前版本：{currentVersion || '…'}
-            {updateState.phase === 'up-to-date' ? '　已是最新版本' : ''}
-            {updateState.phase === 'checking' ? '　正在检查…' : ''}
-            {updateState.phase === 'downloading' ? `　正在下载 ${updateState.percent}%` : ''}
-            {updateState.phase === 'installing' ? '　下载完成，正在调起安装…' : ''}
-            {updateState.phase === 'error' ? `　${updateState.message}` : ''}
-          </Text>
-          <View style={styles.btnRow}>
-            {updateState.phase === 'available' ? (
-              <TVFocusable
-                id="about-download-update"
-                onPress={() => handleDownloadAndInstall(updateState.asset)}
-                style={[styles.btn, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}
-                testID="tv-about-download-update"
-              >
-                <View style={styles.btnInner}>
-                  <Text style={{ color: colors.foreground, fontSize: scale(16), fontWeight: '600' }}>
-                    下载安装 v{updateState.version}
-                  </Text>
-                </View>
-              </TVFocusable>
-            ) : (
-              <TVFocusable
-                id="about-check-update"
-                onPress={handleCheckUpdate}
-                disabled={updateState.phase === 'checking' || updateState.phase === 'downloading' || updateState.phase === 'installing'}
-                style={[styles.btn, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}
-                testID="tv-about-check-update"
-              >
-                <View style={styles.btnInner}>
-                  <Text style={{ color: colors.foreground, fontSize: scale(16), fontWeight: '600' }}>检查更新</Text>
-                </View>
-              </TVFocusable>
-            )}
-          </View>
-          {updateState.phase === 'downloading' ? (
-            <View style={[styles.progressTrack, { backgroundColor: hexToRgba(colors.mutedForeground, 0.15) }]}>
-              <View style={[styles.progressFill, { backgroundColor: colors.buttonPrimaryBg, width: `${updateState.percent}%` }]} />
-            </View>
-          ) : null}
-          {updateState.phase === 'available' && !!updateState.notes ? (
-            <Text style={[styles.para, { color: colors.mutedForeground, fontSize: scale(15) }]} numberOfLines={6}>
-              {updateState.notes}
-            </Text>
-          ) : null}
         </View>
 
         <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
@@ -260,8 +140,6 @@ const styles = StyleSheet.create({
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: tv(14) },
   btn: { paddingHorizontal: tv(20), paddingVertical: tv(10), borderRadius: tv(8), marginRight: tv(12), marginBottom: tv(8) },
   btnInner: { alignItems: 'center', justifyContent: 'center' },
-  progressTrack: { marginTop: tv(14), height: tv(8), borderRadius: tv(4), overflow: 'hidden' },
-  progressFill: { height: tv(8), borderRadius: tv(4) },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

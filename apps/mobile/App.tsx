@@ -61,6 +61,7 @@ import TaskListScreen from './src/pages/TaskListScreen';
 import HelpCenterScreen from './src/pages/HelpCenterScreen';
 import AboutScreen from './src/pages/AboutScreen';
 import LicenseScreen from './src/pages/LicenseScreen';
+import UpdateScreen from './src/pages/UpdateScreen';
 import CollectGuideScreen from './src/pages/CollectGuideScreen';
 import VideoManagementScreen from './src/pages/VideoManagementScreen';
 import TestCollectScreen from './src/pages/TestCollectScreen';
@@ -73,6 +74,10 @@ import DocumentaryScreen from './src/pages/DocumentaryScreen';
 import Sidebar from './src/components/Sidebar';
 import CollectProgressDialog from './src/components/CollectProgressDialog';
 import { ResourceOverlay } from './src/components/ResourceOverlay';
+import { UpdateHint } from './src/components/UpdateHint';
+import { fetchLatestRelease, compareVersions, getUpdateBadgeStore } from '@openreel/core';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const Stack = createNativeStackNavigator();
 
@@ -107,6 +112,7 @@ function RootNavigator() {
         <Stack.Screen name="TaskList" component={TaskListScreen} />
         <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
         <Stack.Screen name="About" component={AboutScreen} />
+        <Stack.Screen name="Update" component={UpdateScreen} />
         <Stack.Screen name="License" component={LicenseScreen} />
         <Stack.Screen name="CollectGuide" component={CollectGuideScreen} />
         <Stack.Screen name="VideoManagement" component={VideoManagementScreen} />
@@ -114,6 +120,7 @@ function RootNavigator() {
         <Stack.Screen name="KidLock" component={KidLockScreen} />
       </Stack.Navigator>
       <Sidebar />
+      <UpdateHint />
       <CollectProgressDialog />
     </>
   );
@@ -169,6 +176,20 @@ export default function App() {
         }
         setReady(true);
       });
+
+    // 冷启动自动检查更新（仅 Android；失败静默）
+    if (Platform.OS === 'android') {
+      const currentVersion = Constants.expoConfig?.version ?? '';
+      fetchLatestRelease()
+        .then((release) => {
+          if (currentVersion && compareVersions(release.version, currentVersion) > 0) {
+            getUpdateBadgeStore().getState().setPendingUpdate(release.version);
+          }
+        })
+        .catch(() => {
+          // 静默忽略：网络异常/无 Release 不打扰用户
+        });
+    }
   }, []);
 
   useEffect(() => {

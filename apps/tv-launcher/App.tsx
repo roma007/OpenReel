@@ -12,10 +12,12 @@ import { writePrefetchConcurrency } from './src/services/cache';
 import { TVStartupOverlay } from './src/components/TVStartupOverlay';
 import { TVFocusBridge } from './src/focus/TVFocusBridge';
 import CollectProgressDialog from './src/components/CollectProgressDialog';
-import { TVToast } from './src/components/TVToast';
+import { TVToast, showTVToast } from './src/components/TVToast';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
+import { fetchLatestRelease, compareVersions, getUpdateBadgeStore } from '@openreel/core';
+import Constants from 'expo-constants';
 import HomeScreen from './src/pages/HomeScreen';
 import CategoryScreen from './src/pages/CategoryScreen';
 import SearchScreen from './src/pages/SearchScreen';
@@ -33,6 +35,7 @@ import AppearanceSettingsScreen from './src/pages/AppearanceSettingsScreen';
 import UsagePreferencesScreen from './src/pages/UsagePreferencesScreen';
 import RecommendationSettingsScreen from './src/pages/RecommendationSettingsScreen';
 import AboutScreen from './src/pages/AboutScreen';
+import UpdateScreen from './src/pages/UpdateScreen';
 import LicenseScreen from './src/pages/LicenseScreen';
 import HelpCenterScreen from './src/pages/HelpCenterScreen';
 import CollectGuideScreen from './src/pages/CollectGuideScreen';
@@ -71,6 +74,7 @@ function RootNavigator() {
         <Stack.Screen name="UsagePreferences" component={UsagePreferencesScreen} />
         <Stack.Screen name="RecommendationSettings" component={RecommendationSettingsScreen} />
         <Stack.Screen name="About" component={AboutScreen} />
+        <Stack.Screen name="Update" component={UpdateScreen} />
         <Stack.Screen name="License" component={LicenseScreen} />
         <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
         <Stack.Screen name="CollectGuide" component={CollectGuideScreen} />
@@ -119,6 +123,19 @@ export default function App() {
           return;
         }
         setReady(true);
+      });
+
+    // 冷启动自动检查更新（TV Launcher 端；失败静默，不阻塞启动）
+    const currentVersion = Constants.expoConfig?.version ?? '';
+    fetchLatestRelease()
+      .then((release) => {
+        if (currentVersion && compareVersions(release.version, currentVersion) > 0) {
+          getUpdateBadgeStore().getState().setPendingUpdate(release.version);
+          showTVToast(`发现新版本 v${release.version}，可到 设置 → 版本更新 查看`, 'info');
+        }
+      })
+      .catch(() => {
+        // 静默忽略：网络异常/无 Release 不打扰用户
       });
   }, []);
 

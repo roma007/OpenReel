@@ -1,25 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ArrowLeft, Info, Github, Scale, Monitor, Smartphone, Apple, FolderTree, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Info, Github, Scale, Monitor, Smartphone, Apple, FolderTree } from 'lucide-react';
 import { useBackgroundStore } from '../themes/backgroundStore';
-import { check } from '@tauri-apps/plugin-updater';
-import { getVersion } from '@tauri-apps/api/app';
 
 const REPO_URL = 'https://github.com/roma007/OpenReel';
-
-// 在线升级目前仅支持 Windows（macOS 不在范围内）
-const IS_WINDOWS = navigator.userAgent.includes('Windows');
-
-type UpdateState =
-  | { phase: 'idle' }
-  | { phase: 'checking' }
-  | { phase: 'up-to-date' }
-  | { phase: 'available'; version: string; notes?: string }
-  | { phase: 'downloading'; percent: number }
-  | { phase: 'installing' }
-  | { phase: 'error'; message: string };
 
 const platforms = [
   { icon: Monitor, name: '桌面端', detail: 'macOS · Windows' },
@@ -48,58 +34,6 @@ export default function AboutPage() {
   const clearBgImage = useBackgroundStore((s) => s.clearBgImage);
   useEffect(() => { clearBgImage(); }, [clearBgImage]);
   const navigate = useNavigate();
-
-  const [currentVersion, setCurrentVersion] = useState('');
-  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' });
-
-  useEffect(() => {
-    if (IS_WINDOWS) {
-      getVersion().then(setCurrentVersion).catch(() => {});
-    }
-  }, []);
-
-  const handleCheckUpdate = async () => {
-    setUpdateState({ phase: 'checking' });
-    try {
-      const update = await check();
-      if (!update) {
-        setUpdateState({ phase: 'up-to-date' });
-        return;
-      }
-      setUpdateState({ phase: 'available', version: update.version, notes: update.body });
-    } catch (e) {
-      setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
-    }
-  };
-
-  const handleDownloadAndInstall = async () => {
-    try {
-      const update = await check();
-      if (!update) {
-        setUpdateState({ phase: 'up-to-date' });
-        return;
-      }
-      setUpdateState({ phase: 'downloading', percent: 0 });
-      let downloaded = 0;
-      let total = 0;
-      // Windows: 下载完成后安装器以 passive 模式自动运行并重启应用，无需手动 relaunch
-      await update.downloadAndInstall((event) => {
-        if (event.event === 'Started') {
-          total = event.data.contentLength ?? 0;
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          if (total > 0) {
-            setUpdateState({ phase: 'downloading', percent: Math.min(99, Math.round((downloaded / total) * 100)) });
-          }
-        } else if (event.event === 'Finished') {
-          setUpdateState({ phase: 'installing' });
-        }
-      });
-      setUpdateState({ phase: 'installing' });
-    } catch (e) {
-      setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
-    }
-  };
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -161,48 +95,6 @@ export default function AboutPage() {
           桌面端建立的片库不会自动同步到手机，如需在手机上观看请在手机端自行采集一次。
         </p>
       </Card>
-
-      {IS_WINDOWS && (
-        <Card className="p-6">
-          <h2 className="font-semibold mb-4">版本更新</h2>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="text-sm text-muted-foreground">
-              当前版本：{currentVersion || '…'}
-              {updateState.phase === 'up-to-date' && <span className="ml-2 text-text">已是最新版本</span>}
-              {updateState.phase === 'checking' && <span className="ml-2">正在检查…</span>}
-              {updateState.phase === 'downloading' && <span className="ml-2">正在下载 {updateState.percent}%</span>}
-              {updateState.phase === 'installing' && <span className="ml-2">下载完成，安装程序即将启动，应用会自动重启</span>}
-              {updateState.phase === 'error' && <span className="ml-2">检查失败：{updateState.message}</span>}
-            </div>
-            {updateState.phase === 'available' ? (
-              <Button onClick={handleDownloadAndInstall}>
-                <RefreshCw className="size-4 mr-2" />
-                下载并安装 v{updateState.version}
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={handleCheckUpdate}
-                disabled={updateState.phase === 'checking' || updateState.phase === 'downloading' || updateState.phase === 'installing'}
-              >
-                <RefreshCw className="size-4 mr-2" />
-                检查更新
-              </Button>
-            )}
-          </div>
-          {updateState.phase === 'downloading' && (
-            <div className="mt-3 h-2 rounded-full bg-muted-foreground/10 overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all"
-                style={{ width: `${updateState.percent}%` }}
-              />
-            </div>
-          )}
-          {updateState.phase === 'available' && updateState.notes && (
-            <p className="text-xs text-muted-foreground mt-3 leading-relaxed whitespace-pre-wrap">{updateState.notes}</p>
-          )}
-        </Card>
-      )}
 
       <Card className="p-6">
         <h2 className="font-semibold mb-2">源代码</h2>

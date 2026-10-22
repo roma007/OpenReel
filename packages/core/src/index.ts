@@ -65,3 +65,4 @@ export {
 // 状态管理
 export { createAppStore, getCurrentStoreApiVersion, getStoreApiVersion, type AppState, type AppStore } from './store/createStore';
 export { getSplashStore, type SplashPhase } from './stores/splashStore';
+export { getUpdateBadgeStore, type UpdateBadgeState } from './stores/updateBadgeStore';

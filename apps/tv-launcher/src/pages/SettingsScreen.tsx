@@ -11,6 +11,7 @@ import { focusRegistry } from '../focus/registry';
 import { TV_FIXED, TV_LAYOUT, tv } from '../theme/tokens';
 import { useAppStore } from '../useAppStore';
 import { showTVToast } from '../components/TVToast';
+import { getUpdateBadgeStore } from '@openreel/core';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -40,6 +41,7 @@ const MAIN_ENTRIES: Entry[] = [
 
 const HELP_ENTRIES: Entry[] = [
   { key: 'help', label: '帮助中心', route: 'HelpCenter', desc: '常见问题与使用说明' },
+  { key: 'update', label: '版本更新', route: 'Update', desc: '检查与安装新版本' },
   { key: 'about', label: '关于我们', route: 'About', desc: '版本信息' },
   { key: 'license', label: '版权声明', route: 'License', desc: '开源许可' },
 ];
@@ -69,6 +71,7 @@ export function SettingsScreen() {
   const scale = useScaledFontSize();
   // 卡片/行底遵循「卡片透明度」，与移动端 Sidebar 一致（hexToRgba(colors.card, cardOpacity/100)）
   const cardOpacity = useThemeStore((s) => s.cardOpacity);
+  const hasUpdate = getUpdateBadgeStore()((s) => s.hasUpdate);
 
   const clearHistory = useAppStore((s) => s.clearHistory);
   // 清除观看历史：3 秒内两次确认（沿用 HistoryScreen/VideoManagement 危险操作惯例，不弹 Alert）
@@ -130,9 +133,14 @@ export function SettingsScreen() {
       testID={`tv-settings-${e.key}`}
     >
       <View style={styles.rowMain}>
-        <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '600' }}>
-          {e.label}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '600' }}>
+            {e.label}
+          </Text>
+          {e.key === 'update' && hasUpdate ? (
+            <View style={styles.badgeDot} />
+          ) : null}
+        </View>
         <Text style={{ color: colors.mutedForeground, fontSize: scale(15), marginTop: 3 }}>
           {e.desc}
         </Text>
@@ -264,6 +272,13 @@ const styles = StyleSheet.create({
     paddingVertical: tv(18),
   },
   rowMain: { flex: 1 },
+  badgeDot: {
+    width: tv(10),
+    height: tv(10),
+    borderRadius: tv(5),
+    backgroundColor: '#ef4444',
+    marginLeft: tv(8),
+  },
 });
 
 export default SettingsScreen;

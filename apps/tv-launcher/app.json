@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenReel 桌面",
     "slug": "openreel-tv-launcher",
-    "version": "1.0.205",
+    "version": "1.0.206",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

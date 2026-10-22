@@ -9,6 +9,7 @@ import { MigrationOverlay } from './components/MigrationOverlay';
 
 import { ContextMenu } from './components/ContextMenu';
 import { ResourceOverlay } from './components/ResourceOverlay';
+import { UpdateHint } from './components/UpdateHint';
 import { ThemeProvider } from './themes/ThemeProvider';
 import { FontSizeProvider } from './themes/FontSizeProvider';
 import { ConfirmProvider } from './components/ConfirmProvider';
@@ -38,6 +39,11 @@ import HelpCenterPage from './pages/HelpCenterPage';
 import AboutPage from './pages/AboutPage';
 import LicensePage from './pages/LicensePage';
 import DbToolPage from './pages/DbToolPage';
+import UpdatePage from './pages/UpdatePage';
+import { check } from '@tauri-apps/plugin-updater';
+import { getUpdateBadgeStore } from '@openreel/core';
+
+const IS_WINDOWS = navigator.userAgent.includes('Windows');
 
 interface AppProps {
   /** 本次页面加载是否为刷新（reload）。刷新属页面级操作，不播欢迎页。 */
@@ -93,6 +99,19 @@ function MainApp({ isReload }: { isReload: boolean }) {
         setReady(true);
       });
 
+    // 冷启动自动检查更新（仅 Windows；失败静默，不阻塞启动）
+    if (IS_WINDOWS) {
+      check()
+        .then((update) => {
+          if (update) {
+            getUpdateBadgeStore().getState().setPendingUpdate(update.version);
+          }
+        })
+        .catch(() => {
+          // 静默忽略：网络异常/无 Release 等情况不打扰用户
+        });
+    }
+
     return () => {
       clearTimeout(timeoutId);
     };
@@ -116,6 +135,7 @@ function MainApp({ isReload }: { isReload: boolean }) {
               <ConfirmProvider>
                 <BrowserRouter>
                   <ContextMenu />
+                  <UpdateHint />
                   {/* 资源监控浮窗：需在 Router 内取 useLocation 按页面归因；ready 门控使其不覆盖启动/迁移占位层 */}
                   <ResourceOverlay />
                   <Routes>
@@ -141,6 +161,7 @@ function MainApp({ isReload }: { isReload: boolean }) {
                       <Route path="/settings/collect" element={<CollectConfigPage />} />
                       <Route path="/help/guide" element={<CollectGuidePage />} />
                       <Route path="/settings/video" element={<VideoManagementPage />} />
+                      <Route path="/settings/update" element={<UpdatePage />} />
                       <Route path="/db-tool" element={<DbToolPage />} />
                       <Route path="/test-collect" element={<TestCollectPage />} />
                       <Route path="/help" element={<HelpCenterPage />} />

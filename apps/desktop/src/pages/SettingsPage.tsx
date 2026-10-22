@@ -2,12 +2,17 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { useBackgroundStore } from '../themes/backgroundStore';
-import { Database, ChevronRight, Lock, Palette, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Database, ChevronRight, Lock, Palette, SlidersHorizontal, Sparkles, RefreshCw } from 'lucide-react';
+import { getUpdateBadgeStore } from '@openreel/core';
+
+// 在线升级仅 Windows 支持（macOS 不在范围）
+const IS_WINDOWS = navigator.userAgent.includes('Windows');
 
 export default function SettingsPage() {
   const navigate = useNavigate();
   const clearBgImage = useBackgroundStore((s) => s.clearBgImage);
   useEffect(() => { clearBgImage(); return () => {}; }, [clearBgImage]);
+  const hasUpdate = getUpdateBadgeStore()((s) => s.hasUpdate);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -92,6 +97,21 @@ export default function SettingsPage() {
           </div>
           <ChevronRight className="size-4 text-muted-foreground" />
         </button>
+        {IS_WINDOWS && (
+          <button
+            className="flex items-center justify-between py-3 w-[calc(100%+2rem)] text-left hover:bg-secondary/50 transition-colors -mx-4 px-4"
+            onClick={() => navigate('/settings/update')}
+          >
+            <div className="flex items-center gap-3">
+              <RefreshCw className="size-4 text-muted-foreground" />
+              <span>版本更新</span>
+              {hasUpdate && (
+                <span className="size-2 rounded-full bg-destructive" aria-label="有新版本" />
+              )}
+            </div>
+            <ChevronRight className="size-4 text-muted-foreground" />
+          </button>
+        )}
       </Card>
     </div>
   );
