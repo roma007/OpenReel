@@ -235,7 +235,7 @@ Gradle `Configuration` 把每项转成正则匹配 `project.name`，命中即 `f
 **取文件**：
 ```
 xcrun devicectl device copy from --device 1D4B63FE-82F6-5C8B-9C7F-DAA006E0B13D \
-  --domain-type appDataContainer --domain-identifier com.mengfeng.movieapp \
+  --domain-type appDataContainer --domain-identifier com.openreel.ios \
   --source Library/Caches/vc_trace.log
 ```
 

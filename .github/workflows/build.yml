@@ -48,12 +48,16 @@ jobs:
           set -e
           # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
           desktop_id=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').identifier")
+          desktop_mac=$(node -p "require('./apps/desktop/src-tauri/tauri.macos.conf.json').identifier")
+          desktop_win=$(node -p "require('./apps/desktop/src-tauri/tauri.windows.conf.json').identifier")
           android_pkg=$(node -p "require('./apps/mobile/app.json').expo.android.package")
           ios_bundle=$(node -p "require('./apps/mobile/app.json').expo.ios.bundleIdentifier")
-          [ "$desktop_id" = "com.movie.app.desktop" ] || { echo "IDENTIFIER CHANGED: desktop identifier=$desktop_id"; exit 1; }
-          [ "$android_pkg" = "com.movie.app" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
-          [ "$ios_bundle" = "com.mengfeng.movieapp" ] || { echo "IDENTIFIER CHANGED: ios bundleIdentifier=$ios_bundle"; exit 1; }
-          echo "Identifiers OK (desktop=$desktop_id, android=$android_pkg, ios=$ios_bundle)"
+          [ "$desktop_id" = "com.openreel.desktop" ] || { echo "IDENTIFIER CHANGED: desktop identifier=$desktop_id"; exit 1; }
+          [ "$desktop_mac" = "com.openreel.mac" ] || { echo "IDENTIFIER CHANGED: mac identifier=$desktop_mac"; exit 1; }
+          [ "$desktop_win" = "com.openreel.windows" ] || { echo "IDENTIFIER CHANGED: windows identifier=$desktop_win"; exit 1; }
+          [ "$android_pkg" = "com.openreel.android" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
+          [ "$ios_bundle" = "com.openreel.ios" ] || { echo "IDENTIFIER CHANGED: ios bundleIdentifier=$ios_bundle"; exit 1; }
+          echo "Identifiers OK (desktop=$desktop_id, mac=$desktop_mac, windows=$desktop_win, android=$android_pkg, ios=$ios_bundle)"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -117,12 +121,16 @@ jobs:
           set -e
           # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
           desktop_id=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').identifier")
+          desktop_mac=$(node -p "require('./apps/desktop/src-tauri/tauri.macos.conf.json').identifier")
+          desktop_win=$(node -p "require('./apps/desktop/src-tauri/tauri.windows.conf.json').identifier")
           android_pkg=$(node -p "require('./apps/mobile/app.json').expo.android.package")
           ios_bundle=$(node -p "require('./apps/mobile/app.json').expo.ios.bundleIdentifier")
-          [ "$desktop_id" = "com.movie.app.desktop" ] || { echo "IDENTIFIER CHANGED: desktop identifier=$desktop_id"; exit 1; }
-          [ "$android_pkg" = "com.movie.app" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
-          [ "$ios_bundle" = "com.mengfeng.movieapp" ] || { echo "IDENTIFIER CHANGED: ios bundleIdentifier=$ios_bundle"; exit 1; }
-          echo "Identifiers OK (desktop=$desktop_id, android=$android_pkg, ios=$ios_bundle)"
+          [ "$desktop_id" = "com.openreel.desktop" ] || { echo "IDENTIFIER CHANGED: desktop identifier=$desktop_id"; exit 1; }
+          [ "$desktop_mac" = "com.openreel.mac" ] || { echo "IDENTIFIER CHANGED: mac identifier=$desktop_mac"; exit 1; }
+          [ "$desktop_win" = "com.openreel.windows" ] || { echo "IDENTIFIER CHANGED: windows identifier=$desktop_win"; exit 1; }
+          [ "$android_pkg" = "com.openreel.android" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
+          [ "$ios_bundle" = "com.openreel.ios" ] || { echo "IDENTIFIER CHANGED: ios bundleIdentifier=$ios_bundle"; exit 1; }
+          echo "Identifiers OK (desktop=$desktop_id, mac=$desktop_mac, windows=$desktop_win, android=$android_pkg, ios=$ios_bundle)"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -204,7 +212,7 @@ jobs:
           set -e
           # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
           android_pkg=$(node -p "require('./apps/mobile/app.json').expo.android.package")
-          [ "$android_pkg" = "com.movie.app" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
+          [ "$android_pkg" = "com.openreel.android" ] || { echo "IDENTIFIER CHANGED: android package=$android_pkg"; exit 1; }
           echo "Identifiers OK (android=$android_pkg)"
 
       - name: Setup JDK
@@ -271,7 +279,7 @@ jobs:
           set -e
           # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
           tv_pkg=$(node -p "require('./apps/tv/app.json').expo.android.package")
-          [ "$tv_pkg" = "com.movie.app.tv" ] || { echo "IDENTIFIER CHANGED: tv package=$tv_pkg"; exit 1; }
+          [ "$tv_pkg" = "com.openreel.tv" ] || { echo "IDENTIFIER CHANGED: tv package=$tv_pkg"; exit 1; }
           echo "Identifiers OK (tv=$tv_pkg)"
 
       - name: Setup JDK
@@ -349,7 +357,7 @@ jobs:
           set -e
           # 升级 vs 重装由系统按「标识符+签名」判定，标识符一旦发布不可更改，否则新装不再覆盖、旧数据丢失。改包名构建直接失败。
           tv_launcher_pkg=$(node -p "require('./apps/tv-launcher/app.json').expo.android.package")
-          [ "$tv_launcher_pkg" = "com.movie.app.launcher" ] || { echo "IDENTIFIER CHANGED: tv-launcher package=$tv_launcher_pkg"; exit 1; }
+          [ "$tv_launcher_pkg" = "com.openreel.tvlauncher" ] || { echo "IDENTIFIER CHANGED: tv-launcher package=$tv_launcher_pkg"; exit 1; }
           echo "Identifiers OK (tv-launcher=$tv_launcher_pkg)"
 
       - name: Setup JDK

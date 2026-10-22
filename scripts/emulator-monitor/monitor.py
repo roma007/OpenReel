@@ -3,7 +3,7 @@
 """安卓模拟器资源占用持续监控主程序。
 
 职责：
-- 持续跟踪 com.movie.app 进程（pid 崩/起自动跟随）。
+- 持续跟踪 com.openreel.android 进程（pid 崩/起自动跟随）。
 - 高频采样 CPU / RSS（/proc），低频补 PSS·堆（dumpsys meminfo）、FPS（gfxinfo framestats）、
   IO/网络增量（/proc/<pid>/io + /proc/net/dev）。
 - 页面标签：优先接收 App 悬浮层 HTTP POST /page 上报的路由；无上报时用 uiautomator 文本兜底。
@@ -25,7 +25,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-APP_PKG = "com.movie.app"
+APP_PKG = "com.openreel.android"
 DEFAULT_DEVICE = "emulator-5554"
 DEFAULT_PORT = 8756
 SNAPSHOT_DIR = os.path.expanduser("~/.movie-app-monitor")

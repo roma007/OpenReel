@@ -113,7 +113,7 @@ openreel/
 
 - 片源由使用者自行添加，应用本身不内置、不分发任何内容资源。
 - 请在所在地区法律允许的范围内使用。
-- `com.movie.app`（Android）、`com.mengfeng.movieapp`（iOS）、`com.movie.app.desktop`（桌面）为应用标识符，永久不变——这是升级覆盖安装的判定依据，不要修改。
+- `com.openreel.android`（Android）、`com.openreel.ios`（iOS）、`com.openreel.mac` / `com.openreel.windows`（桌面）、`com.openreel.tv`（TV）、`com.openreel.tvlauncher`（TV 启动桌面）为应用标识符，永久不变——这是升级覆盖安装的判定依据，不要修改。
 
 ## License
 

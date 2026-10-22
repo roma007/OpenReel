@@ -15,7 +15,7 @@ METRO_LOG="$LOG_DIR/metro.log"
 LAUNCH_LOG="$LOG_DIR/launcher.log"
 AVD_NAME="tvhome-tv"
 DNS_SERVER="8.8.8.8,8.8.4.4"
-APP_ID="com.movie.app.tv"
+APP_ID="com.openreel.tv"
 ACTIVITY="$APP_ID/.MainActivity"
 METRO_PORT=8081
 

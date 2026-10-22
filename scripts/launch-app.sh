@@ -1,7 +1,7 @@
 #!/bin/bash
 
-APP_PACKAGE="com.movie.app"
-APP_ACTIVITY="com.movie.app/.MainActivity"
+APP_PACKAGE="com.openreel.android"
+APP_ACTIVITY="com.openreel.android/.MainActivity"
 
 DEVICE=$(adb devices | grep -w "device" | head -1 | awk '{print $1}')
 

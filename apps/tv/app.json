@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenReel TV",
     "slug": "openreel-tv",
-    "version": "1.0.206",
+    "version": "1.0.207",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
       "**/*"
     ],
     "android": {
-      "package": "com.movie.app.tv",
+      "package": "com.openreel.tv",
       "screenOrientation": "landscape",
       "permissions": [
         "android.permission.INTERNET",

@@ -87,13 +87,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.movie.app.launcher'
+    namespace 'com.openreel.tvlauncher'
     defaultConfig {
-        applicationId 'com.movie.app.launcher'
+        applicationId 'com.openreel.tvlauncher'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 206
-        versionName "1.0.206"
+        versionCode 207
+        versionName "1.0.207"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenReel",
-  "version": "1.0.206",
-  "identifier": "com.movie.app.desktop",
+  "version": "1.0.207",
+  "identifier": "com.openreel.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",

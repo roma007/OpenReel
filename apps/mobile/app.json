@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenReel",
     "slug": "openreel",
-    "version": "1.0.206",
+    "version": "1.0.207",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -16,7 +16,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mengfeng.movieapp",
+      "bundleIdentifier": "com.openreel.ios",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "需要访问本地网络以发现和连接投屏设备",
         "NSBonjourServices": ["_raop._tcp", "_upnp._tcp", "_airplay._tcp"],
@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f0f"
       },
-      "package": "com.movie.app",
+      "package": "com.openreel.android",
       "permissions": [
         "android.permission.INTERNET"
       ]

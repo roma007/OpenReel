@@ -113,7 +113,7 @@ openreel/
 
 - Sources are supplied by the user. The application ships with, and distributes, no content resources of its own.
 - Use within the bounds of applicable local law.
-- `com.movie.app` (Android), `com.mengfeng.movieapp` (iOS) and `com.movie.app.desktop` (desktop) are the application identifiers and are permanently fixed — they determine how upgrades are installed over an existing copy. Do not change them.
+- `com.openreel.android` (Android), `com.openreel.ios` (iOS), `com.openreel.mac` / `com.openreel.windows` (desktop), `com.openreel.tv` (TV) and `com.openreel.tvlauncher` (TV launcher) are the application identifiers and are permanently fixed — they determine how upgrades are installed over an existing copy. Do not change them.
 
 ## License
 
