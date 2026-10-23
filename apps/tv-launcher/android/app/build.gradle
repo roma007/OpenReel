@@ -92,8 +92,8 @@ android {
         applicationId 'com.openreel.tvlauncher'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 208
-        versionName "1.0.208"
+        versionCode 209
+        versionName "1.0.209"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -116,7 +116,7 @@ android {
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
         release {
             // 永久固定 release 签名（2026-10-16 起），不再使用 debug.keystore。
