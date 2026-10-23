@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenReel 隐私政策</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e5e5e5;
+    --muted: #a0a0a0;
+    --accent: #ff3333;
+    --section: #222222;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+    padding: 0 16px 48px;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  header {
+    text-align: center;
+    padding: 40px 0 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: 1px; }
+  header .sub { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  header .sub span { margin: 0 8px; opacity: 0.5; }
+  h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 36px 0 16px;
+    padding-left: 12px;
+    border-left: 3px solid var(--accent);
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 20px 0 10px;
+    color: #f0f0f0;
+  }
+  p { margin-bottom: 14px; color: #d0d0d0; font-size: 14.5px; }
+  ul { margin: 10px 0 16px 22px; }
+  li { margin-bottom: 6px; color: #d0d0d0; font-size: 14.5px; }
+  li::marker { color: var(--accent); }
+  .perm {
+    background: var(--section);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+  }
+  .perm .name {
+    font-weight: 600;
+    color: #fff;
+    font-size: 15px;
+    margin-bottom: 4px;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .perm .desc { color: var(--muted); font-size: 14px; }
+  .box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin: 14px 0;
+  }
+  .highlight {
+    background: rgba(255, 51, 51, 0.08);
+    border: 1px solid rgba(255, 51, 51, 0.2);
+    border-radius: 10px;
+    padding: 18px;
+    margin: 16px 0;
+  }
+  .highlight p { color: #ffcccc; margin-bottom: 8px; }
+  a { color: #6ba3ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>OpenReel 隐私政策</h1>
+  <div class="sub">最近更新：2026-10-23 <span>·</span> 开发者：蒙锋</div>
+</header>
+
+<div class="highlight">
+  <p><strong>一、核心声明</strong></p>
+  <p>OpenReel 是一款纯客户端视频聚合应用，不设账号体系、不收集任何可识别您个人身份的信息。所有数据仅存储于您的设备本地，默认不会上传至任何服务器。</p>
+</div>
+
+<h2>二、信息收集与使用</h2>
+<p><strong>本应用不收集以下任何信息：</strong></p>
+<ul>
+  <li>真实姓名、昵称、手机号码、电子邮箱</li>
+  <li>身份证号、银行卡号、付款记录</li>
+  <li>地理位置、通讯录、相册、麦克风、摄像头</li>
+  <li>设备 IMEI、MAC 地址、广告标识符（OAID / IDFA）</li>
+  <li>浏览器历史、其他应用列表、剪贴板内容</li>
+</ul>
+<p><strong>本应用在本地存储的信息</strong>（仅存于您的设备，默认不上传）：</p>
+<ul>
+  <li>您主动添加的视频源地址</li>
+  <li>媒体元数据、收藏、播放历史、播放进度</li>
+  <li>应用偏好设置（主题、字号、播放策略等）</li>
+</ul>
+
+<h2>三、运行时权限说明</h2>
+<p>Android 系统在功能需要时会申请以下权限。除下列说明外，权限不会被用于任何其他目的。画中画（Picture in Picture）使用 Android 系统多窗口能力实现，不需要也不申请悬浮窗权限。</p>
+
+<div class="perm">
+  <div class="name">android.permission.INTERNET</div>
+  <div class="desc">访问网络。<br>用途：向您配置的视频源服务器发起 HTTP/HTTPS 请求，获取节目列表与视频流。本应用的所有网络请求仅指向您主动添加的视频源地址，不向开发者自有服务器发送请求。</div>
+</div>
+
+<div class="perm">
+  <div class="name">android.permission.VIBRATE</div>
+  <div class="desc">震动反馈。<br>用途：部分交互（长按、确认）时的轻量反馈，不主动触发。</div>
+</div>
+
+<div class="perm">
+  <div class="name">android.permission.READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE（Android 12 及以下）</div>
+  <div class="desc">读写外部存储。<br>用途：导出/导入收藏与源配置文件、调试日志导出。Android 13 及以上版本已自动拆分为更细粒度的权限，无需额外申请。</div>
+</div>
+
+<div class="perm">
+  <div class="name">android.permission.REQUEST_INSTALL_PACKAGES</div>
+  <div class="desc">安装应用。<br>用途：应用内检查到新版本并下载 APK 后，调起系统安装器完成升级。系统会弹出明确的二次确认。</div>
+</div>
+
+<h2>四、第三方库与 SDK</h2>
+<p>本应用基于以下开源组件构建：</p>
+<ul>
+  <li><strong>React Native</strong>（MIT）— 跨平台 UI 框架，由 Facebook 维护，运行时不收集任何数据</li>
+  <li><strong>Expo</strong>（MIT）— 开发工具链，本应用已禁用 Expo 更新服务，不向外发送遥测数据</li>
+  <li><strong>SQLite / expo-sqlite</strong>（公有领域）— 本地数据库，所有数据仅写入本地 .db 文件</li>
+  <li><strong>dav1d</strong>（BSD）— AV1 视频解码器，纯本地计算</li>
+</ul>
+<p>本应用<strong>不包含任何第三方广告 SDK、数据统计 SDK 或崩溃上报 SDK</strong>。</p>
+
+<h2>五、数据存储与保护</h2>
+<ul>
+  <li>所有数据存储于应用私有目录（Android: <code>/data/data/com.openreel.android/</code>；iOS: App Sandbox），默认仅应用自身可读写</li>
+  <li>卸载应用会一并删除全部本地数据，无法恢复</li>
+  <li>应用未实现数据同步功能，您更换设备时需手动导出再导入</li>
+</ul>
+
+<h2>六、用户权利</h2>
+<ul>
+  <li><strong>查看</strong>：应用内「关于我们 → 数据导出」可将收藏与源配置导出为 JSON 文件</li>
+  <li><strong>删除</strong>：应用内「设置 → 清理数据」可选择性清除播放历史、收藏、任务记录，或完全重置数据库</li>
+  <li><strong>停止</strong>：卸载应用即可终止一切本地数据处理</li>
+  <li><strong>反馈</strong>：有隐私相关疑问可通过文末联系方式提出</li>
+</ul>
+
+<h2>七、儿童保护</h2>
+<p>本应用不针对 14 周岁以下儿童，也不会刻意收集儿童的任何信息。应用中不包含面向未成年人的广告或诱导付费内容。</p>
+
+<h2>八、政策更新</h2>
+<p>本隐私政策可能随版本迭代更新，重大变更会在应用内设置页弹窗提示。您可随时在应用内「关于我们」页面查看最新版本的本政策。</p>
+
+<h2>九、联系我们</h2>
+<div class="box">
+  <p><strong>开发者</strong>：蒙锋</p>
+  <p><strong>反馈渠道</strong>：<a href="https://github.com/roma007/openreel/issues">GitHub Issues</a></p>
+  <p><strong>开源仓库</strong>：<a href="https://github.com/roma007/openreel">github.com/roma007/openreel</a></p>
+  <p><strong>许可协议</strong>：MIT License（详见仓库根目录 LICENSE 文件）</p>
+</div>
+
+<footer>
+  OpenReel · 不追踪、不收集、无账号 · Copyright © 2026
+</footer>
+
+</div>
+</body>
+</html>
