@@ -18,12 +18,12 @@ type UpdateState =
   | { phase: 'idle' }
   | { phase: 'checking' }
   | { phase: 'up-to-date' }
-  | { phase: 'available'; version: string; notes: string; asset: ReleaseAsset }
+  | { phase: 'available'; version: string; notes: string; asset: ReleaseAsset | null }
   | { phase: 'downloading'; percent: number }
   | { phase: 'installing' }
   | { phase: 'error'; message: string };
 
-/** TV 版本更新页：检查 + 下载 + 调起系统安装器。 */
+/** TV 版本信息页：检查 + 下载 + 调起系统安装器。 */
 export function UpdateScreen() {
   const colors = useThemeColors();
   const scale = useScaledFontSize();
@@ -32,13 +32,11 @@ export function UpdateScreen() {
   const badge = getUpdateBadgeStore();
 
   const currentVersion = Constants.expoConfig?.version ?? '';
-  const [updateState, setUpdateState] = React.useState<UpdateState>({ phase: 'idle' });
-
-  // 进入版本更新页即视为已读红点
-  React.useEffect(() => {
-    badge.getState().markSeen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 冷启动已检测到新版本时，进入页面直接呈现「有新版」态（无需再点检查）
+  const [updateState, setUpdateState] = React.useState<UpdateState>(() => {
+    const known = badge.getState().latestVersion;
+    return known ? { phase: 'available', version: known, notes: '', asset: null } : { phase: 'idle' };
+  });
 
   const handleCheckUpdate = async () => {
     setUpdateState({ phase: 'checking' });
@@ -54,18 +52,26 @@ export function UpdateScreen() {
         setUpdateState({ phase: 'error', message: `新版本 v${release.version} 未找到安装包` });
         return;
       }
+      badge.getState().setPendingUpdate(release.version);
       setUpdateState({ phase: 'available', version: release.version, notes: release.notes, asset });
     } catch (e) {
       setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   };
 
-  const handleDownloadAndInstall = async (asset: ReleaseAsset) => {
+  const handleDownloadAndInstall = async (asset: ReleaseAsset | null, version: string) => {
     try {
+      let target = asset;
+      if (!target) {
+        // 冷启动只记录了版本号，未缓存安装包信息：下载前现取
+        const release = await fetchLatestRelease();
+        target = pickApkAsset(release, APK_ASSET_PREFIX);
+        if (!target) throw new Error(`新版本 v${version} 未找到安装包`);
+      }
       setUpdateState({ phase: 'downloading', percent: 0 });
-      const targetUri = `${FileSystem.documentDirectory}${asset.name}`;
+      const targetUri = `${FileSystem.documentDirectory}${target.name}`;
       const resumable = FileSystem.createDownloadResumable(
-        asset.downloadUrl,
+        target.downloadUrl,
         targetUri,
         {},
         (progress) => {
@@ -93,16 +99,17 @@ export function UpdateScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: 'transparent' }]}>
-      <TVPageHeader title="版本更新" backId="update-back" />
+      <TVPageHeader title="版本信息" backId="update-back" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingHorizontal: TV_LAYOUT.paddingX }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>版本更新</Text>
+          <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: scale(20) }]}>版本信息</Text>
           <Text style={[styles.para, { color: colors.textSecondary, fontSize: scale(17) }]}>
             当前版本：{currentVersion || '…'}
+            {updateState.phase === 'available' ? `　最新版本：${updateState.version}` : ''}
             {updateState.phase === 'up-to-date' ? '　已是最新版本' : ''}
             {updateState.phase === 'checking' ? '　正在检查…' : ''}
             {updateState.phase === 'downloading' ? `　正在下载 ${updateState.percent}%` : ''}
@@ -113,13 +120,13 @@ export function UpdateScreen() {
             {updateState.phase === 'available' ? (
               <TVFocusable
                 id="update-download"
-                onPress={() => handleDownloadAndInstall(updateState.asset)}
+                onPress={() => handleDownloadAndInstall(updateState.asset, updateState.version)}
                 style={[styles.btn, { backgroundColor: hexToRgba(colors.surfaceElevated, cardOpacity / 100) }]}
                 testID="tv-update-download"
               >
                 <View style={styles.btnInner}>
                   <Text style={{ color: colors.foreground, fontSize: scale(16), fontWeight: '600' }}>
-                    下载安装 v{updateState.version}
+                    下载最新版本
                   </Text>
                 </View>
               </TVFocusable>

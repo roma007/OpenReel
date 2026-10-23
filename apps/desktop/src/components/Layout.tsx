@@ -23,6 +23,7 @@ import { useState, useEffect, createContext, useContext, useCallback, type React
 import { getVersion } from '@tauri-apps/api/app';
 import { useAppStore } from '../useAppStore';
 import { getKidLockService } from '../stores/kidLockStore';
+import { getUpdateBadgeStore } from '@openreel/core';
 
 const navItems = [
   { to: '/', label: '首页', icon: Home },
@@ -95,12 +96,13 @@ function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.207');
+  const [appVersion, setAppVersion] = useState('1.0.208');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
   const closeAiImport = useImportDialogStore((s) => s.closeAiImport);
   const { loadVideoSources, videoSources } = useAppStore();
+  const hasUpdate = getUpdateBadgeStore()((s) => s.hasUpdate);
 
   const USAGE_GUIDE_KEY = 'movie_app_usage_guide_seen';
 
@@ -158,7 +160,7 @@ export function Layout() {
       <div className="flex h-full">
         <aside className="w-56 shrink-0 flex flex-col bg-[var(--color-sidebar-alpha)] backdrop-blur-md">
           <div className="flex items-center gap-2 px-5 h-14">
-            <Film className="size-5 text-muted-foreground" />
+            <img src="/logo.png" alt="OpenReel" className="size-6 rounded-md" />
             <span className="font-semibold tracking-tight text-lg">OpenReel</span>
           </div>
           <nav className="flex-1 py-3">
@@ -178,9 +180,19 @@ export function Layout() {
               </NavLink>
             ))}
           </nav>
-          <div className="px-5 py-3 text-xs text-muted-foreground">
-            版本 {appVersion}
-          </div>
+          <Link
+            to="/settings/update"
+            className="flex items-center justify-between px-5 py-3 text-xs text-muted-foreground hover:text-text hover:bg-hover transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              版本 {appVersion}
+              {hasUpdate && <span className="size-2 rounded-full bg-destructive" aria-label="有新版本" />}
+            </span>
+            <span className="flex items-center gap-2">
+              {hasUpdate && <span className="text-destructive">有新版</span>}
+              <span aria-hidden>›</span>
+            </span>
+          </Link>
         </aside>
 
         <div className="flex-1 flex flex-col overflow-hidden">

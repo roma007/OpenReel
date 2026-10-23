@@ -41,7 +41,6 @@ const MAIN_ENTRIES: Entry[] = [
 
 const HELP_ENTRIES: Entry[] = [
   { key: 'help', label: '帮助中心', route: 'HelpCenter', desc: '常见问题与使用说明' },
-  { key: 'update', label: '版本更新', route: 'Update', desc: '检查与安装新版本' },
   { key: 'about', label: '关于我们', route: 'About', desc: '版本信息' },
   { key: 'license', label: '版权声明', route: 'License', desc: '开源许可' },
 ];
@@ -133,14 +132,9 @@ export function SettingsScreen() {
       testID={`tv-settings-${e.key}`}
     >
       <View style={styles.rowMain}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '600' }}>
-            {e.label}
-          </Text>
-          {e.key === 'update' && hasUpdate ? (
-            <View style={styles.badgeDot} />
-          ) : null}
-        </View>
+        <Text style={{ color: colors.foreground, fontSize: scale(19), fontWeight: '600' }}>
+          {e.label}
+        </Text>
         <Text style={{ color: colors.mutedForeground, fontSize: scale(15), marginTop: 3 }}>
           {e.desc}
         </Text>
@@ -227,12 +221,28 @@ export function SettingsScreen() {
           {HELP_ENTRIES.map((e) => renderRow(e))}
         </View>
 
-        {/* 组4：版本（对齐移动端 Sidebar 底部版本组） */}
+        {/* 组4：版本信息（对齐移动端 Sidebar 底部版本组），整行可聚焦，点击进入版本信息页 */}
         <View style={[styles.card, { backgroundColor: cardBg }]}>
-          <View style={styles.row}>
-            <Text style={{ color: colors.foreground, fontSize: scale(17) }}>版本</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: scale(16) }}>{APP_VERSION}</Text>
-          </View>
+          <TVFocusable
+            id="settings:version"
+            onPress={() => nav.navigate('Update')}
+            style={styles.row}
+            testID="tv-settings-version"
+          >
+            <View style={styles.rowMain}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ color: colors.foreground, fontSize: scale(17) }}>版本</Text>
+                {hasUpdate ? <View style={styles.badgeDot} /> : null}
+                <Text style={{ color: colors.mutedForeground, fontSize: scale(16), marginLeft: tv(10) }}>
+                  {APP_VERSION}
+                </Text>
+                {hasUpdate ? (
+                  <Text style={{ color: '#ef4444', fontSize: scale(14), marginLeft: tv(8) }}>有新版</Text>
+                ) : null}
+              </View>
+            </View>
+            <Text style={{ color: colors.mutedForeground, fontSize: scale(22) }}>›</Text>
+          </TVFocusable>
         </View>
       </ScrollView>
     </View>

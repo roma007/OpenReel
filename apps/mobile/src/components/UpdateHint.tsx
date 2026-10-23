@@ -10,14 +10,14 @@ import { useScaledFontSize } from '../themes/useScaledFontSize';
 
 /**
  * 移动端弱提醒：屏幕顶部居中浮动横幅，提示有新版本。
- * 点击进入版本更新页。可手动关闭。
+ * 点击进入版本信息页。可手动关闭。
  * 仅 Android 显示（iOS 不在在线升级范围）。
  */
 export function UpdateHint() {
   const navigation = useNavigation<any>();
   const badge = getUpdateBadgeStore();
   const hasUpdate = badge((s) => s.hasUpdate);
-  const pendingVersion = badge((s) => s.pendingVersion);
+  const pendingVersion = badge((s) => s.latestVersion);
   const [dismissed, setDismissed] = useState(false);
   const colors = useThemeColors();
   const s = useScaledFontSize();
@@ -29,7 +29,6 @@ export function UpdateHint() {
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={() => {
-          badge.getState().markSeen();
           navigation.navigate('Update');
         }}
         style={[

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 启动第一段：深色底 + 居中的绿色 logo（与 TV 启动桌面端一致） -->
+<!-- 启动第一段：深色底 + 居中 logo（与 TV 启动桌面端一致） -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
   <item android:drawable="@color/splashscreen_background" />
   <item

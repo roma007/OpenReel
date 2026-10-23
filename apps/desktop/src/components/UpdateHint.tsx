@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { getUpdateBadgeStore } from '@openreel/core';
 
 /**
- * 弱提醒：右上角浮动横幅，提示有新版本，可点击跳转到版本更新页。
+ * 弱提醒：右上角浮动横幅，提示有新版本，可点击跳转到版本信息页。
  * App 冷启动检查到有新版本时由 App.tsx 触发挂载。
  * 非阻塞、可手动关闭。
  */
@@ -12,7 +12,7 @@ export function UpdateHint() {
   const navigate = useNavigate();
   const badge = getUpdateBadgeStore();
   const hasUpdate = badge((s) => s.hasUpdate);
-  const pendingVersion = badge((s) => s.pendingVersion);
+  const pendingVersion = badge((s) => s.latestVersion);
   const [dismissed, setDismissed] = useState(false);
 
   if (!hasUpdate || dismissed || !pendingVersion) return null;
@@ -20,7 +20,6 @@ export function UpdateHint() {
   return (
     <button
       onClick={() => {
-        badge.getState().markSeen();
         navigate('/settings/update');
       }}
       className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-lg bg-card border border-border shadow-lg hover:bg-secondary/50 transition-colors text-left"

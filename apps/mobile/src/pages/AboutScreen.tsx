@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
-import { ArrowLeft, Info, GitPullRequest, Scale, FolderTree, ShieldCheck, ChevronRight } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Image } from 'react-native';
+import { ArrowLeft, GitPullRequest, Scale, FolderTree, ShieldCheck, ChevronRight } from 'lucide-react-native';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
 import { useScaledFontSize } from '../themes/useScaledFontSize';
@@ -49,9 +49,8 @@ export default function AboutScreen({ navigation }: Props) {
     card: { backgroundColor: cardBg, borderRadius: radius.lg, padding: 16 },
     sectionTitle: { fontSize: s(15), fontWeight: '600', color: colors.text, marginBottom: 12 },
     brandRow: { flexDirection: 'row', alignItems: 'flex-start' },
-    brandIcon: {
+    brandLogo: {
       width: 36, height: 36, borderRadius: radius.lg,
-      backgroundColor: colors.buttonPrimaryBg, alignItems: 'center', justifyContent: 'center',
     },
     brandInfo: { flex: 1, marginLeft: 12 },
     brandName: { fontSize: s(16), fontWeight: '600', color: colors.text },
@@ -92,9 +91,7 @@ export default function AboutScreen({ navigation }: Props) {
       <View style={styles.content}>
         <View style={styles.card}>
           <View style={styles.brandRow}>
-            <View style={styles.brandIcon}>
-              <Info size={18} color="#fff" />
-            </View>
+            <Image source={require('../../assets/logo.png')} style={styles.brandLogo} />
             <View style={styles.brandInfo}>
               <Text style={styles.brandName}>OpenReel</Text>
               <Text style={styles.tagline}>把散落的片源，收进自己的片库。</Text>

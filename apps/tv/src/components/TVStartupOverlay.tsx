@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import type { MigrationProgress, MigrationDiskError } from '@openreel/expo-db';
 import { useThemeColors } from '@openreel/expo-ui';
 import { TV_SCALE, tv } from '../theme/tokens';
@@ -46,7 +46,7 @@ export function TVStartupOverlay({ migrationProgress, diskBlocked }: TVStartupOv
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* logo 固定在屏幕中心，与原生启动页的位置/尺寸一致；文字在其下方淡入，避免 logo 位移 */}
       <View style={styles.centerAnchor}>
-        <View style={styles.logoBox} />
+        <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
         <Text style={styles.logoText}>OpenReel TV版</Text>
 
         {percent != null && (
@@ -95,11 +95,10 @@ const styles = StyleSheet.create({
     marginTop: -56,
     alignItems: 'center',
   },
-  logoBox: {
+  logoImage: {
     width: 112,
     height: 112,
     borderRadius: 24,
-    backgroundColor: 'rgba(0,255,0,0.5)',
   },
   logoText: {
     marginTop: tv(14),

@@ -26,13 +26,11 @@ export default function UpdatePage() {
   const badge = getUpdateBadgeStore();
 
   const [currentVersion, setCurrentVersion] = useState('');
-  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' });
-
-  // 进入版本更新页即视为已读红点
-  useEffect(() => {
-    badge.getState().markSeen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 冷启动已检测到新版本时，进入页面直接呈现「有新版」态（无需再点检查）
+  const [updateState, setUpdateState] = useState<UpdateState>(() => {
+    const known = badge.getState().latestVersion;
+    return known ? { phase: 'available', version: known } : { phase: 'idle' };
+  });
 
   useEffect(() => {
     if (IS_WINDOWS) {
@@ -49,6 +47,7 @@ export default function UpdatePage() {
         badge.getState().clear();
         return;
       }
+      badge.getState().setPendingUpdate(update.version);
       setUpdateState({ phase: 'available', version: update.version, notes: update.body });
     } catch (e) {
       setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -91,7 +90,7 @@ export default function UpdatePage() {
             <ArrowLeft className="size-4 mr-2" />
             返回
           </Button>
-          <h1 className="text-2xl font-bold">版本更新</h1>
+          <h1 className="text-2xl font-bold">版本信息</h1>
         </div>
       </div>
 
@@ -106,6 +105,7 @@ export default function UpdatePage() {
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="text-sm text-muted-foreground">
               当前版本：{currentVersion || '…'}
+              {updateState.phase === 'available' && <span className="ml-2 text-text">最新版本：{updateState.version}</span>}
               {updateState.phase === 'up-to-date' && <span className="ml-2 text-text">已是最新版本</span>}
               {updateState.phase === 'checking' && <span className="ml-2">正在检查…</span>}
               {updateState.phase === 'downloading' && <span className="ml-2">正在下载 {updateState.percent}%</span>}
@@ -115,7 +115,7 @@ export default function UpdatePage() {
             {updateState.phase === 'available' ? (
               <Button onClick={handleDownloadAndInstall}>
                 <RefreshCw className="size-4 mr-2" />
-                下载并安装 v{updateState.version}
+                下载最新版本
               </Button>
             ) : (
               <Button

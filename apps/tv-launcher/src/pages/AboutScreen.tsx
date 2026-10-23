@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Text, View, StyleSheet, ScrollView } from 'react-native';
+import { Linking, Text, View, StyleSheet, ScrollView, Image } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
@@ -38,7 +38,10 @@ export function AboutScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.card, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}>
-          <Text style={[styles.brand, { color: colors.foreground, fontSize: scale(24) }]}>OpenReel</Text>
+          <View style={styles.brandRow}>
+            <Image source={require('../../assets/logo.png')} style={styles.brandLogo} />
+            <Text style={[styles.brand, { color: colors.foreground, fontSize: scale(24) }]}>OpenReel</Text>
+          </View>
           <Text style={[styles.tagline, { color: colors.textSecondary, fontSize: scale(18) }]}>
             把散落的片源，收进自己的片库。
           </Text>
@@ -132,6 +135,8 @@ const styles = StyleSheet.create({
   card: { padding: tv(20), borderRadius: tv(10), borderWidth: 1, marginBottom: tv(18) },
   cardTitle: { fontWeight: '700', marginBottom: tv(6) },
   brand: { fontWeight: '800' },
+  brandRow: { flexDirection: 'row', alignItems: 'center', marginBottom: tv(8) },
+  brandLogo: { width: tv(44), height: tv(44), borderRadius: tv(11), marginRight: tv(12) },
   tagline: { marginTop: tv(4) },
   para: { lineHeight: tv(27), marginTop: tv(8) },
   pointRow: { marginTop: tv(12) },

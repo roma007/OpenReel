@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { ArrowLeft, RefreshCw } from 'lucide-react-native';
 import Constants from 'expo-constants';
@@ -24,7 +24,7 @@ type UpdateState =
   | { phase: 'idle' }
   | { phase: 'checking' }
   | { phase: 'up-to-date' }
-  | { phase: 'available'; version: string; notes: string; asset: ReleaseAsset }
+  | { phase: 'available'; version: string; notes: string; asset: ReleaseAsset | null }
   | { phase: 'downloading'; percent: number }
   | { phase: 'installing' }
   | { phase: 'error'; message: string };
@@ -37,13 +37,11 @@ export default function UpdateScreen({ navigation }: Props) {
   const badge = getUpdateBadgeStore();
 
   const currentVersion = Constants.expoConfig?.version ?? '';
-  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' });
-
-  // 进入版本更新页即视为已读红点
-  useEffect(() => {
-    badge.getState().markSeen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 冷启动已检测到新版本时，进入页面直接呈现「有新版」态（无需再点检查）
+  const [updateState, setUpdateState] = useState<UpdateState>(() => {
+    const known = badge.getState().latestVersion;
+    return known ? { phase: 'available', version: known, notes: '', asset: null } : { phase: 'idle' };
+  });
 
   const handleCheckUpdate = async () => {
     setUpdateState({ phase: 'checking' });
@@ -59,18 +57,26 @@ export default function UpdateScreen({ navigation }: Props) {
         setUpdateState({ phase: 'error', message: `新版本 v${release.version} 未找到安装包` });
         return;
       }
+      badge.getState().setPendingUpdate(release.version);
       setUpdateState({ phase: 'available', version: release.version, notes: release.notes, asset });
     } catch (e) {
       setUpdateState({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   };
 
-  const handleDownloadAndInstall = async (asset: ReleaseAsset) => {
+  const handleDownloadAndInstall = async (asset: ReleaseAsset | null, version: string) => {
     try {
+      let target = asset;
+      if (!target) {
+        // 冷启动只记录了版本号，未缓存安装包信息：下载前现取
+        const release = await fetchLatestRelease();
+        target = pickApkAsset(release, APK_ASSET_PREFIX);
+        if (!target) throw new Error(`新版本 v${version} 未找到安装包`);
+      }
       setUpdateState({ phase: 'downloading', percent: 0 });
-      const targetUri = `${FileSystem.documentDirectory}${asset.name}`;
+      const targetUri = `${FileSystem.documentDirectory}${target.name}`;
       const resumable = FileSystem.createDownloadResumable(
-        asset.downloadUrl,
+        target.downloadUrl,
         targetUri,
         {},
         (progress) => {
@@ -124,17 +130,20 @@ export default function UpdateScreen({ navigation }: Props) {
           <Button variant="icon" size="sm" onPress={() => navigation.goBack()}>
             <ArrowLeft size={20} color={colors.text} />
           </Button>
-          <Text style={styles.title}>版本更新</Text>
+          <Text style={styles.title}>版本信息</Text>
           <View style={styles.placeholder} />
         </View>
       </View>
 
       <View style={styles.content}>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>版本更新</Text>
+          <Text style={styles.sectionTitle}>版本信息</Text>
           <View style={styles.updateRow}>
             <Text style={styles.updateInfo}>
               当前版本：{currentVersion || '…'}
+              {updateState.phase === 'available' && (
+                <Text style={styles.updateHighlight}>　最新版本：{updateState.version}</Text>
+              )}
               {updateState.phase === 'up-to-date' && <Text style={styles.updateHighlight}>　已是最新版本</Text>}
               {updateState.phase === 'checking' && <Text>　正在检查…</Text>}
               {updateState.phase === 'downloading' && <Text>　正在下载 {updateState.percent}%</Text>}
@@ -145,9 +154,9 @@ export default function UpdateScreen({ navigation }: Props) {
               <Button
                 size="sm"
                 leftIcon={<RefreshCw size={14} color={colors.buttonPrimaryText} />}
-                onPress={() => handleDownloadAndInstall(updateState.asset)}
+                onPress={() => handleDownloadAndInstall(updateState.asset, updateState.version)}
               >
-                下载安装 v{updateState.version}
+                下载最新版本
               </Button>
             ) : (
               <Button

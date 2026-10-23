@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ArrowLeft, Info, Github, Scale, Monitor, Smartphone, Apple, FolderTree } from 'lucide-react';
+import { ArrowLeft, Github, Scale, Monitor, Smartphone, Apple, FolderTree } from 'lucide-react';
 import { useBackgroundStore } from '../themes/backgroundStore';
 
 const REPO_URL = 'https://github.com/roma007/OpenReel';
@@ -49,7 +49,7 @@ export default function AboutPage() {
 
       <Card className="p-6">
         <div className="flex items-start gap-4">
-          <Info className="size-8 text-muted-foreground shrink-0 mt-1" />
+          <img src="/logo.png" alt="OpenReel" className="size-10 rounded-lg shrink-0" />
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold mb-2">OpenReel</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">

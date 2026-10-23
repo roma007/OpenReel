@@ -131,7 +131,7 @@ export default function App() {
       .then((release) => {
         if (currentVersion && compareVersions(release.version, currentVersion) > 0) {
           getUpdateBadgeStore().getState().setPendingUpdate(release.version);
-          showTVToast(`发现新版本 v${release.version}，可到 设置 → 版本更新 查看`, 'info');
+          showTVToast(`发现新版本 v${release.version}，可到 设置 → 版本信息 查看`, 'info');
         }
       })
       .catch(() => {

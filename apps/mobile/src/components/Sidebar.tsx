@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Animated, Alert, Platform,
+  Animated, Alert,
 } from 'react-native';
 import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
@@ -18,7 +18,6 @@ import { getUpdateBadgeStore } from '@openreel/core';
 const SIDEBAR_WIDTH = 280;
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
-const IS_ANDROID = Platform.OS === 'android';
 
 export default function Sidebar() {
   const { isOpen, close } = useSidebarStore();
@@ -121,6 +120,23 @@ export default function Sidebar() {
       paddingVertical: 14,
       paddingHorizontal: 15,
     },
+    versionLabel: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    versionRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    versionNew: {
+      fontSize: s(12),
+      color: '#ef4444',
+    },
+    versionArrow: {
+      fontSize: s(18),
+      color: colors.mutedForeground,
+    },
     badgeDot: {
       width: 8,
       height: 8,
@@ -175,12 +191,6 @@ export default function Sidebar() {
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('HelpCenter')}>
               <Text style={styles.menuText}>帮助中心</Text>
             </TouchableOpacity>
-            {IS_ANDROID && (
-              <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('Update')}>
-                <Text style={styles.menuText}>版本更新</Text>
-                {hasUpdate && <View style={styles.badgeDot} />}
-              </TouchableOpacity>
-            )}
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNav('About')}>
               <Text style={styles.menuText}>关于我们</Text>
             </TouchableOpacity>
@@ -193,10 +203,17 @@ export default function Sidebar() {
           </View>
 
           <View style={styles.section}>
-            <View style={styles.versionItem}>
-              <Text style={styles.menuText}>版本</Text>
-              <Text style={styles.menuValue}>{APP_VERSION}</Text>
-            </View>
+            <TouchableOpacity style={styles.versionItem} onPress={() => handleNav('Update')}>
+              <View style={styles.versionLabel}>
+                <Text style={styles.menuText}>版本</Text>
+                {hasUpdate && <View style={styles.badgeDot} />}
+              </View>
+              <View style={styles.versionRight}>
+                <Text style={styles.menuValue}>{APP_VERSION}</Text>
+                {hasUpdate && <Text style={styles.versionNew}>有新版</Text>}
+                <Text style={styles.versionArrow}>›</Text>
+              </View>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </Animated.View>

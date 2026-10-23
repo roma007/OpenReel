@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import { useThemeColors, useScaledFontSize, useThemeStore, hexToRgba } from '@openreel/expo-ui';
 import { TVFocusable } from '../focus/TVFocusable';
 import { TV_LAYOUT, tv } from '../theme/tokens';
@@ -52,9 +52,12 @@ export function TVNavBar({
         },
       ]}
     >
-      <Text style={[styles.brand, { color: colors.foreground, fontSize: scale(22) }]}>
-        {title || 'OpenReel'}
-      </Text>
+      <View style={styles.brandWrap}>
+        <Image source={require('../../assets/logo.png')} style={styles.brandLogo} />
+        <Text style={[styles.brand, { color: colors.foreground, fontSize: scale(22) }]}>
+          {title || 'OpenReel'}
+        </Text>
+      </View>
       <View style={styles.items}>
         {items.map((it) => (
           <TVFocusable
@@ -103,10 +106,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  brandWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: tv(16),
+  },
+  brandLogo: {
+    width: tv(34),
+    height: tv(34),
+    borderRadius: tv(9),
+    marginRight: tv(8),
+  },
   brand: {
     fontWeight: '800',
     letterSpacing: 1,
-    marginRight: tv(16),
   },
   items: {
     flexDirection: 'row',
