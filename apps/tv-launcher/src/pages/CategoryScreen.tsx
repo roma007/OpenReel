@@ -362,6 +362,15 @@ export function CategoryScreen() {
         {/* 筛选条：默认全部收缩；点某个触发器只展开该类，其余自动收缩 */}
         <View style={styles.filterBar}>
           <View style={styles.filterRow}>
+            {showShortDramaFilter ? (
+              <TVButton
+                id="cat-filter:episode"
+                label={`长短剧：${episodeLabel}`}
+                variant={expandedFilter === 'episode' ? 'primary' : 'ghost'}
+                onPress={() => toggleFilter('episode')}
+                testID="tv-category-filter-episode"
+              />
+            ) : null}
             <TVButton
               id="cat-filter:sort"
               label={`排序：${sortLabel}`}
@@ -394,15 +403,6 @@ export function CategoryScreen() {
                 variant={expandedFilter === 'area' ? 'primary' : 'ghost'}
                 onPress={() => toggleFilter('area')}
                 testID="tv-category-filter-area"
-              />
-            ) : null}
-            {showShortDramaFilter ? (
-              <TVButton
-                id="cat-filter:episode"
-                label={`剧集：${episodeLabel}`}
-                variant={expandedFilter === 'episode' ? 'primary' : 'ghost'}
-                onPress={() => toggleFilter('episode')}
-                testID="tv-category-filter-episode"
               />
             ) : null}
           </View>

@@ -65,6 +65,8 @@ export function SourceManagerScreen() {
   const [checking, setChecking] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<Record<string, 'increment' | 'full'>>({});
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
+  const [deletingPlaySourceId, setDeletingPlaySourceId] = useState<string | null>(null);
 
   const hasRunningTaskRef = useRef(false);
 
@@ -253,34 +255,41 @@ export function SourceManagerScreen() {
 
   const doRemoveSource = useCallback(
     async (source: VideoSource) => {
+      if (deletingSourceId) return;
+      setDeletingSourceId(source.id);
       try {
         await removeVideoSource(source.id);
         showTVToast(`已删除视频源「${source.name}」（已采集数据保留）`, 'success');
       } catch (e) {
         showTVToast(`删除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
+        setDeletingSourceId(null);
         await loadVideoSources().catch(() => {});
       }
     },
-    [loadVideoSources, removeVideoSource],
+    [loadVideoSources, removeVideoSource, deletingSourceId],
   );
 
   const doRemovePlaySources = useCallback(
     async (source: VideoSource) => {
+      if (deletingPlaySourceId) return;
+      setDeletingPlaySourceId(source.id);
       try {
         await getProvider().deletePlaySourcesBySourceId(source.id);
         showTVToast(`「${source.name}」的播放源已删除`, 'success');
       } catch (e) {
         showTVToast(`删除失败：${e instanceof Error ? e.message : String(e)}`, 'error');
       } finally {
+        setDeletingPlaySourceId(null);
         await loadVideoSources().catch(() => {});
       }
     },
-    [loadVideoSources],
+    [loadVideoSources, deletingPlaySourceId],
   );
 
   const pressDeleteSource = useCallback(
     (source: VideoSource) => {
+      if (deletingSourceId || deletingPlaySourceId) return;
       if (pendingDelete !== `src:${source.id}`) {
         setPendingDelete(`src:${source.id}`);
         showTVToast(`再按一次「确认删源」以删除「${source.name}」（3 秒内有效，采集数据保留）`, 'info');
@@ -289,11 +298,12 @@ export function SourceManagerScreen() {
       setPendingDelete(null);
       void doRemoveSource(source);
     },
-    [doRemoveSource, pendingDelete],
+    [doRemoveSource, pendingDelete, deletingSourceId, deletingPlaySourceId],
   );
 
   const pressDeletePlaySources = useCallback(
     (source: VideoSource) => {
+      if (deletingSourceId || deletingPlaySourceId) return;
       if (pendingDelete !== `data:${source.id}`) {
         setPendingDelete(`data:${source.id}`);
         showTVToast(
@@ -305,7 +315,7 @@ export function SourceManagerScreen() {
       setPendingDelete(null);
       void doRemovePlaySources(source);
     },
-    [doRemovePlaySources, pendingDelete],
+    [doRemovePlaySources, pendingDelete, deletingSourceId, deletingPlaySourceId],
   );
 
   const doExportAll = useCallback(() => {
@@ -431,7 +441,7 @@ export function SourceManagerScreen() {
                     labelFontSize={scale(12)}
                     sublabelFontSize={scale(11)}
                     sublabelColor={colors.disabledForeground}
-                    disabled={collecting || busy}
+                    disabled={collecting || busy || !!deletingSourceId || !!deletingPlaySourceId}
                     style={styles.sourceActionBtn}
                     onPress={() => doCollect(source, 'increment')}
                     testID={`tv-src-inc-${source.id}`}
@@ -446,7 +456,7 @@ export function SourceManagerScreen() {
                     labelFontSize={scale(12)}
                     sublabelFontSize={scale(11)}
                     sublabelColor={colors.disabledForeground}
-                    disabled={collecting || busy}
+                    disabled={collecting || busy || !!deletingSourceId || !!deletingPlaySourceId}
                     style={styles.sourceActionBtn}
                     onPress={() => doCollect(source, 'full')}
                     testID={`tv-src-full-${source.id}`}
@@ -461,7 +471,7 @@ export function SourceManagerScreen() {
                     labelFontSize={scale(12)}
                     sublabelFontSize={scale(11)}
                     sublabelColor={colors.disabledForeground}
-                    disabled={checkingNow}
+                    disabled={checkingNow || !!deletingSourceId || !!deletingPlaySourceId}
                     style={styles.sourceActionBtn}
                     onPress={() => doCheck(source)}
                     testID={`tv-src-check-${source.id}`}
@@ -475,6 +485,7 @@ export function SourceManagerScreen() {
                     labelFontSize={scale(12)}
                     style={styles.sourceActionBtn}
                     onPress={() => openEdit(source)}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                     testID={`tv-src-edit-${source.id}`}
                     nextFocusUpId={focusUpId}
                     nextFocusDownId={focusDownId}
@@ -486,30 +497,45 @@ export function SourceManagerScreen() {
                     labelFontSize={scale(12)}
                     style={styles.sourceActionBtn}
                     onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                     testID={`tv-src-toggle-${source.id}`}
                     nextFocusUpId={focusUpId}
                     nextFocusDownId={focusDownId}
                   />
                   <TVButton
                     id={`src-delp:${source.id}`}
-                    label={pendingDelete === `data:${source.id}` ? '确认删视频？' : '删视频'}
+                    label={
+                      deletingPlaySourceId === source.id
+                        ? '删除中…'
+                        : pendingDelete === `data:${source.id}`
+                          ? '确认删视频？'
+                          : '删视频'
+                    }
                     variant="secondary"
                     labelColor={colors.warning}
                     labelFontSize={scale(12)}
                     style={styles.sourceActionBtn}
                     onPress={() => pressDeletePlaySources(source)}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                     testID={`tv-src-delp-${source.id}`}
                     nextFocusUpId={focusUpId}
                     nextFocusDownId={focusDownId}
                   />
                   <TVButton
                     id={`src-del:${source.id}`}
-                    label={pendingDelete === `src:${source.id}` ? '确认删源？' : '删源'}
+                    label={
+                      deletingSourceId === source.id
+                        ? '删除中…'
+                        : pendingDelete === `src:${source.id}`
+                          ? '确认删源？'
+                          : '删源'
+                    }
                     variant="secondary"
                     labelColor={colors.error}
                     labelFontSize={scale(12)}
                     style={styles.sourceActionBtn}
                     onPress={() => pressDeleteSource(source)}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                     testID={`tv-src-del-${source.id}`}
                     nextFocusUpId={focusUpId}
                     nextFocusDownId={focusDownId}

@@ -33,6 +33,15 @@ const LANGUAGE_TERMS_SORTED: ReadonlyArray<readonly [string, string]> = [...LANG
   (a, b) => b[0].length - a[0].length,
 );
 
+/**
+ * 语言版本词清单（去重后的裸词）。
+ *
+ * 供「存量同名合并」把候选预筛下沉到 SQL：只有标题里出现过这些词的行才可能是版本条目。
+ * 是对 `computeBaseTitle`（= stripVersionSuffix + stripTrailingYear）判定结果的**超集**，
+ * 不会漏掉任何可合并条目，只会多扫几行由调用方再用 `computeBaseTitle` 精确过滤。
+ */
+export const LANGUAGE_TERM_LIST: readonly string[] = Array.from(new Set(LANGUAGE_TERMS.map(([term]) => term)));
+
 const BRACKET_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['（', '）'],
   ['(', ')'],

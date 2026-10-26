@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -19,6 +19,7 @@ import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
 import { fetchLatestRelease, compareVersions, getUpdateBadgeStore } from '@openreel/core';
 import Constants from 'expo-constants';
+// import { ResourceOverlay } from './src/components/ResourceOverlay';
 import HomeScreen from './src/pages/HomeScreen';
 import CategoryScreen from './src/pages/CategoryScreen';
 import SearchScreen from './src/pages/SearchScreen';
@@ -97,6 +98,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
   const [diskBlocked, setDiskBlocked] = useState<MigrationDiskError | null>(null);
+  // const routeRef = useRef('Home');
 
   const initTheme = useThemeStore((s) => s.initTheme);
   const initColorMode = useThemeStore((s) => s.initColorMode);
@@ -148,7 +150,10 @@ export default function App() {
     <SafeAreaProvider>
       <BlurredBackground imageUrl={bgImageUrl}>
         {ready ? (
-          <NavigationContainer theme={navTheme} documentTitle={{ enabled: false }}>
+          <NavigationContainer
+            theme={navTheme}
+            documentTitle={{ enabled: false }}
+          >
             <RootNavigator />
           </NavigationContainer>
         ) : (
@@ -158,6 +163,7 @@ export default function App() {
             diskBlocked={diskBlocked}
           />
         )}
+        {/* <ResourceOverlay routeRef={routeRef} /> */}
       </BlurredBackground>
     </SafeAreaProvider>
   );

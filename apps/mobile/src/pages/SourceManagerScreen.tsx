@@ -128,6 +128,8 @@ export default function SourceManagerScreen({ navigation }: Props) {
   const [checkingSource, setCheckingSource] = useState<string | null>(null);
 
   const [submittingSources, setSubmittingSources] = useState<Record<string, 'increment' | 'full'>>({});
+  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
+  const [deletingPlaySourceId, setDeletingPlaySourceId] = useState<string | null>(null);
 
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiStep, setAiStep] = useState<'prompt' | 'paste' | 'preview'>('prompt');
@@ -195,9 +197,24 @@ export default function SourceManagerScreen({ navigation }: Props) {
   };
 
   const handleDelete = (id: string, name: string) => {
+    if (deletingSourceId || deletingPlaySourceId) return;
     Alert.alert('删除视频源', `确定要删除「${name}」吗？\n\n仅删除视频源配置，不会删除该源采集的视频数据。如需删除数据请使用「删视频」。`, [
       { text: '取消', style: 'cancel' },
-      { text: '删除', style: 'destructive', onPress: () => removeVideoSource(id) },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          if (deletingSourceId) return;
+          setDeletingSourceId(id);
+          try {
+            await removeVideoSource(id);
+          } catch (err: any) {
+            showToast(`删除失败: ${err.message || '未知错误'}`, 'error');
+          } finally {
+            setDeletingSourceId(null);
+          }
+        },
+      },
     ]);
   };
 
@@ -224,18 +241,23 @@ export default function SourceManagerScreen({ navigation }: Props) {
   };
 
   const handleDeletePlaySources = (source: VideoSource) => {
+    if (deletingSourceId || deletingPlaySourceId) return;
     Alert.alert('删除播放源', `确定要删除「${source.name}」的所有播放源吗？如果某部视频没有其他播放源，该视频也会被一并删除。`, [
       { text: '取消', style: 'cancel' },
       {
         text: '删除',
         style: 'destructive',
         onPress: async () => {
+          if (deletingPlaySourceId) return;
+          setDeletingPlaySourceId(source.id);
           try {
             await getProvider().deletePlaySourcesBySourceId(source.id);
             await loadVideoSources();
             showToast(`「${source.name}」的播放源已删除`);
           } catch (err: any) {
-            showToast(`删除失败: ${err.message}`, 'error');
+            showToast(`删除失败: ${err.message || '未知错误'}`, 'error');
+          } finally {
+            setDeletingPlaySourceId(null);
           }
         },
       },
@@ -431,6 +453,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     onPress={() => handleStartEdit(source)}
                     leftIcon={<Pencil size={14} color={colors.textSecondary} />}
                     textStyle={{ color: colors.textSecondary }}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                   >
                     编辑
                   </Button>
@@ -441,6 +464,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     onPress={() => toggleSourceEnabled(source.id, !source.isEnabled)}
                     leftIcon={<Ban size={14} color={colors.textSecondary} />}
                     textStyle={{ color: colors.textSecondary }}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
                   >
                     {source.isEnabled ? '禁用' : '启用'}
                   </Button>
@@ -451,8 +475,10 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     onPress={() => handleDelete(source.id, source.name)}
                     leftIcon={<Trash2 size={14} color={colors.error} />}
                     textStyle={{ color: colors.error }}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
+                    loading={deletingSourceId === source.id}
                   >
-                    删源
+                    {deletingSourceId === source.id ? '删除中' : '删源'}
                   </Button>
                   <Button
                     variant="ghost"
@@ -461,8 +487,10 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     onPress={() => handleDeletePlaySources(source)}
                     leftIcon={<Database size={14} color={colors.textSecondary} />}
                     textStyle={{ color: colors.textSecondary }}
+                    disabled={!!deletingSourceId || !!deletingPlaySourceId}
+                    loading={deletingPlaySourceId === source.id}
                   >
-                    删视频
+                    {deletingPlaySourceId === source.id ? '删除中' : '删视频'}
                   </Button>
                 </View>
 
@@ -473,7 +501,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     style={styles.sourceActionBtn}
                     textStyle={{ textAlign: 'center' }}
                     loading={checking}
-                    disabled={checking}
+                    disabled={checking || !!deletingSourceId || !!deletingPlaySourceId}
                     onPress={() => handleCheck(source)}
                   >
                     <>
@@ -488,7 +516,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     size="sm"
                     style={styles.sourceActionBtn}
                     textStyle={{ textAlign: 'center' }}
-                    disabled={collecting || submitting}
+                    disabled={collecting || submitting || !!deletingSourceId || !!deletingPlaySourceId}
                     loading={submitting}
                     onPress={() => handleCollect(source.code, 'increment', source.name)}
                   >
@@ -504,7 +532,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
                     size="sm"
                     style={styles.sourceActionBtn}
                     textStyle={{ textAlign: 'center' }}
-                    disabled={collecting || submitting}
+                    disabled={collecting || submitting || !!deletingSourceId || !!deletingPlaySourceId}
                     loading={submitting}
                     onPress={() => handleCollect(source.code, 'full', source.name)}
                   >

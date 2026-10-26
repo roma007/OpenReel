@@ -1,7 +1,7 @@
 import { CMSAdapter } from './cmsAdapter';
 import { normalizer, DEFAULT_MIN_YEAR } from '../utils/normalizer';
 import { mapType, refineTypeByEpisodes, isVersionTitle, needsShortDramaCheck } from '../utils/typeMapper';
-import { computeBaseTitle, extractLanguage, shortUrlHash, stripVersionSuffix, stripTrailingYear } from '../utils/versionMerge';
+import { computeBaseTitle, extractLanguage, LANGUAGE_TERM_LIST, shortUrlHash, stripVersionSuffix, stripTrailingYear } from '../utils/versionMerge';
 import { SOURCE_ID_TO_NAME_MAP, PLAY_SOURCE_TYPE_MAP, isPlayableMediaUrl } from '../utils/constants';
 import { isKnownDeadPosterUrl, isUsablePosterUrl } from '../utils/posterHost';
 import { isChildSafe } from '../utils/kidSafe';
@@ -686,8 +686,10 @@ sourceUpdatedAt,
     console.log(`[Collector] collectFromSource: sourceId=${sourceId}, baseUrl=${baseUrl}, page=${page}, pageSize=${pageSize}`);
     console.log(`[Collector] config: minYear=${config.minYear}, concurrency=${config.concurrency}`);
 
-    // 存量同名多版本合并（幂等；60s 节流后台执行，不阻塞本页采集）
-    void this.runVersionMergeOnce();
+    // 存量同名多版本合并**不在这里触发**：本方法每采一页就会被调用一次，而合并是整表级整理，
+    // 放在这里等于「采集全程每 60s 就全表扫一遍」（实测 157,646 行、每轮 106~146s、合并 0 条），
+    // CPU 与写锁全被它吃掉，电视端遥控响应被拖到 1.5~3s。改由整轮采集结束后执行一次
+    // （见 collectLatest 末尾的 runVersionMergeOnce(true)）。
 
     const adapter = new CMSAdapter(baseUrl);
 
@@ -914,6 +916,9 @@ sourceUpdatedAt,
         failedCount++;
         failedItems.push({ vodId: String(items[i].vod_id), title: items[i].vod_name, error: err instanceof Error ? err.message : String(err) });
       }
+      // 每提交一条就让出一次 JS 线程：采集写库是纯 JS + 单连接串行的长任务，
+      // 不让出事件循环时遥控按键/导航事件会被拖到秒级（电视端实测 1.5~3s 才响应）。
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
     return { failedCount, failedItems, skippedCount };
@@ -1483,12 +1488,19 @@ const title = await normalizer.normalizeTitle(item.vod_name);
 
   async mergeExistingVersionDuplicates(): Promise<number> {
     const startedAt = Date.now();
+    // 候选预筛下沉到 SQL：computeBaseTitle = stripVersionSuffix + stripTrailingYear，
+    // 因此「标题含语言版本词」或「尾部 4 位与 year 相同」是版本条目的超集条件。
+    // 旧实现把整张 media 表（实测 157,646 条）读进 JS 逐行算基准标题，单轮耗时 106~146s、
+    // 占满单核（电视端实测 App 123%~348% CPU、遥控响应被拖到 1.5~3s），且每轮合并 0 条；
+    // 现在只取候选行，主条目按 fingerprint 唯一索引定点回查，语义完全不变。
+    const likeConds = LANGUAGE_TERM_LIST.map(() => 'title LIKE ?').join(' OR ');
     const rows = await this.db.select<{ id: number; title: string; year: number | null; fingerprint: string; type: string }>(
-      `SELECT id, title, year, fingerprint, type FROM media`
+      `SELECT id, title, year, fingerprint, type FROM media
+        WHERE (${likeConds})
+           OR (year IS NOT NULL AND substr(title, -4) = CAST(year AS TEXT))`,
+      LANGUAGE_TERM_LIST.map((term) => `%${term}%`)
     );
-    console.log(`[Collector] 存量同名合并: 扫描 ${rows.length} 条 media 开始`);
-    const byFingerprint = new Map<string, (typeof rows)[number]>();
-    for (const r of rows) byFingerprint.set(r.fingerprint, r);
+    console.log(`[Collector] 存量同名合并: 候选 ${rows.length} 条 media 开始（SQL 预筛，全表 15 万级不再读入 JS）`);
 
     // 指纹层面直接剥离版本词/尾部年份得到基准指纹（纯同步字符串运算），
     // 避免对每条候选重复走 generateFingerprint 的 opencc 转换拖慢全表扫描。
@@ -1516,14 +1528,28 @@ const title = await normalizer.normalizeTitle(item.vod_name);
 
     let merged = 0;
     let selfPromoted = 0;
+    const baseFps = Array.from(groups.keys());
+    const mainMap = new Map<string, { id: number; title: string }>();
+    if (baseFps.length > 0) {
+      const batchSize = 200;
+      for (let i = 0; i < baseFps.length; i += batchSize) {
+        const batch = baseFps.slice(i, i + batchSize);
+        const rows = await this.db.select<{ id: number; title: string; fingerprint: string }>(
+          `SELECT id, title, fingerprint FROM media WHERE fingerprint IN (${batch.map(() => '?').join(',')})`,
+          batch
+        );
+        for (const r of rows) mainMap.set(r.fingerprint, { id: r.id, title: r.title });
+      }
+    }
     for (const [baseFp, members] of groups) {
-      let main = byFingerprint.get(baseFp);
+      // 主条目按指纹唯一索引定点回查（候选集只有版本条目，主条目本身不在其中）
+      let main: { id: number; title: string } | null = mainMap.get(baseFp) ?? null;
       if (!main) {
         // 库中无无语言主条目：组内至少两条版本候选时自选主合并（如 国语+粤语 版本族），
         // 单条孤版本（如「她以为我不懂粤语」）保持独立防误伤；主 title 归一为基准名（语言由线路承载）
         if (members.length < 2) continue;
         main = members[0];
-        const { baseTitle } = computeBaseTitle(main.title, main.year ?? null);
+        const { baseTitle } = computeBaseTitle(main.title, members[0].year ?? null);
         if (baseTitle && baseTitle !== main.title) {
           await this.db.execute('UPDATE media SET title = ? WHERE id = ?', [baseTitle, main.id]);
         }
@@ -1542,6 +1568,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           console.error(`[Collector] 存量合并失败 (${v.id}):`, err);
         }
       }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     console.log(`[Collector] 存量同名合并: 完成，合并 ${merged} 条（自建主 ${selfPromoted} 组），耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     return merged;
@@ -1636,21 +1663,20 @@ const title = await normalizer.normalizeTitle(item.vod_name);
 
     console.log(`[Collector] collectLatest: ${sources.length} sources, incrementalMaxPages=${config.incrementalMaxPages}, maxIncrementalHours=${config.maxIncrementalHours}`);
 
-    // 存量纠错与同名合并一并后台化：二者都是「存量整理」，与本次增量采集无数据依赖。
-    // 过去 repair 串行 await 在建任务行之前，实测阻塞 7417ms（+315ms→+7417ms 期间
-    // 浮窗已显示「采集中 0/6」而任务列表「暂无采集任务」），是 7 秒的假采集中空窗。
-    // 与 runVersionMergeOnce 同为并发写 media（该并发模式本项目已验证：实测合并
-    // 扫描 44978 条耗时 3.9s 期间采集正常入库 6557 部），此处沿用同一前提。
-    const repairPromise = this.repairMediaTypeMismatches().catch((err) => {
-      console.error('[Collector] 存量纠错失败（不影响本次采集）:', err instanceof Error ? err.message : String(err));
-      return 0;
-    });
-    const versionMergePromise = this.runVersionMergeOnce(true);
+    // 存量纠错与同名合并都在**整轮采集结束之后**串行执行一次，不再与采集并行。
+    // 二者都是整表级整理，与本次增量采集无数据依赖；以前把它们和采集 Promise.all 并行，
+    // 结果是采集期间一直有全表扫描在跑（电视端实测：合并每轮扫 157,646 行、耗时 106~146s、
+    // 合并 0 条，App CPU 123%~348%，遥控/返回键响应被拖到 1.5~3s）。
+    const runPostCollectionMaintenance = async (): Promise<void> => {
+      await this.repairMediaTypeMismatches().catch((err) => {
+        console.error('[Collector] 存量纠错失败（不影响本次采集）:', err instanceof Error ? err.message : String(err));
+        return 0;
+      });
+      await this.runVersionMergeOnce(true);
+    };
 
     const batchMeter = new PerfMeter();
     await Promise.all([
-      repairPromise,
-      versionMergePromise,
       ...sources.map(async (source, si) => {
         const sourceMeter = new PerfMeter();
         const now = new Date().toISOString();
@@ -1839,6 +1865,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
     })]);
 
     this.logPerf('BATCH', { mode: 'incremental' }, batchMeter);
+
+    // 采集全部结束后再做存量整理（串行、一次）：不占采集期的 CPU/写锁。
+    try {
+      await runPostCollectionMaintenance();
+    } catch (err) {
+      console.error('[Collector] 采集后存量整理失败（不影响本次采集结果）:', err instanceof Error ? err.message : String(err));
+    }
 
     console.log(`[Collector] collectLatest completed`);
     // 采集完成后统一触发一次"越看越懂你"重算：新元数据入库后，推荐库需刷新。

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Pressable, Switch, Animated, Easing } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore, getProvider } from '../useAppStore';
@@ -278,27 +278,34 @@ export default function HomeScreen() {
   }, []);
 
   // 添加视频源引导弹窗一次性防重入：loadVideoSources 一次加载会两次 set videoSources
-  //（第 1 次数据、第 2 次补 mediaCount），effect 会连弹两个相同 Alert（iOS 每个 Alert
-  // 独立 UIWindow，视觉上叠成一个，需点两次按钮才消失）。以「一轮空源状态只弹一次」
+  //（第 1 次数据、第 2 次补 mediaCount），effect 会连弹两个相同弹窗。以「一轮空源状态只弹一次」
   // 为界：有源时复位标记，冷启动内存标记自然复位（未配源时下次打开仍会弹）。
   const sourceGuideShownRef = useRef(false);
+  const [sourceGuideVisible, setSourceGuideVisible] = useState(false);
+
+  const closeSourceGuide = useCallback(() => {
+    setSourceGuideVisible(false);
+  }, []);
+
+  const handleSourceGuideAiImport = useCallback(() => {
+    setSourceGuideVisible(false);
+    navigation.navigate('AiSourceImport');
+  }, [navigation]);
+
+  const handleSourceGuideManualAdd = useCallback(() => {
+    setSourceGuideVisible(false);
+    navigation.navigate('SourceManager');
+  }, [navigation]);
 
   useEffect(() => {
     if (videoSources.length > 0) {
       sourceGuideShownRef.current = false;
+      setSourceGuideVisible(false);
       return;
     }
     if (sourcesChecked && !sourceGuideShownRef.current) {
       sourceGuideShownRef.current = true;
-      Alert.alert(
-        '添加视频源',
-        '还没有视频源，使用 AI 智能导入可以快速添加',
-        [
-          { text: 'AI 导入', onPress: () => navigation.navigate('AiSourceImport') },
-          { text: '手动添加', onPress: () => navigation.navigate('SourceManager') },
-        ],
-        { cancelable: false }
-      );
+      setSourceGuideVisible(true);
     }
   }, [sourcesChecked, videoSources]);
 
@@ -717,6 +724,50 @@ export default function HomeScreen() {
       backgroundColor: colors.mutedForeground,
       borderRadius: radius.progress,
     },
+    sourceGuideOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.8)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 30,
+    },
+    sourceGuideContainer: {
+      width: '100%',
+      backgroundColor: colors.background,
+      borderRadius: radius.xl,
+      padding: 24,
+    },
+    sourceGuideTitle: {
+      fontSize: s(20),
+      fontWeight: 'bold',
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    sourceGuideSubtitle: {
+      fontSize: s(13),
+      color: colors.mutedForeground,
+      textAlign: 'center',
+      marginBottom: 20,
+      lineHeight: 18,
+    },
+    sourceGuideBtnRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      marginTop: 6,
+    },
+    sourceGuideRightBtns: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    sourceGuideLaterText: {
+      fontSize: s(14),
+      color: colors.mutedForeground,
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+    },
   }), [colors, cardOpacity, cardBg, surfaceBg, s]);
 
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
@@ -773,6 +824,32 @@ export default function HomeScreen() {
         {renderFavoritesCard()}
       </ScrollView>
       {videoSources.length > 0 && <UsageGuideModal />}
+      <Modal
+        visible={sourceGuideVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSourceGuide}
+      >
+        <Pressable style={styles.sourceGuideOverlay} onPress={closeSourceGuide}>
+          <Pressable style={styles.sourceGuideContainer} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sourceGuideTitle}>添加视频源</Text>
+            <Text style={styles.sourceGuideSubtitle}>还没有视频源，使用 AI 智能导入可以快速添加</Text>
+            <View style={styles.sourceGuideBtnRow}>
+              <TouchableOpacity onPress={closeSourceGuide}>
+                <Text style={styles.sourceGuideLaterText}>下次再说</Text>
+              </TouchableOpacity>
+              <View style={styles.sourceGuideRightBtns}>
+                <Button variant="secondary" size="md" onPress={handleSourceGuideManualAdd}>
+                  手动添加
+                </Button>
+                <Button variant="primary" size="md" onPress={handleSourceGuideAiImport}>
+                  AI 导入
+                </Button>
+              </View>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
     </BlurredBackground>
   );

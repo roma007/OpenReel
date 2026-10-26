@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, Columns3 } from 'lucide-react';
+import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, Columns3, Settings2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 const pageSize = 30;
 
@@ -188,6 +189,9 @@ export default function CategoryPage({ type }: CategoryPageProps) {
   const [selectedColumns, setSelectedColumns] = useState<string[]>(loadColumns);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [showShortDramaFilter, setShowShortDramaFilter] = useState(false);
+  const [showDefaultFilterDialog, setShowDefaultFilterDialog] = useState(false);
+  const [defaultFilterDraft, setDefaultFilterDraft] = useState<CategoryDefaultFilter>({});
+  const defaultFilterAppliedRef = useRef(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [localMediaList, setLocalMediaList] = useState<Media[]>([]);
   const [localMediaMeta, setLocalMediaMeta] = useState<PaginatedResponse<Media>['meta'] | null>(null);
@@ -198,6 +202,40 @@ export default function CategoryPage({ type }: CategoryPageProps) {
   const columnsMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollKey = `scrollPos_${type}`;
+
+const DEFAULT_FILTER_KEY_PREFIX = 'category_default_filter_';
+
+interface CategoryDefaultFilter {
+  subType?: string;
+  year?: number;
+  area?: string;
+  episodeType?: 'short' | 'long';
+}
+
+function getDefaultFilter(type: string): CategoryDefaultFilter {
+  try {
+    const raw = localStorage.getItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveDefaultFilter(type: string, filter: CategoryDefaultFilter): void {
+  try {
+    localStorage.setItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`, JSON.stringify(filter));
+  } catch {}
+}
+
+function clearDefaultFilter(type: string): void {
+  try {
+    localStorage.removeItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`);
+  } catch {}
+}
+
 
   useEffect(() => {
     if (!showColumnsMenu) return;
@@ -236,6 +274,46 @@ export default function CategoryPage({ type }: CategoryPageProps) {
     setActiveEpisodeType(episodeType === 'short' || episodeType === 'long' ? episodeType : undefined);
     setSort(sortParam === 'latest' ? 'latest' : 'recommend');
   }, [searchParams]);
+
+  // 应用默认筛选：仅在直接进入（无 URL 筛选参数、无 page 参数）且未应用过时生效，不影响返回等操作
+  useEffect(() => {
+    if (defaultFilterAppliedRef.current) return;
+    const hasUrlFilter = searchParams.get('subType') || searchParams.get('year') || searchParams.get('area') || searchParams.get('episodeType') || searchParams.get('page');
+    if (hasUrlFilter) {
+      defaultFilterAppliedRef.current = true;
+      return;
+    }
+    const def = getDefaultFilter(type);
+    if (!def || (!def.subType && typeof def.year !== 'number' && !def.area && !def.episodeType)) {
+      defaultFilterAppliedRef.current = true;
+      return;
+    }
+    // 等待筛选列表加载完成再校验，避免列表未加载时误判导致部分默认筛选失效
+    const needSub = !!def.subType && subTypes.length === 0;
+    const needYear = typeof def.year === 'number' && years.length === 0;
+    const needArea = !!def.area && areas.length === 0;
+    if (needSub || needYear || needArea) {
+      return;
+    }
+    const updates: (prev: URLSearchParams) => URLSearchParams = (prev) => {
+      if (def.subType && subTypes.includes(def.subType)) {
+        prev.set('subType', def.subType);
+      }
+      if (typeof def.year === 'number' && years.includes(def.year)) {
+        prev.set('year', String(def.year));
+      }
+      if (def.area && areas.includes(def.area)) {
+        prev.set('area', def.area);
+      }
+      if (def.episodeType && (def.episodeType === 'short' || def.episodeType === 'long')) {
+        prev.set('episodeType', def.episodeType);
+      }
+      prev.delete('page');
+      return prev;
+    };
+    defaultFilterAppliedRef.current = true;
+    setSearchParams(updates);
+  }, [type, subTypes, years, areas, searchParams, setSearchParams]);
 
   const saveScrollPosition = () => {
     const main = document.getElementById('main-content');
@@ -457,6 +535,47 @@ export default function CategoryPage({ type }: CategoryPageProps) {
                 </Button>
               )}
 
+              {showShortDramaFilter && (
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">长短剧</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      variant={!activeEpisodeType ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setActiveEpisodeType(undefined);
+                        applyFilterChange(prev => { prev.delete('episodeType'); prev.delete('page'); return prev; });
+                      }}
+                      className="text-xs"
+                    >
+                      全部
+                    </Button>
+                    <Button
+                      variant={activeEpisodeType === 'short' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setActiveEpisodeType('short');
+                        applyFilterChange(prev => { prev.set('episodeType', 'short'); prev.delete('page'); return prev; });
+                      }}
+                      className="text-xs"
+                    >
+                      短剧
+                    </Button>
+                    <Button
+                      variant={activeEpisodeType === 'long' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setActiveEpisodeType('long');
+                        applyFilterChange(prev => { prev.set('episodeType', 'long'); prev.delete('page'); return prev; });
+                      }}
+                      className="text-xs"
+                    >
+                      长剧
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {subTypes.length > 0 && (
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">类型</span>
@@ -537,47 +656,6 @@ export default function CategoryPage({ type }: CategoryPageProps) {
                   </div>
                 </div>
               )}
-
-              {showShortDramaFilter && (
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">剧集</span>
-                  <div className="flex flex-wrap gap-1">
-                    <Button
-                      variant={!activeEpisodeType ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setActiveEpisodeType(undefined);
-                        applyFilterChange(prev => { prev.delete('episodeType'); prev.delete('page'); return prev; });
-                      }}
-                      className="text-xs"
-                    >
-                      全部
-                    </Button>
-                    <Button
-                      variant={activeEpisodeType === 'short' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setActiveEpisodeType('short');
-                        applyFilterChange(prev => { prev.set('episodeType', 'short'); prev.delete('page'); return prev; });
-                      }}
-                      className="text-xs"
-                    >
-                      短剧
-                    </Button>
-                    <Button
-                      variant={activeEpisodeType === 'long' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setActiveEpisodeType('long');
-                        applyFilterChange(prev => { prev.set('episodeType', 'long'); prev.delete('page'); return prev; });
-                      }}
-                      className="text-xs"
-                    >
-                      长剧
-                    </Button>
-                  </div>
-                </div>
-              )}
             </Card>
           )}
 
@@ -602,6 +680,18 @@ export default function CategoryPage({ type }: CategoryPageProps) {
               </Button>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => {
+                  setDefaultFilterDraft(getDefaultFilter(type));
+                  setShowDefaultFilterDialog(true);
+                }}
+              >
+                <Settings2 className="size-3.5 mr-1" />
+                设置默认筛选
+              </Button>
               {viewMode === 'list' && (
                 <div className="relative" ref={columnsMenuRef}>
                   <Button
@@ -765,6 +855,65 @@ export default function CategoryPage({ type }: CategoryPageProps) {
             </div>
           )}
         </>
+
+      <Dialog open={showDefaultFilterDialog} onOpenChange={setShowDefaultFilterDialog}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>设置默认筛选（{typeNames[type] || type}）</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {showShortDramaFilter && (
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">长短剧</span>
+                <div className="flex flex-wrap gap-1">
+                  <Button variant={!defaultFilterDraft.episodeType ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, episodeType: undefined }))}>全部</Button>
+                  <Button variant={defaultFilterDraft.episodeType === 'short' ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, episodeType: 'short' }))}>短剧</Button>
+                  <Button variant={defaultFilterDraft.episodeType === 'long' ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, episodeType: 'long' }))}>长剧</Button>
+                </div>
+              </div>
+            )}
+            {subTypes.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">类型</span>
+                <div className="flex flex-wrap gap-1">
+                  <Button variant={!defaultFilterDraft.subType ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, subType: undefined }))}>全部</Button>
+                  {subTypes.map((g: string) => (
+                    <Button key={g} variant={defaultFilterDraft.subType === g ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, subType: g }))}>{g}</Button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {years.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">年份</span>
+                <div className="flex flex-wrap gap-1">
+                  <Button variant={defaultFilterDraft.year === undefined ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, year: undefined }))}>全部</Button>
+                  {years.map((y: number) => (
+                    <Button key={y} variant={defaultFilterDraft.year === y ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, year: y }))}>{y}</Button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {areas.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">地区</span>
+                <div className="flex flex-wrap gap-1">
+                  <Button variant={!defaultFilterDraft.area ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, area: undefined }))}>全部</Button>
+                  {areas.map((a: string) => (
+                    <Button key={a} variant={defaultFilterDraft.area === a ? 'default' : 'outline'} size="sm" className="text-xs" onClick={() => setDefaultFilterDraft((prev: any) => ({ ...prev, area: a }))}>{a}</Button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { clearDefaultFilter(type); setDefaultFilterDraft({}); setShowDefaultFilterDialog(false); }}>清空默认筛选</Button>
+            <Button variant="outline" size="sm" onClick={() => setShowDefaultFilterDialog(false)}>取消</Button>
+            <Button size="sm" onClick={() => { saveDefaultFilter(type, defaultFilterDraft); setShowDefaultFilterDialog(false); }}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

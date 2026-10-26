@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Dimensions, Animated } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Dimensions, Animated, Modal, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { getProvider, getStore } from '../useAppStore';
 import { useThemeColors } from '../themes/useThemeColors';
@@ -13,6 +15,39 @@ import { getFilterCache, setFilterCache, getShortDramaCache, setShortDramaCache 
 import type { Media, PaginatedMeta } from '@openreel/core';
 
 const PAGE_SIZE = 20;
+
+const DEFAULT_FILTER_KEY_PREFIX = 'category_default_filter_';
+
+interface CategoryDefaultFilter {
+  subType?: string;
+  year?: number;
+  area?: string;
+  episodeType?: 'short' | 'long';
+}
+
+async function getDefaultFilter(type: string): Promise<CategoryDefaultFilter> {
+  try {
+    const raw = await AsyncStorage.getItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+async function saveDefaultFilter(type: string, filter: CategoryDefaultFilter): Promise<void> {
+  try {
+    await AsyncStorage.setItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`, JSON.stringify(filter));
+  } catch {}
+}
+
+async function clearDefaultFilter(type: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(`${DEFAULT_FILTER_KEY_PREFIX}${type}`);
+  } catch {}
+}
 
 function useDebounce(fn: () => void, delay: number, deps: any[]) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,7 +93,9 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
   const [selectedEpisodeType, setSelectedEpisodeType] = useState<'short' | 'long' | undefined>();
   const [sort, setSort] = useState<'latest' | 'recommend'>('recommend');
   const [showShortDramaFilter, setShowShortDramaFilter] = useState(false);
-
+  const [showDefaultFilterModal, setShowDefaultFilterModal] = useState(false);
+  const [defaultFilterDraft, setDefaultFilterDraft] = useState<CategoryDefaultFilter>({});
+  const defaultFilterAppliedRef = useRef(false);
   const [expandedFilter, setExpandedFilter] = useState<string | null>(null);
 
   const isLoadingRef = useRef(false);
@@ -168,6 +205,44 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
       setShowShortDramaFilter(false);
     }
   }, [type, provider]);
+
+  // 应用默认筛选：仅在直接进入（无路由传入的筛选参数）且未应用过时生效
+  useEffect(() => {
+    if (defaultFilterAppliedRef.current) return;
+    const hasRouteFilter = routeSubType || route.params?.year || route.params?.area || route.params?.episodeType;
+    if (hasRouteFilter) {
+      defaultFilterAppliedRef.current = true;
+      return;
+    }
+    getDefaultFilter(type).then((def) => {
+      if (defaultFilterAppliedRef.current) return;
+      if (!def || (!def.subType && typeof def.year !== 'number' && !def.area && !def.episodeType)) {
+        defaultFilterAppliedRef.current = true;
+        return;
+      }
+      const needSub = !!def.subType && subTypes.length === 0;
+      const needYear = typeof def.year === 'number' && years.length === 0;
+      const needArea = !!def.area && areas.length === 0;
+      if (needSub || needYear || needArea) {
+        return;
+      }
+      if (def.subType && subTypes.includes(def.subType) && !selectedSubType) {
+        setSelectedSubType(def.subType);
+      }
+      if (typeof def.year === 'number' && years.includes(def.year) && selectedYear === undefined) {
+        setSelectedYear(def.year);
+      }
+      if (def.area && areas.includes(def.area) && !selectedArea) {
+        setSelectedArea(def.area);
+      }
+      if (def.episodeType && (def.episodeType === 'short' || def.episodeType === 'long') && selectedEpisodeType === undefined) {
+        setSelectedEpisodeType(def.episodeType);
+      }
+      defaultFilterAppliedRef.current = true;
+    }).catch(() => {
+      defaultFilterAppliedRef.current = true;
+    });
+  }, [type, subTypes, years, areas]);
 
   useDebounce(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
@@ -298,6 +373,19 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
       paddingHorizontal: 15,
       marginTop: 0,
       paddingVertical: 6,
+      alignItems: 'center',
+    },
+    filterBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 6,
+      borderWidth: 1,
+    },
+    filterBtnText: {
+      fontWeight: '500',
     },
     row: {
       paddingHorizontal: 15,
@@ -321,6 +409,74 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
     emptyText: {
       color: colors.mutedForeground,
       fontSize: s(16),
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    modalContent: {
+      width: '100%',
+      maxWidth: 420,
+      maxHeight: '80%',
+      borderRadius: 10,
+      borderWidth: 1,
+      overflow: 'hidden',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    modalTitle: {
+      fontWeight: '600',
+    },
+    modalBody: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      maxHeight: 400,
+    },
+    filterSection: {
+      marginBottom: 14,
+    },
+    filterSectionTitle: {
+      marginBottom: 6,
+    },
+    filterChips: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    filterChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 6,
+    },
+    filterChipText: {
+      fontWeight: '500',
+    },
+    modalFooter: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    modalBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+    },
+    modalBtnText: {
+      fontWeight: '500',
     },
   }), [colors, s]);
 
@@ -348,6 +504,18 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
 
         {hasAnyFilter && (
           <View style={styles.filterBar}>
+            <TouchableOpacity
+              style={[styles.filterBtn, { borderColor: colors.border, backgroundColor: colors.card } as any]}
+              onPress={async () => {
+                const def = await getDefaultFilter(type);
+                setDefaultFilterDraft(def || {});
+                setShowDefaultFilterModal(true);
+                setExpandedFilter(null);
+              }}
+            >
+              <MaterialCommunityIcons name="cog-outline" size={16} color={colors.text} />
+              <Text style={[styles.filterBtnText, { color: colors.text }, { fontSize: s(12) }]}>设置默认筛选</Text>
+            </TouchableOpacity>
             <FilterDropdown
               label="排序"
               options={[
@@ -432,7 +600,95 @@ export default function CategoryScreen({ type }: CategoryScreenProps) {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
+<Modal visible={showDefaultFilterModal} transparent animationType="fade" onRequestClose={() => setShowDefaultFilterModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }] as any}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }, { fontSize: s(16) }]}>设置默认筛选（{typeNames[type] || type}）</Text>
+              <TouchableOpacity onPress={() => setShowDefaultFilterModal(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {showShortDramaFilter && (
+                <View style={styles.filterSection}>
+                  <Text style={[styles.filterSectionTitle, { color: colors.mutedForeground }, { fontSize: s(12) }]}>长短剧</Text>
+                  <View style={styles.filterChips}>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, episodeType: undefined }))} style={[styles.filterChip, !defaultFilterDraft.episodeType ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, !defaultFilterDraft.episodeType ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>全部</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, episodeType: 'short' }))} style={[styles.filterChip, defaultFilterDraft.episodeType === 'short' ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, defaultFilterDraft.episodeType === 'short' ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>短剧</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, episodeType: 'long' }))} style={[styles.filterChip, defaultFilterDraft.episodeType === 'long' ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, defaultFilterDraft.episodeType === 'long' ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>长剧</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+              {subTypes.length > 0 && (
+                <View style={styles.filterSection}>
+                  <Text style={[styles.filterSectionTitle, { color: colors.mutedForeground }, { fontSize: s(12) }]}>分类</Text>
+                  <View style={styles.filterChips}>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, subType: undefined }))} style={[styles.filterChip, !defaultFilterDraft.subType ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, !defaultFilterDraft.subType ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>全部</Text>
+                    </TouchableOpacity>
+                    {(selectedSubType && !subTypes.includes(selectedSubType) ? [selectedSubType, ...subTypes] : subTypes).map((g) => (
+                      <TouchableOpacity key={g} onPress={() => setDefaultFilterDraft(prev => ({ ...prev, subType: g }))} style={[styles.filterChip, defaultFilterDraft.subType === g ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                        <Text style={[styles.filterChipText, defaultFilterDraft.subType === g ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>{g}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+              {years.length > 0 && (
+                <View style={styles.filterSection}>
+                  <Text style={[styles.filterSectionTitle, { color: colors.mutedForeground }, { fontSize: s(12) }]}>年份</Text>
+                  <View style={styles.filterChips}>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, year: undefined }))} style={[styles.filterChip, defaultFilterDraft.year === undefined ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, defaultFilterDraft.year === undefined ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>全部</Text>
+                    </TouchableOpacity>
+                    {years.map((y) => (
+                      <TouchableOpacity key={y} onPress={() => setDefaultFilterDraft(prev => ({ ...prev, year: y }))} style={[styles.filterChip, defaultFilterDraft.year === y ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                        <Text style={[styles.filterChipText, defaultFilterDraft.year === y ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>{y}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+              {areas.length > 0 && (
+                <View style={styles.filterSection}>
+                  <Text style={[styles.filterSectionTitle, { color: colors.mutedForeground }, { fontSize: s(12) }]}>地区</Text>
+                  <View style={styles.filterChips}>
+                    <TouchableOpacity onPress={() => setDefaultFilterDraft(prev => ({ ...prev, area: undefined }))} style={[styles.filterChip, !defaultFilterDraft.area ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                      <Text style={[styles.filterChipText, !defaultFilterDraft.area ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>全部</Text>
+                    </TouchableOpacity>
+                    {areas.map((a) => (
+                      <TouchableOpacity key={a} onPress={() => setDefaultFilterDraft(prev => ({ ...prev, area: a }))} style={[styles.filterChip, defaultFilterDraft.area === a ? { backgroundColor: colors.mutedForeground } : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }] as any}>
+                        <Text style={[styles.filterChipText, defaultFilterDraft.area === a ? { color: '#fff' } : { color: colors.text }, { fontSize: s(12) }]}>{a}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]} onPress={async () => { await clearDefaultFilter(type); setDefaultFilterDraft({}); setShowDefaultFilterModal(false); }}>
+                <Text style={[styles.modalBtnText, { color: colors.text }, { fontSize: s(13) }]}>清空默认筛选</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setShowDefaultFilterModal(false)}>
+                <Text style={[styles.modalBtnText, { color: colors.text }, { fontSize: s(13) }]}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.mutedForeground }]} onPress={async () => { await saveDefaultFilter(type, defaultFilterDraft); setShowDefaultFilterModal(false); }}>
+                <Text style={[styles.modalBtnText, { color: '#fff' }, { fontSize: s(13) }]}>保存</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
     </BlurredBackground>
   );
 }
+
+      

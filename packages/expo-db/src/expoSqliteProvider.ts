@@ -708,6 +708,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   /** 事务互斥队列：expo 单连接下多个 withTransactionAsync 交错会导致
    *  「cannot start a transaction within a transaction」；FIFO 串行保证 BEGIN/COMMIT 成对。 */
   private txQueue: Promise<void> = Promise.resolve();
+  /** 当前事务嵌套深度（>0 表示事务内）：同连接上嵌套开事务会自锁，需直接放行。 */
+  private txDepth = 0;
 
   private wrapWithRetry(db: any): any {
     const isLockError = (error: any): boolean => {
@@ -769,7 +771,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     }
     mark('pragmas');
 
-    // 主键重建状态必须在 runMigrations() 之前采集：SCHEMA_SQL 自身即用 INTEGER 主键，
+
+// 主键重建状态必须在 runMigrations() 之前采集：SCHEMA_SQL 自身即用 INTEGER 主键，
     // 之后采集会把全新安装误判为「已重建」（详见 detectPkRebuildState 注释）。
     this.pkRebuildState = await this.detectPkRebuildState();
 
@@ -1881,17 +1884,27 @@ export class ExpoSqliteProvider implements DatabaseProvider {
        LEFT JOIN tv_media_initials_fts f ON f.rowid = m.id
        WHERE f.rowid IS NULL OR f.src_updated_at IS NULL OR f.src_updated_at != m.updated_at`
     );
-    for (const row of rows) {
-      try {
-        const initials = this.initialsComputer({
-          title: row.title,
-          alias: row.alias,
-          originalTitle: row.original_title,
-        });
-        if (initials) await this.writeInitialsRow(row.id, initials, row.updated_at);
-      } catch {
-        // 单行失败不中断回填
+    const bfs = Date.now();
+    const batchSize = 500;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      await this.withTransactionAsync(async () => {
+        for (const row of batch) {
+          try {
+            const initials = this.initialsComputer!({
+              title: row.title,
+              alias: row.alias,
+              originalTitle: row.original_title,
+            });
+            if (initials) await this.writeInitialsRow(row.id, initials, row.updated_at);
+          } catch {
+            // 单行失败不中断回填
+          }
+        }
+      });
+      if ((i + batchSize) % 20000 === 0 || i + batchSize >= rows.length) {
       }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     return rows.length;
   }
@@ -3268,20 +3281,25 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   async withTransactionAsync<T>(fn: () => Promise<T>): Promise<T> {
     const db = this.db!;
-    // 使用 expo-sqlite 模块级事务 API（native 维护事务状态），多源并行时经 FIFO 队列串行，
-    // 避免手写 execAsync('BEGIN') 造成 SQLiteModule 状态错乱。
+    if (this.txDepth > 0) return fn();
+
     const run = async (): Promise<T> => {
-      let result!: T;
-      await db.withExclusiveTransactionAsync(async () => {
-        result = await fn();
-      });
-      return result;
+      this.txDepth++;
+      try {
+        let result!: T;
+        await (db as any).withTransactionAsync(async () => {
+          result = await fn();
+        });
+        return result;
+      } finally {
+        this.txDepth--;
+      }
     };
+
     const prev = this.txQueue;
     let release!: () => void;
     this.txQueue = new Promise<void>((res) => { release = res; });
     try {
-      // prev.catch 兜底：前序事务 throw 也不会吞掉队列，后续事务照常执行
       return await prev.catch(() => {}).then(run);
     } finally {
       release();

@@ -31,18 +31,31 @@ export function TVExitConfirm() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       // 有历史栈（详情/分类/设置等）→ 放行默认返回，不提示
+      try {
+        if (navigation.canGoBack && navigation.canGoBack()) {
+          return false;
+        }
+      } catch {}
       const state = navigation.getState?.();
-      if (state && state.index > 0) return false;
+      if (state && typeof state.index === 'number' && state.index > 0) {
+        return false;
+      }
 
       if (armedRef.current) {
-        BackHandler.exitApp();
+        try {
+          BackHandler.exitApp();
+        } catch {}
         return true;
       }
       armedRef.current = true;
       setVisible(true);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
       timerRef.current = setTimeout(() => {
         armedRef.current = false;
         setVisible(false);
+        timerRef.current = null;
       }, EXIT_WINDOW_MS);
       return true;
     });

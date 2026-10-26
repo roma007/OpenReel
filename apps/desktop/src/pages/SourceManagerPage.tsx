@@ -64,6 +64,7 @@ export default function SourceManagerPage() {
 
   const [pendingCollect, setPendingCollect] = useState<Map<string, 'increment' | 'full'>>(new Map());
   const [pendingDelete, setPendingDelete] = useState<Set<string>>(new Set());
+  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [checkingSource, setCheckingSource] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   const [editingSource, setEditingSource] = useState<VideoSource | null>(null);
@@ -217,6 +218,7 @@ export default function SourceManagerPage() {
   };
 
   const handleDeleteSource = async (source: VideoSource) => {
+    if (deletingSourceId || pendingDelete.has(source.id)) return;
     const ok = await confirm({
       title: '删除视频源',
       description: `确定要删除「${source.name}」吗？此操作无法撤销。\n\n仅删除视频源配置，不会删除该源采集的视频数据。如需删除数据请使用「删视频」。`,
@@ -224,7 +226,14 @@ export default function SourceManagerPage() {
       variant: 'destructive',
     });
     if (!ok) return;
-    removeVideoSource(source.id);
+    setDeletingSourceId(source.id);
+    try {
+      await removeVideoSource(source.id);
+    } catch (err: any) {
+      toast(`删除失败: ${err.message || '未知错误'}`, 'error');
+    } finally {
+      setDeletingSourceId(null);
+    }
   };
 
   const handleDeletePlaySources = async (source: VideoSource) => {
@@ -555,7 +564,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => handleCheck(source)}
-                      disabled={checkingSource === source.code}
+                      disabled={checkingSource === source.code || deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
                       {checkingSource === source.code ? (
                         <><Loader2 className="size-3.5 mr-1 animate-spin" /> 检查中...</>
@@ -569,7 +578,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => handleCollect(source, 'increment')}
-                      disabled={collecting || isPending}
+                      disabled={collecting || isPending || deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
                       {(collecting || isPending) && collectingType === 'increment' ? (
                         <><Loader2 className="size-3.5 mr-1 animate-spin" /> 采集中 {progress}%</>
@@ -583,7 +592,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => handleCollect(source, 'full')}
-                      disabled={collecting || isPending}
+                      disabled={collecting || isPending || deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
                       {(collecting || isPending) && collectingType === 'full' ? (
                         <><Loader2 className="size-3.5 mr-1 animate-spin" /> 采集中 {progress}%</>
@@ -597,6 +606,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => handleStartEdit(source)}
+                      disabled={deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
                       <Pencil className="size-3.5 mr-1" /> 编辑
                     </Button>
@@ -606,6 +616,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => toggleSourceEnabled(source.id, !source.isEnabled)}
+                      disabled={deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
                       <Ban className="size-3.5 mr-1" /> {source.isEnabled ? '禁用' : '启用'}
                     </Button>
@@ -615,8 +626,13 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs text-red-600"
                       onClick={() => handleDeleteSource(source)}
+                      disabled={deletingSourceId === source.id || pendingDelete.has(source.id)}
                     >
-                      <Trash2 className="size-3.5 mr-1" /> 删源
+                      {deletingSourceId === source.id ? (
+                        <><Loader2 className="size-3.5 mr-1 animate-spin" /> 删除中...</>
+                      ) : (
+                        <><Trash2 className="size-3.5 mr-1" /> 删源</>
+                      )}
                     </Button>
 
                     <Button
@@ -624,7 +640,7 @@ export default function SourceManagerPage() {
                       size="sm"
                       className="h-7 px-2 text-xs"
                       onClick={() => handleDeletePlaySources(source)}
-                      disabled={pendingDelete.has(source.id)}
+                      disabled={pendingDelete.has(source.id) || deletingSourceId === source.id}
                     >
                       {pendingDelete.has(source.id) ? (
                         <><Loader2 className="size-3.5 mr-1 animate-spin" /> 删除中...</>

@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenReel TV",
     "slug": "openreel-tv",
-    "version": "1.0.210",
+    "version": "1.0.211",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
