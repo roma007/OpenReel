@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Image } from 'react-native';
-import { ArrowLeft, GitPullRequest, Scale, FolderTree, ShieldCheck, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, GitPullRequest, Scale, FolderTree, ShieldCheck, ChevronRight, FileText } from 'lucide-react-native';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
 import { useScaledFontSize } from '../themes/useScaledFontSize';
@@ -98,8 +98,8 @@ export default function AboutScreen({ navigation }: Props) {
             </View>
           </View>
           <Text style={styles.intro}>
-            OpenReel 是一个自托管的影视聚合播放客户端。你把自己喜欢的片源接进来，
-            它负责采集、刮削、归类、推荐，然后把片子收进一个属于你自己的片库。
+            OpenReel 是一款本地优先的影视聚合播放客户端。数据全存本机，片源自备，不内置、不分发任何资源。
+            你把自己喜欢的片源接进来，它负责采集、刮削、归类、推荐，然后把片子收进一个属于你自己的片库。
           </Text>
         </View>
 
@@ -144,6 +144,16 @@ export default function AboutScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={styles.licenseEntry}
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate('PrivacyPolicy')}
+        >
+          <FileText size={18} color={colors.textSecondary} />
+          <Text style={styles.licenseText}>隐私政策</Text>
+          <ChevronRight size={18} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.licenseEntry, { marginTop: -2 }]}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('License')}
         >

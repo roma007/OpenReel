@@ -7,6 +7,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { File, Paths } from 'expo-file-system';
 import { getKidLockService } from './src/stores/kidLockStore';
 import { SplashOverlay } from './src/components/SplashOverlay';
+import { PrivacyPolicyConsentModal } from './src/components/PrivacyPolicyConsentModal';
+import { hasAgreedPrivacy } from './src/utils/privacyConsent';
+import PrivacyPolicyScreen from './src/pages/PrivacyPolicyScreen';
 
 // 全局 JS 错误捕获：未捕获异常/未处理 rejection 写入本地 js_error.log（仅写日志，不改变行为）。
 // 用于「播放页返回闪退」一类 JS fatal 的诊断留存；本地开发/线上排障时可取出该文件定位。
@@ -118,6 +121,7 @@ function RootNavigator() {
         <Stack.Screen name="VideoManagement" component={VideoManagementScreen} />
         <Stack.Screen name="TestCollect" component={TestCollectScreen} />
         <Stack.Screen name="KidLock" component={KidLockScreen} />
+        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
       </Stack.Navigator>
       <Sidebar />
       <UpdateHint />
@@ -133,6 +137,8 @@ export default function App() {
   const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
   // 磁盘空间不足：渲染升级引导页（不执行迁移、不进入应用）
   const [diskBlocked, setDiskBlocked] = useState<MigrationDiskError | null>(null);
+  const [privacyAgreed, setPrivacyAgreed] = useState(true);
+  const navRef = useRef<any>(null);
   const initTheme = useThemeStore((s) => s.initTheme);
   const initColorMode = useThemeStore((s) => s.initColorMode);
   const setSystemColorScheme = useThemeStore((s) => s.setSystemColorScheme);
@@ -166,6 +172,9 @@ export default function App() {
       initImageScale(),
       initCardOpacity(),
       initFontSizeScale(),
+      hasAgreedPrivacy().then((agreed) => {
+        setPrivacyAgreed(agreed);
+      }),
     ])
       .then(() => setReady(true))
       .catch((err) => {
@@ -204,6 +213,7 @@ export default function App() {
     <SafeAreaProvider>
       {ready && (
         <NavigationContainer
+          ref={navRef}
           theme={navTheme}
           onStateChange={(s) => {
             const r = s?.routes?.[s?.index ?? 0];
@@ -217,6 +227,17 @@ export default function App() {
       <SplashOverlay ready={ready} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />
       {/* 安卓模拟器资源监控悬浮层（诊断用，右上角 x 可关） */}
       <ResourceOverlay routeRef={routeRef} />
+      {ready && !diskBlocked && !privacyAgreed && (
+        <PrivacyPolicyConsentModal
+          visible
+          onAgreed={() => setPrivacyAgreed(true)}
+          onViewPolicy={() => {
+            try {
+              navRef.current?.navigate('PrivacyPolicy');
+            } catch {}
+          }}
+        />
+      )}
     </SafeAreaProvider>
   );
 }

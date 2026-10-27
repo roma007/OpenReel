@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Modal, TextInput, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Modal, TextInput, Clipboard, Platform, KeyboardAvoidingView, InputAccessoryView } from 'react-native';
 import { useAppStore, getProvider } from '../useAppStore';
 import { SourceImportService, exportSourcesToJson, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
 import type { VideoSource, CollectTask, ImportSourceItem, ParsedImportSource } from '@openreel/core';
@@ -13,6 +13,8 @@ import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { ArrowLeft, Check, CheckCircle2, XCircle, AlertTriangle, Trash2, Pencil, Database, Ban } from 'lucide-react-native';
+
+const AI_PASTE_MODAL_ACCESSORY_ID = 'ai-paste-modal-accessory';
 
 interface Props {
   navigation: any;
@@ -99,6 +101,7 @@ export default function SourceManagerScreen({ navigation }: Props) {
     aiResultContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 8 },
     aiResultText: { fontSize: sf(18), color: colors.success, fontWeight: '600' },
     aiResultSubtext: { fontSize: sf(14), color: colors.mutedForeground },
+    aiAccessoryBar: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.background, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   }), [colors, cardBg, surfaceBg, surfaceElevatedBg, sf]);
 
   const getHealthLabel = (source: VideoSource): { label: string; color: string } => {
@@ -674,37 +677,79 @@ export default function SourceManagerScreen({ navigation }: Props) {
 
             {aiStep === 'paste' && (
               <>
-                <Text style={styles.modalTitle}>粘贴 AI 返回的数据</Text>
-                <Text style={styles.aiSubtitle}>
-                  将 AI 返回的 JSON 数据粘贴到下方输入框中，然后点击解析
-                </Text>
-                <TextInput
-                  style={styles.aiTextarea}
-                  multiline
-                  placeholder="在此粘贴 AI 返回的 JSON 数据..."
-                  placeholderTextColor={colors.disabledForeground}
-                  value={aiPastedText}
-                  onChangeText={setAiPastedText}
-                  textAlignVertical="top"
-                />
-                <View style={styles.aiSampleRow}>
-                  <Button variant="link" size="sm" onPress={() => setAiPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
-                    填入示例
-                  </Button>
-                </View>
-                <View style={styles.modalButtons}>
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    style={styles.modalButton}
-                    onPress={() => setAiStep('prompt')}
-                  >
-                    返回
-                  </Button>
-                  <Button variant="primary" size="md" style={styles.modalButton} onPress={handleAiParse}>
-                    解析并预览
-                  </Button>
-                </View>
+                {Platform.OS === 'ios' ? (
+                  <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={60}>
+                    <Text style={styles.modalTitle}>粘贴 AI 返回的数据</Text>
+                    <Text style={styles.aiSubtitle}>
+                      将 AI 返回的 JSON 数据粘贴到下方输入框中，然后点击解析
+                    </Text>
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                      <TextInput
+                        style={[styles.aiTextarea, { flex: 1, minHeight: 200 }]}
+                        multiline
+                        placeholder="在此粘贴 AI 返回的 JSON 数据..."
+                        placeholderTextColor={colors.disabledForeground}
+                        value={aiPastedText}
+                        onChangeText={setAiPastedText}
+                        textAlignVertical="top"
+                      />
+                      <View style={styles.aiSampleRow}>
+                        <Button variant="link" size="sm" onPress={() => setAiPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
+                          填入示例
+                        </Button>
+                      </View>
+                    </ScrollView>
+                    <View style={styles.modalButtons}>
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        style={styles.modalButton}
+                        onPress={() => setAiStep('prompt')}
+                      >
+                        返回
+                      </Button>
+                      <Button variant="primary" size="md" style={styles.modalButton} onPress={handleAiParse}>
+                        解析并预览
+                      </Button>
+                    </View>
+                  </KeyboardAvoidingView>
+                ) : (
+                  <KeyboardAvoidingView style={{ flex: 1 }} behavior="height" keyboardVerticalOffset={0}>
+                    <Text style={styles.modalTitle}>粘贴 AI 返回的数据</Text>
+                    <Text style={styles.aiSubtitle}>
+                      将 AI 返回的 JSON 数据粘贴到下方输入框中，然后点击解析
+                    </Text>
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                      <TextInput
+                        style={[styles.aiTextarea, { flex: 1, minHeight: 200 }]}
+                        multiline
+                        placeholder="在此粘贴 AI 返回的 JSON 数据..."
+                        placeholderTextColor={colors.disabledForeground}
+                        value={aiPastedText}
+                        onChangeText={setAiPastedText}
+                        textAlignVertical="top"
+                      />
+                      <View style={styles.aiSampleRow}>
+                        <Button variant="link" size="sm" onPress={() => setAiPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
+                          填入示例
+                        </Button>
+                      </View>
+                    </ScrollView>
+                    <View style={styles.modalButtons}>
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        style={styles.modalButton}
+                        onPress={() => setAiStep('prompt')}
+                      >
+                        返回
+                      </Button>
+                      <Button variant="primary" size="md" style={styles.modalButton} onPress={handleAiParse}>
+                        解析并预览
+                      </Button>
+                    </View>
+                  </KeyboardAvoidingView>
+                )}
               </>
             )}
 

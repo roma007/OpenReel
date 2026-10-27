@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Clipboard, Platform, KeyboardAvoidingView, InputAccessoryView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppStore } from '../useAppStore';
@@ -12,6 +12,8 @@ import { Button } from '../components/ui/Button';
 import { SourceImportService, AI_SOURCE_PROMPT, AI_SOURCE_IMPORT_SAMPLE } from '@openreel/core';
 import type { ParsedImportSource } from '@openreel/core';
 import { Search, CheckCircle2, XCircle, AlertTriangle, HelpCircle, ClipboardPaste, Save, PartyPopper, Frown } from 'lucide-react-native';
+
+const AI_PASTE_ACCESSORY_ID = 'ai-paste-accessory';
 
 type Step = 'prompt' | 'paste' | 'preview';
 
@@ -62,6 +64,7 @@ export default function AiSourceImportScreen() {
     resultTitle: { fontSize: s(18), fontWeight: '600' },
     resultSub: { fontSize: s(14) },
     footer: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+    accessoryBar: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.background, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   }), [colors, cardOpacity, s]);
 
   const handleCopyPrompt = () => {
@@ -200,40 +203,94 @@ export default function AiSourceImportScreen() {
 
       {step === 'paste' && (
         <>
-          <ScrollView style={styles.content} contentContainerStyle={styles.contentInner}>
-            <Text style={[styles.description, { color: colors.mutedForeground }]}>
-              将 AI 返回的 JSON 数据粘贴到下方文本框中，然后点击解析
-            </Text>
+          {Platform.OS === 'ios' ? (
+            <>
+              <ScrollView
+                style={styles.content}
+                contentContainerStyle={[styles.contentInner, { flexGrow: 1 }]}
+                keyboardDismissMode="interactive"
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={[styles.description, { color: colors.mutedForeground }]}>
+                  将 AI 返回的 JSON 数据粘贴到下方文本框中，然后点击解析
+                </Text>
 
-            <View style={styles.pasteActions}>
-              <Button variant="secondary" size="sm" onPress={handlePasteFromClipboard} leftIcon={<ClipboardPaste size={16} color={colors.buttonSecondaryText} />}>
-                从剪贴板粘贴
-              </Button>
-              <Button variant="secondary" size="sm" onPress={() => setPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
-                查看示例
-              </Button>
-            </View>
+                <View style={styles.pasteActions}>
+                  <Button variant="secondary" size="sm" onPress={handlePasteFromClipboard} leftIcon={<ClipboardPaste size={16} color={colors.buttonSecondaryText} />}>
+                    从剪贴板粘贴
+                  </Button>
+                  <Button variant="secondary" size="sm" onPress={() => setPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
+                    查看示例
+                  </Button>
+                </View>
 
-            <TextInput
-              style={[styles.textarea, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), color: colors.text }]}
-              placeholder="在此粘贴 AI 返回的 JSON 数据..."
-              placeholderTextColor={colors.mutedForeground}
-              value={pastedText}
-              onChangeText={setPastedText}
-              multiline
-              textAlignVertical="top"
-              numberOfLines={12}
-            />
-          </ScrollView>
+                <TextInput
+                  style={[styles.textarea, { flex: 1, minHeight: 200, backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), color: colors.text }]}
+                  placeholder="在此粘贴 AI 返回的 JSON 数据..."
+                  placeholderTextColor={colors.mutedForeground}
+                  value={pastedText}
+                  onChangeText={setPastedText}
+                  multiline
+                  textAlignVertical="top"
+                  inputAccessoryViewID={AI_PASTE_ACCESSORY_ID}
+                />
+              </ScrollView>
 
-          <View style={styles.footer}>
-            <Button variant="secondary" size="md" onPress={() => setStep('prompt')}>
-              ← 返回
-            </Button>
-<Button variant="primary" size="md" onPress={handleParse} rightIcon={<Search size={16} color={colors.buttonPrimaryText} />}>
-               解析并预览
-            </Button>
-          </View>
+              <InputAccessoryView nativeID={AI_PASTE_ACCESSORY_ID}>
+                <View style={styles.accessoryBar}>
+                  <Button variant="secondary" size="md" onPress={() => setStep('prompt')}>
+                    ← 返回
+                  </Button>
+                  <Button variant="primary" size="md" onPress={handleParse} rightIcon={<Search size={16} color={colors.buttonPrimaryText} />}>
+                    解析并预览
+                  </Button>
+                </View>
+              </InputAccessoryView>
+            </>
+          ) : (
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior="height" keyboardVerticalOffset={0}>
+              <ScrollView
+                style={styles.content}
+                contentContainerStyle={[styles.contentInner, { flexGrow: 1 }]}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={[styles.description, { color: colors.mutedForeground }]}>
+                  将 AI 返回的 JSON 数据粘贴到下方文本框中，然后点击解析
+                </Text>
+
+                <View style={styles.pasteActions}>
+                  <Button variant="secondary" size="sm" onPress={handlePasteFromClipboard} leftIcon={<ClipboardPaste size={16} color={colors.buttonSecondaryText} />}>
+                    从剪贴板粘贴
+                  </Button>
+                  <Button variant="secondary" size="sm" onPress={() => setPastedText(AI_SOURCE_IMPORT_SAMPLE)}>
+                    查看示例
+                  </Button>
+                </View>
+
+                <TextInput
+                  style={[styles.textarea, { flex: 1, minHeight: 200, backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), color: colors.text }]}
+                  placeholder="在此粘贴 AI 返回的 JSON 数据..."
+                  placeholderTextColor={colors.mutedForeground}
+                  value={pastedText}
+                  onChangeText={setPastedText}
+                  multiline
+                  textAlignVertical="top"
+                />
+              </ScrollView>
+
+              <View style={styles.footer}>
+                <Button variant="secondary" size="md" onPress={() => setStep('prompt')}>
+                  ← 返回
+                </Button>
+                <Button variant="primary" size="md" onPress={handleParse} rightIcon={<Search size={16} color={colors.buttonPrimaryText} />}>
+                  解析并预览
+                </Button>
+              </View>
+            </KeyboardAvoidingView>
+          )}
         </>
       )}
 

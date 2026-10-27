@@ -96,7 +96,7 @@ function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.211');
+  const [appVersion, setAppVersion] = useState('1.0.212');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);

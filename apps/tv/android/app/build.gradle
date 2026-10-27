@@ -92,8 +92,8 @@ android {
         applicationId 'com.openreel.tv'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 211
-        versionName "1.0.211"
+        versionCode 212
+        versionName "1.0.212"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
