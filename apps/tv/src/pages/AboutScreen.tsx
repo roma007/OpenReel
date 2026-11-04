@@ -123,6 +123,17 @@ export function AboutScreen() {
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: scale(22) }}>›</Text>
         </TVFocusable>
+        <TVFocusable
+          id="about-to-privacy"
+          onPress={() => nav.navigate('PrivacyPolicy')}
+          style={[styles.row, { backgroundColor: hexToRgba(colors.surface, cardOpacity / 100), borderColor: colors.border }]}
+          testID="tv-about-to-privacy"
+        >
+          <View style={styles.rowMain}>
+            <Text style={{ color: colors.foreground, fontSize: scale(18), fontWeight: '600' }}>查看隐私政策</Text>
+          </View>
+          <Text style={{ color: colors.mutedForeground, fontSize: scale(22) }}>›</Text>
+        </TVFocusable>
       </ScrollView>
     </View>
   );

@@ -14,6 +14,8 @@ import { TVFocusBridge } from './src/focus/TVFocusBridge';
 import CollectProgressDialog from './src/components/CollectProgressDialog';
 import { TVToast, showTVToast } from './src/components/TVToast';
 import { TVExitConfirm } from './src/components/TVExitConfirm';
+import { PrivacyPolicyConsentModal } from './src/components/PrivacyPolicyConsentModal';
+import { hasAgreedPrivacy } from './src/utils/privacyConsent';
 import BlurredBackground from './src/components/BlurredBackground';
 import { useBackgroundImageStore } from './src/stores/backgroundImageStore';
 import { restoreTvAppearanceSettings } from './src/stores/appearanceRestore';
@@ -37,6 +39,7 @@ import AppearanceSettingsScreen from './src/pages/AppearanceSettingsScreen';
 import UsagePreferencesScreen from './src/pages/UsagePreferencesScreen';
 import RecommendationSettingsScreen from './src/pages/RecommendationSettingsScreen';
 import AboutScreen from './src/pages/AboutScreen';
+import PrivacyPolicyScreen from './src/pages/PrivacyPolicyScreen';
 import UpdateScreen from './src/pages/UpdateScreen';
 import LicenseScreen from './src/pages/LicenseScreen';
 import HelpCenterScreen from './src/pages/HelpCenterScreen';
@@ -76,6 +79,7 @@ function RootNavigator() {
         <Stack.Screen name="UsagePreferences" component={UsagePreferencesScreen} />
         <Stack.Screen name="RecommendationSettings" component={RecommendationSettingsScreen} />
         <Stack.Screen name="About" component={AboutScreen} />
+<Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
         <Stack.Screen name="Update" component={UpdateScreen} />
         <Stack.Screen name="License" component={LicenseScreen} />
         <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
@@ -98,6 +102,8 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
   const [diskBlocked, setDiskBlocked] = useState<MigrationDiskError | null>(null);
+  const [privacyAgreed, setPrivacyAgreed] = useState(false);
+  const [viewingPrivacyPolicy, setViewingPrivacyPolicy] = useState(false);
   // const routeRef = useRef('Home');
 
   const initTheme = useThemeStore((s) => s.initTheme);
@@ -115,6 +121,7 @@ export default function App() {
       initFontSizeScale(),
       // TV 侧恢复外观数值项（卡片透明度/背景图缩放/背景图模糊/磨砂强度）——共享包的加载器与 TV 取值范围不一致，见该文件注释
       restoreTvAppearanceSettings(),
+      hasAgreedPrivacy().then((agreed) => { setPrivacyAgreed(agreed); }),
     ])
       .then(async () => {
         // TV 端分片预读并发降为 4（盒子网络/存储弱于手机），写入原生读取的文件桥
@@ -153,6 +160,10 @@ export default function App() {
           <NavigationContainer
             theme={navTheme}
             documentTitle={{ enabled: false }}
+            onStateChange={(s) => {
+              const r = s?.routes?.[s?.index ?? 0];
+              if (r?.name !== 'PrivacyPolicy') setViewingPrivacyPolicy(false);
+            }}
           >
             <RootNavigator />
           </NavigationContainer>
@@ -161,6 +172,13 @@ export default function App() {
             ready={ready}
             migrationProgress={migrationProgress}
             diskBlocked={diskBlocked}
+          />
+        )}
+        {ready && !diskBlocked && !privacyAgreed && !viewingPrivacyPolicy && (
+          <PrivacyPolicyConsentModal
+            visible
+            onAgreed={() => setPrivacyAgreed(true)}
+            onViewPolicy={() => setViewingPrivacyPolicy(true)}
           />
         )}
         {/* <ResourceOverlay routeRef={routeRef} /> */}

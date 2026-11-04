@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Pressable,
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore, getProvider } from '../useAppStore';
+import { usePrivacyConsentStore } from '../stores/privacyStore';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
 import { useScaledFontSize } from '../themes/useScaledFontSize';
@@ -282,6 +283,8 @@ export default function HomeScreen() {
   // 为界：有源时复位标记，冷启动内存标记自然复位（未配源时下次打开仍会弹）。
   const sourceGuideShownRef = useRef(false);
   const [sourceGuideVisible, setSourceGuideVisible] = useState(false);
+  // 隐私政策未同意前不弹首页引导：RN Modal 在原生层，会盖住隐私弹窗的正文与复选框
+  const privacyAgreed = usePrivacyConsentStore((st) => st.agreed);
 
   const closeSourceGuide = useCallback(() => {
     setSourceGuideVisible(false);
@@ -298,6 +301,8 @@ export default function HomeScreen() {
   }, [navigation]);
 
   useEffect(() => {
+    // 隐私政策同意前不弹引导弹窗，同意后（privacyAgreed 变 true）effect 重跑自动补齐
+    if (!privacyAgreed) return;
     if (videoSources.length > 0) {
       sourceGuideShownRef.current = false;
       setSourceGuideVisible(false);
@@ -307,7 +312,7 @@ export default function HomeScreen() {
       sourceGuideShownRef.current = true;
       setSourceGuideVisible(true);
     }
-  }, [sourcesChecked, videoSources]);
+  }, [sourcesChecked, videoSources, privacyAgreed]);
 
   useEffect(() => {
     loadUserUsageTypes();
@@ -823,9 +828,9 @@ export default function HomeScreen() {
         {renderHistoryCard()}
         {renderFavoritesCard()}
       </ScrollView>
-      {videoSources.length > 0 && <UsageGuideModal />}
+      {videoSources.length > 0 && privacyAgreed && <UsageGuideModal />}
       <Modal
-        visible={sourceGuideVisible}
+        visible={sourceGuideVisible && privacyAgreed}
         transparent
         animationType="fade"
         onRequestClose={closeSourceGuide}

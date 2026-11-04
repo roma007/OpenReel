@@ -29,6 +29,9 @@ Thumbs.db
 scripts/emulator-monitor/.venv/
 scripts/emulator-monitor/__pycache__/
 
+# 项目内 Python conda 环境（由 environment.yml 定义，可重建，不入库）
+.conda/
+
 # 工具文档（不入库）
 .trae/
 BUTTON_COLORS.md

@@ -37,6 +37,9 @@ import VideoManagementPage from './pages/VideoManagementPage';
 import TestCollectPage from './pages/TestCollectPage';
 import HelpCenterPage from './pages/HelpCenterPage';
 import AboutPage from './pages/AboutPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import { PrivacyPolicyConsentModal } from './components/PrivacyPolicyConsentModal';
+import { hasAgreedPrivacy } from './utils/privacyConsent';
 import LicensePage from './pages/LicensePage';
 import DbToolPage from './pages/DbToolPage';
 import UpdatePage from './pages/UpdatePage';
@@ -66,6 +69,15 @@ function MainApp({ isReload }: { isReload: boolean }) {
   // 迁移进度（百分比 + 阶段文案），渲染升级进度条
   const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
   // 磁盘空间不足：渲染升级引导页（不执行迁移、不进入应用）
+useEffect(() => {
+    const id = setInterval(() => {
+      if (window.location.pathname !== '/about/privacy') setViewingPrivacy(false);
+    }, 200);
+    return () => clearInterval(id);
+  }, []);
+  const [privacyAgreed, setPrivacyAgreed] = useState<boolean>(() => hasAgreedPrivacy());
+  const [viewingPrivacy, setViewingPrivacy] = useState(false);
+  const [viewingPrivacyPolicy, setViewingPrivacyPolicy] = useState(false);
   const [diskBlocked, setDiskBlocked] = useState<MigrationDiskError | null>(null);
 
   useEffect(() => {
@@ -136,6 +148,7 @@ function MainApp({ isReload }: { isReload: boolean }) {
                 <BrowserRouter>
                   <ContextMenu />
                   <UpdateHint />
+                  <PrivacyPolicyConsentModal visible={ready && !privacyAgreed && !viewingPrivacy} onAgreed={() => { localStorage.setItem('openreel_privacy_agreed_v1','true'); setPrivacyAgreed(true); }} onViewPolicy={() => setViewingPrivacy(true)} />
                   {/* 资源监控浮窗：需在 Router 内取 useLocation 按页面归因；ready 门控使其不覆盖启动/迁移占位层 */}
                   <ResourceOverlay />
                   <Routes>
@@ -165,8 +178,9 @@ function MainApp({ isReload }: { isReload: boolean }) {
                       <Route path="/db-tool" element={<DbToolPage />} />
                       <Route path="/test-collect" element={<TestCollectPage />} />
                       <Route path="/help" element={<HelpCenterPage />} />
-                      <Route path="/about" element={<AboutPage />} />
-                      <Route path="/about/license" element={<LicensePage />} />
+<Route path="/about" element={<AboutPage />} />
+<Route path="/about/license" element={<LicensePage />} />
+<Route path="/about/privacy" element={<PrivacyPolicyPage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>
                   </Routes>

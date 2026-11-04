@@ -117,6 +117,10 @@ export default function AboutPage() {
           <Scale className="size-4 mr-2" />
           查看版权声明
         </Button>
+        <Button variant="ghost" onClick={() => navigate('/about/privacy')}>
+          <Scale className="size-4 mr-2" />
+          查看隐私政策
+        </Button>
       </div>
     </div>
   );

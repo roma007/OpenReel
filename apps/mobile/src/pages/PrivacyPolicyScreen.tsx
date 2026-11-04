@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { useMemo, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, BackHandler, Platform, TouchableOpacity } from 'react-native';
 import { ArrowLeft, ShieldCheck } from 'lucide-react-native';
 import { useThemeColors } from '../themes/useThemeColors';
 import { useThemeStore } from '../themes/store';
@@ -8,6 +8,9 @@ import { hexToRgba } from '../themes/colorUtils';
 import { radius } from '../themes/radiusTokens';
 import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
+import { agreePrivacy } from '../utils/privacyConsent';
+import { exitAppOrExplain } from '../utils/privacyExit';
+import { usePrivacyConsentStore } from '../stores/privacyStore';
 
 interface Props {
   navigation: any;
@@ -18,6 +21,32 @@ export default function PrivacyPolicyScreen({ navigation }: Props) {
   const cardOpacity = useThemeStore((st) => st.cardOpacity);
   const cardBg = hexToRgba(colors.card, cardOpacity / 100);
   const s = useScaledFontSize();
+
+  // 从隐私政策页面返回时必须回到弹窗，禁止直接返回主界面
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (Platform.OS === 'android') {
+        navigation.goBack();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [navigation]);
+
+  const setPrivacyAgreed = usePrivacyConsentStore((st) => st.setAgreed);
+
+  const handleAgree = async () => {
+    await agreePrivacy();
+    // 同步全局同意状态：否则返回首页后隐私弹窗仍在、引导弹窗也被抑制
+    setPrivacyAgreed(true);
+    navigation.navigate('Home');
+  };
+
+  const handleExit = () => {
+    // 与同意弹窗保持一致：Android 直接退出，iOS 引导用户上滑关闭
+    exitAppOrExplain();
+  };
 
   const styles = useMemo(() => StyleSheet.create({
     container: { flex: 1 },
@@ -39,6 +68,8 @@ export default function PrivacyPolicyScreen({ navigation }: Props) {
     para: { fontSize: s(13), color: colors.textSecondary, lineHeight: 20, marginTop: 10 },
     listItem: { fontSize: s(13), color: colors.textSecondary, lineHeight: 20, marginTop: 6 },
     footer: { textAlign: 'center', color: colors.disabledForeground, fontSize: s(12), paddingVertical: 10 },
+    actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+    actionBtn: { flex: 1 },
   }), [colors, cardBg, s]);
 
   return (
@@ -126,6 +157,25 @@ export default function PrivacyPolicyScreen({ navigation }: Props) {
           </View>
 
           <Text style={styles.footer}>Copyright © 2026 roma</Text>
+
+          <View style={styles.actions}>
+            <Button
+              variant="secondary"
+              size="lg"
+              onPress={handleExit}
+              style={styles.actionBtn}
+            >
+              不同意并退出
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
+              onPress={handleAgree}
+              style={styles.actionBtn}
+            >
+              同意并继续
+            </Button>
+          </View>
         </View>
       </ScrollView>
     </BlurredBackground>

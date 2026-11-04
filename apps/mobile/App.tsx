@@ -8,7 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import { getKidLockService } from './src/stores/kidLockStore';
 import { SplashOverlay } from './src/components/SplashOverlay';
 import { PrivacyPolicyConsentModal } from './src/components/PrivacyPolicyConsentModal';
-import { hasAgreedPrivacy } from './src/utils/privacyConsent';
+import { usePrivacyConsentStore } from './src/stores/privacyStore';
 import PrivacyPolicyScreen from './src/pages/PrivacyPolicyScreen';
 
 // 全局 JS 错误捕获：未捕获异常/未处理 rejection 写入本地 js_error.log（仅写日志，不改变行为）。
@@ -137,7 +137,10 @@ export default function App() {
   const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null);
   // 磁盘空间不足：渲染升级引导页（不执行迁移、不进入应用）
   const [diskBlocked, setDiskBlocked] = useState<MigrationDiskError | null>(null);
-  const [privacyAgreed, setPrivacyAgreed] = useState(true);
+  const privacyAgreed = usePrivacyConsentStore((st) => st.agreed);
+  const setPrivacyAgreed = usePrivacyConsentStore((st) => st.setAgreed);
+  const refreshPrivacy = usePrivacyConsentStore((st) => st.refresh);
+  const [viewingPrivacyPolicy, setViewingPrivacyPolicy] = useState(false);
   const navRef = useRef<any>(null);
   const initTheme = useThemeStore((s) => s.initTheme);
   const initColorMode = useThemeStore((s) => s.initColorMode);
@@ -172,9 +175,7 @@ export default function App() {
       initImageScale(),
       initCardOpacity(),
       initFontSizeScale(),
-      hasAgreedPrivacy().then((agreed) => {
-        setPrivacyAgreed(agreed);
-      }),
+      refreshPrivacy(),
     ])
       .then(() => setReady(true))
       .catch((err) => {
@@ -218,6 +219,7 @@ export default function App() {
           onStateChange={(s) => {
             const r = s?.routes?.[s?.index ?? 0];
             if (r?.name) routeRef.current = r.name;
+            if (r?.name !== 'PrivacyPolicy') setViewingPrivacyPolicy(false);
           }}
         >
           <RootNavigator />
@@ -227,11 +229,12 @@ export default function App() {
       <SplashOverlay ready={ready} migrationProgress={migrationProgress} diskBlocked={diskBlocked} />
       {/* 安卓模拟器资源监控悬浮层（诊断用，右上角 x 可关） */}
       <ResourceOverlay routeRef={routeRef} />
-      {ready && !diskBlocked && !privacyAgreed && (
+      {ready && !diskBlocked && !privacyAgreed && !viewingPrivacyPolicy && (
         <PrivacyPolicyConsentModal
           visible
           onAgreed={() => setPrivacyAgreed(true)}
           onViewPolicy={() => {
+            setViewingPrivacyPolicy(true);
             try {
               navRef.current?.navigate('PrivacyPolicy');
             } catch {}

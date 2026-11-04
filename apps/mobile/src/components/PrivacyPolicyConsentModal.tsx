@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, BackHandler, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, BackHandler } from 'react-native';
 import { useThemeColors } from '../themes/useThemeColors';
 import { radius } from '../themes/radiusTokens';
 import { agreePrivacy } from '../utils/privacyConsent';
+import { exitAppOrExplain } from '../utils/privacyExit';
 
 interface Props {
   visible: boolean;
@@ -12,6 +13,7 @@ interface Props {
 
 export function PrivacyPolicyConsentModal({ visible, onAgreed, onViewPolicy }: Props) {
   const colors = useThemeColors();
+  const [checked, setChecked] = useState(false);
   const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
@@ -33,10 +35,8 @@ export function PrivacyPolicyConsentModal({ visible, onAgreed, onViewPolicy }: P
   };
 
   const handleExit = () => {
-    if (Platform.OS === 'android') {
-      BackHandler.exitApp();
-    }
-    // iOS 无法直接退出应用，按平台常规做法仅拦截返回键
+    // Android 直接退出；iOS 弹系统提示引导用户上滑关闭（系统不允许应用自行退出）
+    exitAppOrExplain();
   };
 
   return (
@@ -52,22 +52,26 @@ export function PrivacyPolicyConsentModal({ visible, onAgreed, onViewPolicy }: P
         <TouchableOpacity activeOpacity={0.7} onPress={onViewPolicy} style={styles.linkWrap}>
           <Text style={[styles.link, { color: colors.buttonPrimaryBg }]}>查看完整隐私政策</Text>
         </TouchableOpacity>
-        <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-          我已阅读并理解《OpenReel 隐私政策》
-        </Text>
+        <TouchableOpacity activeOpacity={0.7} onPress={() => setChecked((c) => !c)} style={styles.checkRow}>
+          <View style={[styles.checkbox, checked && { backgroundColor: colors.buttonPrimaryBg }]}>
+            {checked ? <Text style={{ color: '#fff', fontSize: 12 }}>✓</Text> : null}
+          </View>
+          <Text style={[styles.checkText, { color: colors.mutedForeground }]}>我已阅读并理解《OpenReel 隐私政策》</Text>
+        </TouchableOpacity>
         <View style={styles.actions}>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={handleExit}
-            style={[styles.btn, { borderColor: colors.border }]}
+            disabled={!checked}
+            style={[styles.btn, { borderColor: colors.border, opacity: checked ? 1 : 0.5 }]}
           >
             <Text style={[styles.btnText, { color: colors.textSecondary }]}>不同意并退出</Text>
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={handleAgree}
-            disabled={exiting}
-            style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.buttonPrimaryBg }]}
+            disabled={!checked || exiting}
+            style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.buttonPrimaryBg, opacity: checked ? 1 : 0.5 }]}
           >
             <Text style={[styles.btnText, { color: '#fff' }]}>同意并继续</Text>
           </TouchableOpacity>
@@ -114,6 +118,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 14,
   },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#888',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkText: { fontSize: 12, flex: 1 },
   actions: {
     flexDirection: 'row',
     gap: 10,
