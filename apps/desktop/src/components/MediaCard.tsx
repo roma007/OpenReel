@@ -5,7 +5,7 @@ import { openMediaPlay } from '../utils/openMediaPlay';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PosterImage } from '@/components/PosterImage';
-import { X, Star } from 'lucide-react';
+import { X, Star, Loader2 } from 'lucide-react';
 
 export function MediaCard({ 
   media, 
@@ -46,6 +46,12 @@ export function MediaCard({
             alt={media.title}
             className="size-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
+          {/* 索引采集模式：首次点击要联网拉播放地址（1~4s），无反馈会像「点不动」 */}
+          {resolving && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <Loader2 className="size-5 animate-spin text-white" />
+            </div>
+          )}
           {media.rating != null && media.rating > 0 && (
             <Badge
               variant="secondary"
@@ -86,6 +92,12 @@ export function MediaCard({
           alt={media.title}
           className="size-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
+        {/* 索引采集模式：首次点击要联网拉播放地址（1~4s），无反馈会像「点不动」 */}
+        {resolving && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <Loader2 className="size-6 animate-spin text-white" />
+          </div>
+        )}
         {media.rating != null && media.rating > 0 && (
           <Badge
             variant="secondary"

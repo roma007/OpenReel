@@ -1,5 +1,6 @@
 import type { DatabaseProvider } from '../db/provider';
 import type { Media, WatchHistory } from '../types';
+import { MediaDetailService } from './mediaDetailService';
 
 export interface DefaultPlayTarget {
   episodeId: number;
@@ -27,7 +28,22 @@ export async function resolveDefaultPlayTarget(
   provider: DatabaseProvider,
   media: Media,
 ): Promise<DefaultPlayTarget | null> {
-  const episodes = await provider.getEpisodesByMediaId(media.id);
+  let episodes = await provider.getEpisodesByMediaId(media.id);
+
+  // 索引采集模式下 episode/play_source 只是「最近打开过的 300 条」缓存，未缓存的片子
+  // 这里必须先按需联网拉取，否则点击卡片会解析不到任何剧集 → 静默无反应（实测回归）。
+  // 命中缓存时无网络请求；拉到后按「实际命中的源」限定剧集，避免多源同名集数叠加。
+  if (!episodes || episodes.length === 0) {
+    try {
+      const detail = await new MediaDetailService(provider).ensureDetail(media.id);
+      if (detail.ok) {
+        episodes = await provider.getEpisodesByMediaId(media.id, undefined, detail.sourceId ?? undefined);
+      }
+    } catch (err) {
+      console.warn(`[PlayTarget] 按需详情拉取失败 media=${media.id}:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (!episodes || episodes.length === 0) return null;
 
   const sorted = [...episodes].sort(

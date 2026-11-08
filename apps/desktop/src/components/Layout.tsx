@@ -6,6 +6,7 @@ import { BackgroundLayer } from './BackgroundLayer';
 import { KidLockBanner } from './KidLockBanner';
 import { PlayerHost } from './player/PlayerHost';
 import { useImportDialogStore } from '../themes/importDialogStore';
+import { setPlayToastHandler } from '../utils/openMediaPlay';
 import {
   Home,
   Settings,
@@ -66,6 +67,12 @@ function ToastProvider({ children }: { children: ReactNode }) {
     setToast({ message, type });
   }, []);
 
+  // openMediaPlay 在 React 树外「解析不到播放地址」时也要能提示，这里注册全局回调
+  useEffect(() => {
+    setPlayToastHandler(showToast);
+    return () => setPlayToastHandler(null);
+  }, [showToast]);
+
   return (
     <ToastContext.Provider value={showToast}>
       {children}
@@ -96,7 +103,7 @@ function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.215');
+  const [appVersion, setAppVersion] = useState('1.0.216');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
