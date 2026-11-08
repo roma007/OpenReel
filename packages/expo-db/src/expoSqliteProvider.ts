@@ -612,6 +612,186 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 64,
+    description: 'index_first_library_slim_and_on_demand_detail',
+    // 索引优先改造（与桌面端 migrateSlimLibrary 等价）：
+    //  1. 新建 media_source（媒体↔源↔vod_id）与 media_detail（按需详情缓存登记）；
+    //  2. 用 episode.source_id + media.vod_id 回填 media_source（保住已有片库的按需播放能力）；
+    //  3. 直接 DROP 掉 episode / play_source（旧播放地址全部转按需，DROP 是 O(1)，不产生巨量 WAL）；
+    //  4. 重建 media 瘦身表（去掉 description/backdrop_url/personal_score/vod_id），保留原 id；
+    //  5. 重建 media_fts（只索引片名三列）+ 触发器，并 rebuild。
+    // 说明：迁移逐条执行且失败不阻断；PRAGMA foreign_keys 只能在事务外生效（此处正是逐条）。
+    sql: `
+      CREATE TABLE IF NOT EXISTS media_source (
+        media_id INTEGER NOT NULL,
+        source_id TEXT NOT NULL,
+        vod_id TEXT NOT NULL,
+        updated_at TEXT,
+        PRIMARY KEY (media_id, source_id),
+        FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS media_detail (
+        media_id INTEGER NOT NULL,
+        source_id TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        description TEXT,
+        PRIMARY KEY (media_id, source_id),
+        FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_media_source_source_vod ON media_source(source_id, vod_id);
+      CREATE INDEX IF NOT EXISTS idx_media_detail_fetched_at ON media_detail(fetched_at);
+      INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+        SELECT m.id, e.source_id, m.vod_id, m.source_updated_at
+          FROM media m
+          JOIN (SELECT media_id, MIN(source_id) AS source_id FROM episode
+                 WHERE source_id IS NOT NULL GROUP BY media_id) e ON e.media_id = m.id
+         WHERE m.vod_id IS NOT NULL AND m.vod_id <> '';
+      PRAGMA foreign_keys = OFF;
+      DROP TABLE IF EXISTS play_source;
+      DROP TABLE IF EXISTS episode;
+      CREATE TABLE IF NOT EXISTS episode (
+        id INTEGER PRIMARY KEY,
+        media_id INTEGER NOT NULL,
+        season_number INTEGER DEFAULT 1,
+        episode_number INTEGER NOT NULL,
+        title TEXT,
+        duration INTEGER,
+        source_id TEXT,
+        FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS play_source (
+        id INTEGER PRIMARY KEY,
+        episode_id INTEGER NOT NULL,
+        source_id TEXT NOT NULL,
+        source_name TEXT,
+        url TEXT NOT NULL,
+        quality TEXT,
+        language TEXT,
+        is_active INTEGER DEFAULT 1,
+        fail_count INTEGER DEFAULT 0,
+        last_fail_at TEXT,
+        FOREIGN KEY (episode_id) REFERENCES episode(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_episode_media_season_source ON episode(media_id, season_number, source_id);
+      CREATE INDEX IF NOT EXISTS idx_play_source_episode_id ON play_source(episode_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_episode_media_season_ep_source
+        ON episode(media_id, season_number, episode_number, source_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_play_source_episode_id_url
+        ON play_source(episode_id, url);
+      DROP TRIGGER IF EXISTS media_ai;
+      DROP TRIGGER IF EXISTS media_ad;
+      DROP TRIGGER IF EXISTS media_au;
+      DROP TABLE IF EXISTS media_fts;
+      DROP INDEX IF EXISTS idx_media_personal_score;
+      DROP INDEX IF EXISTS idx_media_type_personal_score_visible;
+      DROP INDEX IF EXISTS idx_media_personal_score_visible;
+      DROP INDEX IF EXISTS idx_media_vod_id;
+      CREATE TABLE media_slim (
+        id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        original_title TEXT,
+        alias TEXT,
+        type TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        area TEXT,
+        genre TEXT,
+        director TEXT,
+        cast TEXT,
+        poster_url TEXT,
+        status TEXT,
+        remarks TEXT,
+        fingerprint TEXT UNIQUE,
+        current_episodes INTEGER,
+        total_episodes INTEGER,
+        is_short_drama INTEGER DEFAULT 0,
+        duration_check_status TEXT,
+        episode_duration INTEGER,
+        view_count INTEGER DEFAULT 0,
+        rating REAL,
+        rating_count INTEGER,
+        rating_source TEXT,
+        rating_updated_at TEXT,
+        hidden INTEGER DEFAULT 0,
+        kid_safe INTEGER,
+        series_group TEXT,
+        series_season INTEGER,
+        source_updated_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      INSERT INTO media_slim (
+        id, title, original_title, alias, type, year, area, genre, director, "cast",
+        poster_url, status, remarks, fingerprint, current_episodes, total_episodes,
+        is_short_drama, duration_check_status, episode_duration, view_count, rating,
+        rating_count, rating_source, rating_updated_at, hidden, kid_safe, series_group,
+        series_season, source_updated_at, created_at, updated_at
+      ) SELECT
+        id, title, original_title, alias, type, year, area, genre, director, "cast",
+        poster_url, status, remarks, fingerprint, current_episodes, total_episodes,
+        is_short_drama, duration_check_status, episode_duration, view_count, rating,
+        rating_count, rating_source, rating_updated_at, hidden, kid_safe, series_group,
+        series_season, source_updated_at, created_at, updated_at
+      FROM media;
+      DROP TABLE media;
+      ALTER TABLE media_slim RENAME TO media;
+      CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+        title, alias, original_title,
+        content='media',
+        content_rowid='rowid',
+        tokenize='trigram'
+      );
+      CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
+        INSERT INTO media_fts(rowid, title, alias, original_title)
+        VALUES (new.rowid, new.title, new.alias, new.original_title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
+        INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+        VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
+        old.title IS NOT new.title OR old.alias IS NOT new.alias OR
+        old.original_title IS NOT new.original_title
+      BEGIN
+        INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+        VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+        INSERT INTO media_fts(rowid, title, alias, original_title)
+        VALUES (new.rowid, new.title, new.alias, new.original_title);
+      END;
+      INSERT INTO media_fts(media_fts) VALUES('rebuild');
+      PRAGMA foreign_keys = ON;
+    `,
+  },
+  {
+    version: 65,
+    description: 'recreate_media_indexes_after_slim_rebuild',
+    // v64 重建 media 表时旧索引随 DROP TABLE 一并消失，但迁移是逐条执行、失败不阻断，
+    // 这里幂等补齐全部 media 索引（含 recommendationService 的 INDEXED BY 依赖）。
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
+      CREATE INDEX IF NOT EXISTS idx_media_type_updated_at ON media(type, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_media_hidden ON media(hidden);
+      CREATE INDEX IF NOT EXISTS idx_media_kid_safe ON media(kid_safe);
+      CREATE INDEX IF NOT EXISTS idx_media_type_updated_at_visible ON media(type, updated_at)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_type_year ON media(type, year);
+      CREATE INDEX IF NOT EXISTS idx_media_type_area ON media(type, area);
+      CREATE INDEX IF NOT EXISTS idx_media_type_genre ON media(type, genre);
+      CREATE INDEX IF NOT EXISTS idx_media_type_year_visible ON media(type, year)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_type_area_visible ON media(type, area)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_type_genre_visible ON media(type, genre)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_is_short_drama_visible ON media(type, is_short_drama)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_fingerprint ON media(fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_media_updated_at_visible ON media(updated_at)
+        WHERE (hidden IS NULL OR hidden = 0);
+      CREATE INDEX IF NOT EXISTS idx_media_source_source_vod ON media_source(source_id, vod_id);
+      CREATE INDEX IF NOT EXISTS idx_media_detail_fetched_at ON media_detail(fetched_at);
+    `,
+  },
 ];
 
 /**
@@ -875,6 +1055,26 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       const tPrune = Date.now();
       await this.handlePruneOversizedFailedItems();
       timing.post_prune = Date.now() - tPrune;
+
+      // 按需详情缓存 LRU：只保留最近 300 条媒体的剧集/播放地址（有播放进度的永不淘汰）
+      const tDetail = Date.now();
+      await this.pruneMediaDetailCache(300).catch(() => 0);
+      timing.post_detail_prune = Date.now() - tDetail;
+
+      // 升级后空间回收：索引优先迁移 DROP 了 episode/play_source（约 2GB 页转 freelist），
+      // 库文件不会自动缩小。freelist 过大时后台 VACUUM 一次；失败（磁盘不足/占用）不影响使用。
+      const tVacuum = Date.now();
+      try {
+        const fl = await this.db!.getFirstAsync<{ c: number }>('PRAGMA freelist_count');
+        if ((fl?.c ?? 0) > 20000) {
+          console.log(`[DB] freelist ${fl?.c} 页，后台执行 VACUUM 回收空间…`);
+          await this.db!.execAsync('VACUUM');
+          console.log('[DB] VACUUM 完成');
+        }
+      } catch (e) {
+        console.warn('[DB] VACUUM 跳过:', e instanceof Error ? e.message : String(e));
+      }
+      timing.post_vacuum = Date.now() - tVacuum;
 
       // WAL 收束已移至 init() 前台、open_read_db 之前执行：在后台与 UI 同连接并发时，
       // wal_checkpoint 一旦与同连接在飞语句相撞即抛 SQLITE_LOCKED（详见 init() 内注释）。
@@ -1444,7 +1644,12 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async getMediaById(id: number): Promise<Media | null> {
-    const row = await this.db!.getFirstAsync<any>('SELECT * FROM media WHERE id = ?', [id]);
+    // description 已移到按需详情缓存 media_detail：命中缓存时随详情一并返回，未命中为 NULL
+    const row = await this.db!.getFirstAsync<any>(
+      `SELECT m.*, (SELECT d.description FROM media_detail d WHERE d.media_id = m.id AND d.description IS NOT NULL LIMIT 1) AS description
+         FROM media m WHERE m.id = ?`,
+      [id]
+    );
     if (!row) return null;
     // 儿童模式下隐藏非适龄内容，保证收藏/历史等经单条直查的入口同样生效
     if (this.kidModeActive && row.kid_safe !== 1) return null;
@@ -1633,13 +1838,13 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync(
       `INSERT INTO media (
         title, original_title, alias, type, year, area, genre, director, "cast",
-        description, poster_url, backdrop_url, status, remarks, fingerprint,
+        poster_url, status, remarks, fingerprint,
         current_episodes, total_episodes, is_short_drama, duration_check_status, episode_duration,
         view_count, rating, rating_count, rating_source, rating_updated_at,
         hidden, kid_safe, series_group, series_season,
-        source_updated_at, vod_id,
+        source_updated_at,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint) DO UPDATE SET
         title = excluded.title,
         original_title = excluded.original_title,
@@ -1648,9 +1853,7 @@ export class ExpoSqliteProvider implements DatabaseProvider {
         genre = excluded.genre,
         director = excluded.director,
         cast = excluded.cast,
-        description = excluded.description,
         poster_url = excluded.poster_url,
-        backdrop_url = excluded.backdrop_url,
         status = excluded.status,
         remarks = excluded.remarks,
         current_episodes = excluded.current_episodes,
@@ -1661,13 +1864,12 @@ export class ExpoSqliteProvider implements DatabaseProvider {
         series_group = excluded.series_group,
         series_season = excluded.series_season,
         source_updated_at = excluded.source_updated_at,
-        vod_id = excluded.vod_id,
         updated_at = excluded.updated_at`,
       [
         media.title, media.originalTitle || null, media.alias || null,
         media.type, media.year, media.area || null,
         JSON.stringify(media.genres), JSON.stringify(media.directors), JSON.stringify(media.actors),
-        media.description || null, media.posterUrl || null, media.backdropUrl || null,
+        media.posterUrl || null,
         media.status || null, media.remarks || null, media.fingerprint,
         media.currentEpisodes || null, media.totalEpisodes || null,
         media.isShortDrama ? 1 : 0, media.durationCheckStatus || null, media.episodeDuration || null,
@@ -1677,7 +1879,6 @@ export class ExpoSqliteProvider implements DatabaseProvider {
         media.kidSafe === undefined ? null : (media.kidSafe ? 1 : 0),
         media.seriesGroup || null, media.seriesSeason ?? null,
         media.sourceUpdatedAt || null,
-        media.vodId || null,
         media.createdAt || now, now,
       ]
     );
@@ -1719,25 +1920,108 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     );
   }
 
-  async updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, vodId: string | null): Promise<void> {
-    await this.db!.runAsync(`UPDATE media SET source_updated_at = ?, vod_id = ? WHERE id = ?`, [sourceUpdatedAt, vodId, mediaId]);
+  async updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, _vodId: string | null): Promise<void> {
+    // vod_id 已迁至 media_source（索引层），media 表不再保存
+    await this.db!.runAsync(`UPDATE media SET source_updated_at = ? WHERE id = ?`, [sourceUpdatedAt, mediaId]);
   }
 
-  async getMediaByVodId(vodId: string): Promise<Media | null> {
+  async getMediaByVodId(sourceId: string, vodId: string): Promise<Media | null> {
     // 采集跳过判定读（事务外）：走独立读连接，不被写事务阻塞
-    const rows = await (this.readDb ?? this.db!).getAllAsync<any[]>('SELECT * FROM media WHERE vod_id = ? LIMIT 1', [vodId]);
+    const rows = await (this.readDb ?? this.db!).getAllAsync<any[]>(
+      `SELECT m.* FROM media m JOIN media_source ms ON ms.media_id = m.id
+        WHERE ms.source_id = ? AND ms.vod_id = ? LIMIT 1`,
+      [sourceId, vodId]
+    );
     return rows[0] ? rowToMedia(rows[0]) : null;
   }
 
-  async getMediaByVodIdSet(vodIds: string[]): Promise<Media[]> {
+  async getMediaByVodIdSet(sourceId: string, vodIds: string[]): Promise<Media[]> {
     const ids = vodIds.filter((v) => v != null && v !== '');
     if (ids.length === 0) return [];
     // C2 页级批量去重读（事务外）：走独立读连接
     const rows = await (this.readDb ?? this.db!).getAllAsync<any[]>(
-      `SELECT * FROM media WHERE vod_id IN (${ids.map(() => '?').join(',')})`,
-      ids
+      `SELECT m.* FROM media m JOIN media_source ms ON ms.media_id = m.id
+        WHERE ms.source_id = ? AND ms.vod_id IN (${ids.map(() => '?').join(',')})`,
+      [sourceId, ...ids]
     );
     return rows.map(rowToMedia);
+  }
+
+  // —— 索引层 media_source / 按需详情缓存 media_detail ——
+
+  async upsertMediaSource(mediaId: number, sourceId: string, vodId: string, updatedAt: string | null): Promise<void> {
+    await this.db!.runAsync(
+      `INSERT INTO media_source (media_id, source_id, vod_id, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(media_id, source_id) DO UPDATE SET vod_id = excluded.vod_id, updated_at = excluded.updated_at`,
+      [mediaId, sourceId, vodId, updatedAt]
+    );
+  }
+
+  async getMediaSourcesByMediaId(mediaId: number): Promise<Array<{ sourceId: string; vodId: string; updatedAt: string | null }>> {
+    const rows = await (this.readDb ?? this.db!).getAllAsync<{ sourceId: string; vodId: string; updatedAt: string | null }>(
+      `SELECT source_id AS sourceId, vod_id AS vodId, updated_at AS updatedAt
+         FROM media_source WHERE media_id = ? ORDER BY updated_at DESC`,
+      [mediaId]
+    );
+    return rows;
+  }
+
+  async deleteMediaSource(mediaId: number, sourceId: string): Promise<void> {
+    await this.db!.runAsync('DELETE FROM media_source WHERE media_id = ? AND source_id = ?', [mediaId, sourceId]);
+  }
+
+  async upsertMediaDetail(mediaId: number, sourceId: string, fetchedAt: string, description: string | null): Promise<void> {
+    await this.db!.runAsync(
+      `INSERT INTO media_detail (media_id, source_id, fetched_at, description) VALUES (?, ?, ?, ?)
+       ON CONFLICT(media_id, source_id) DO UPDATE SET fetched_at = excluded.fetched_at, description = excluded.description`,
+      [mediaId, sourceId, fetchedAt, description]
+    );
+  }
+
+  async getMediaDetailMeta(mediaId: number, sourceId: string): Promise<{ fetchedAt: string; description: string | null } | null> {
+    const row = await (this.readDb ?? this.db!).getFirstAsync<any>(
+      'SELECT fetched_at AS fetchedAt, description FROM media_detail WHERE media_id = ? AND source_id = ?',
+      [mediaId, sourceId]
+    );
+    return row ? { fetchedAt: row.fetchedAt, description: row.description ?? null } : null;
+  }
+
+  /**
+   * 按需详情 LRU 淘汰：只保留最近抓取的 `keepMediaCount` 条媒体详情。
+   * 正在观看/有进度记录的媒体（watch_history / watch_line_progress）永不淘汰，
+   * 避免剧集 id 变化导致续播位置丢失。
+   */
+  async pruneMediaDetailCache(keepMediaCount: number): Promise<number> {
+    const keep = Math.max(1, Math.floor(keepMediaCount));
+    const result = await this.db!.runAsync(
+      `DELETE FROM media_detail WHERE media_id IN (
+         SELECT media_id FROM media_detail
+          WHERE media_id NOT IN (SELECT media_id FROM watch_history)
+            AND media_id NOT IN (SELECT media_id FROM watch_line_progress)
+          ORDER BY fetched_at DESC
+          LIMIT -1 OFFSET ?
+       )`,
+      [keep]
+    );
+    const removed = result?.changes ?? 0;
+    if (removed > 0) {
+      // 清理失去详情登记的媒体的剧集/播放地址缓存（FK 级联不跨这两张缓存表）
+      await this.db!.runAsync(
+        `DELETE FROM play_source WHERE episode_id IN (
+           SELECT id FROM episode WHERE media_id NOT IN (SELECT media_id FROM media_detail)
+         )`
+      );
+      await this.db!.runAsync(
+        `DELETE FROM episode WHERE media_id NOT IN (SELECT media_id FROM media_detail)`
+      );
+    }
+    return removed;
+  }
+
+  async clearMediaDetailCache(): Promise<void> {
+    await this.db!.runAsync('DELETE FROM play_source');
+    await this.db!.runAsync('DELETE FROM episode');
+    await this.db!.runAsync('DELETE FROM media_detail');
   }
 
   async updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void> {
@@ -2067,12 +2351,43 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       queryParams.push(`%${params.genre}%`);
     }
 
+
     if (useFts) {
       const countResult = await this.db!.getFirstAsync<{ count: number }>(
         `SELECT COUNT(*) as count FROM media_fts f JOIN media m ON m.rowid = f.rowid${whereClause}`,
         queryParams
       );
-      const total = countResult?.count || 0;
+      let total = countResult?.count || 0;
+
+      // 演员/导演已移出 FTS 索引（体积：69MB → 14MB/23.8 万行）：片名无命中时用 LIKE 兜底，
+      // 保证「按演员名搜索」仍然可用（仅无结果时触发一次，正常搜索零额外成本）。
+      if (total === 0) {
+        const fbParts: string[] = ['(m.hidden IS NULL OR m.hidden = 0)', '(m.director LIKE ? OR m.cast LIKE ?)'];
+        const like = `%${trimmed}%`;
+        const fbParams: any[] = [like, like];
+        if (this.kidModeActive) fbParts.push('m.kid_safe = 1');
+        if (params.type) { fbParts.push('m.type = ?'); fbParams.push(params.type); }
+        if (params.year) { fbParts.push('m.year = ?'); fbParams.push(params.year); }
+        if (params.area) { fbParts.push('m.area = ?'); fbParams.push(params.area); }
+        if (params.genre) { fbParts.push('m.genre LIKE ?'); fbParams.push(`%${params.genre}%`); }
+        const fbWhere = ' WHERE ' + fbParts.join(' AND ');
+        const fbCount = await this.db!.getFirstAsync<{ count: number }>(
+          `SELECT COUNT(*) as count FROM media m${fbWhere}`,
+          fbParams
+        );
+        const fbTotal = fbCount?.count || 0;
+        if (fbTotal > 0) {
+          const fbRows = await this.db!.getAllAsync<any>(
+            `SELECT m.* FROM media m${fbWhere} ORDER BY m.updated_at DESC LIMIT ? OFFSET ?`,
+            [...fbParams, pageSize, offset]
+          );
+          return {
+            items: fbRows.map(rowToMedia),
+            meta: { page, pageSize, total: fbTotal, totalPages: Math.ceil(fbTotal / pageSize) },
+          };
+        }
+      }
+
       const totalPages = Math.ceil(total / pageSize);
 
       const rows = await this.db!.getAllAsync<any>(
@@ -2335,18 +2650,19 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async deletePlaySourcesBySourceId(sourceId: string): Promise<void> {
+    await this.db!.runAsync('DELETE FROM media_source WHERE source_id = ?', [sourceId]);
     await this.db!.runAsync('DELETE FROM play_source WHERE source_id = ?', [sourceId]);
     await this.db!.runAsync(`DELETE FROM episode WHERE NOT EXISTS (SELECT 1 FROM play_source WHERE play_source.episode_id = episode.id)`);
-    await this.db!.runAsync(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM episode WHERE episode.media_id = media.id)`);
+    await this.db!.runAsync(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM media_source WHERE media_source.media_id = media.id)`);
     await this.db!.runAsync(`DELETE FROM favorite WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = favorite.media_id)`);
     await this.db!.runAsync(`DELETE FROM watch_history WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = watch_history.media_id)`);
   }
 
   async getMediaCountBySourceIdMap(): Promise<Map<string, number>> {
+    // 采集只写 media_source（索引层），源媒体数从这里统计；episode 已降级为按需缓存
     const rows = await this.db!.getAllAsync<{ sourceId: string; count: number }>(
       `SELECT source_id as sourceId, COUNT(DISTINCT media_id) as count
-       FROM episode
-       WHERE source_id IS NOT NULL
+       FROM media_source
        GROUP BY source_id`
     );
     const map = new Map<string, number>();
@@ -2372,11 +2688,11 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     const beforeCount = beforeRows[0]?.count || 0;
 
     const mediaWithoutPlaySource = await this.db!.getAllAsync<{ id: string }>(
-      `SELECT m.id FROM media m 
+      // 索引优先：判据从「没有播放地址」改为「没有 media_source（连按需拉取都做不到）」，
+      // 否则全库都会被当成无播源清空
+      `SELECT m.id FROM media m
        WHERE NOT EXISTS (
-         SELECT 1 FROM episode e 
-         JOIN play_source ps ON e.id = ps.episode_id 
-         WHERE e.media_id = m.id
+         SELECT 1 FROM media_source ms WHERE ms.media_id = m.id
        )`
     );
     
@@ -3020,7 +3336,6 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync('DELETE FROM impression');
     await this.db!.runAsync('DELETE FROM user_interest_tag');
     await this.db!.runAsync('DELETE FROM recommend_candidates');
-    await this.db!.runAsync('UPDATE media SET personal_score = 0');
   }
 
   async getDislikedMediaDetail(): Promise<{ mediaId: number; title: string; createdAt: string }[]> {

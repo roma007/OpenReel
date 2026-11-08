@@ -1,5 +1,5 @@
 import { TauriSqlProvider, type MigrationProgress } from './db/tauriSqlProvider';
-import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState, type HttpClient } from '@openreel/core';
+import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState, type HttpClient, type CollectTask } from '@openreel/core';
 
 let _provider: TauriSqlProvider | null = null;
 let _store: AppStore | null = null;
@@ -228,18 +228,27 @@ export async function initApp(
       await precreatePipWindow();
       report('Step 4a2: 画中画窗口预创建完成');
 
-      report('Step 4b: 清理僵尸采集任务...');
-      const staleCount = await _store.getState().resetStaleTasks();
-      if (staleCount > 0) {
-        await logToDb(`Reset ${staleCount} stale collect tasks on startup`);
+      report('Step 4b: 恢复被中断的采集任务...');
+      let interruptedTasks: CollectTask[] = [];
+      try {
+        interruptedTasks = await _store.getState().recoverInterruptedTasks();
+        if (interruptedTasks.length > 0) {
+          await logToDb(`Found ${interruptedTasks.length} interrupted collect tasks, will auto-resume`);
+        }
+      } catch (err) {
+        console.error('[INIT] 恢复中断任务失败:', err);
       }
-      report(`Step 4b: 清理完成（${staleCount} 个僵尸任务）`);
+      report(`Step 4b: 恢复完成（${interruptedTasks.length} 个待续采任务）`);
 
       report('Step 4c: 检查启动时自动采集...');
       try {
-        // 延迟触发启动采集，等待网络与界面稳定
+        // 延迟触发启动采集，等待网络与界面稳定；有需续采任务时让位给续采
         setTimeout(async () => {
           try {
+            if (interruptedTasks.length > 0) {
+              console.log('[AutoCollect] 有中断任务待续采，跳过启动自动采集');
+              return;
+            }
             const cfgService = new (await import('@openreel/core')).SystemConfigService(_provider!);
             const config = await cfgService.getCollectConfig();
             if (!config.autoOnStartup) {
@@ -263,6 +272,20 @@ export async function initApp(
         const errMsg = `启动时自动采集检查失败: ${err instanceof Error ? err.message : String(err)}`;
         console.error(errMsg);
         await logToDb(errMsg, 'error');
+      }
+
+      // 自动续采：延迟到界面稳定后顺序续采（采集可跨多次启动拼完）
+      if (interruptedTasks.length > 0) {
+        const toResume = interruptedTasks;
+        setTimeout(() => {
+          _store!
+            .getState()
+            .autoResumeCollectTasks(toResume)
+            .then(({ resumed, failed }) => {
+              console.log(`[AutoCollect] 自动续采结束：成功 ${resumed} 个，失败 ${failed} 个`);
+            })
+            .catch((err) => console.error('[AutoCollect] 自动续采失败:', err));
+        }, 8000);
       }
 
       report('Step 4d: 重建「越看越懂你」推荐分（异步）...');

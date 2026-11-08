@@ -86,12 +86,24 @@ export interface DatabaseProvider {
     totalEpisodes: number | null,
     updatedAt: string
   ): Promise<void>;
-  /** 更新该片的源侧更新时间（vod_time ISO）与源侧 vod_id，供采集「未变更跳过」对照；仅当值非空时调用。 */
+  /** 更新该片的源侧更新时间（vod_time ISO）；vod_id 已迁至 media_source，参数仅为兼容保留。 */
   updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, vodId: string | null): Promise<void>;
-  /** 按源侧 vod_id 精确查片（采集跳过判定用，避开 list 精简响应无指纹输入的问题）。 */
-  getMediaByVodId(vodId: string): Promise<Media | null>;
-  /** 批量按源侧 vod_id 精确查片（C2 页级去重前置：整页一次 IN 查询，替代逐条 getMediaByVodId）。 */
-  getMediaByVodIdSet(vodIds: string[]): Promise<Media[]>;
+  /** 按「源 + 源侧 vod_id」精确查片（采集跳过判定用）。 */
+  getMediaByVodId(sourceId: string, vodId: string): Promise<Media | null>;
+  /** 批量按「源 + 源侧 vod_id」精确查片（C2 页级去重前置：整页一次 IN 查询）。 */
+  getMediaByVodIdSet(sourceId: string, vodIds: string[]): Promise<Media[]>;
+
+  // —— 索引层：媒体 ↔ 视频源（vod_id 用于按需详情拉取）——
+  upsertMediaSource(mediaId: number, sourceId: string, vodId: string, updatedAt: string | null): Promise<void>;
+  getMediaSourcesByMediaId(mediaId: number): Promise<Array<{ sourceId: string; vodId: string; updatedAt: string | null }>>;
+  deleteMediaSource(mediaId: number, sourceId: string): Promise<void>;
+
+  // —— 按需详情缓存登记（episode/play_source/media_detail 只保留最近 N 条）——
+  upsertMediaDetail(mediaId: number, sourceId: string, fetchedAt: string, description: string | null): Promise<void>;
+  getMediaDetailMeta(mediaId: number, sourceId: string): Promise<{ fetchedAt: string; description: string | null } | null>;
+  /** LRU 淘汰：只保留最近抓取的 keepMediaCount 条媒体详情（有播放进度的媒体永不淘汰） */
+  pruneMediaDetailCache(keepMediaCount: number): Promise<number>;
+  clearMediaDetailCache(): Promise<void>;
   updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void>;
   updateMediaRating(
     mediaId: number,

@@ -54,9 +54,7 @@ export const SCHEMA_SQL = `
     genre TEXT,
     director TEXT,
     cast TEXT,
-    description TEXT,
     poster_url TEXT,
-    backdrop_url TEXT,
     status TEXT,
     remarks TEXT,
     fingerprint TEXT UNIQUE,
@@ -72,15 +70,33 @@ export const SCHEMA_SQL = `
     rating_updated_at TEXT,
     hidden INTEGER DEFAULT 0,
     kid_safe INTEGER,
-    -- 历史遗留：v2 全表物化推荐分。自「候选召回归一」起不再由推荐重算维护/读取，
-    -- 推荐排序改走 recommend_candidates；本列与相关索引仅保留避免重建表。
-    personal_score INTEGER DEFAULT 0,
     series_group TEXT,
     series_season INTEGER,
     source_updated_at TEXT,
-    vod_id TEXT,
     created_at TEXT,
     updated_at TEXT
+  );
+
+  -- 索引层：媒体在哪些源可以找到（vod_id 供按需详情拉取）。
+  -- 采集只写 media + media_source，不再落 episode/play_source 明细。
+  CREATE TABLE IF NOT EXISTS media_source (
+    media_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    vod_id TEXT NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (media_id, source_id),
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+  );
+
+  -- 按需详情缓存登记（LRU 用）：只保留最近打开过的 N 条媒体详情。
+  -- description 等详情文本仅存在于本题缓存，避免全库常驻。
+  CREATE TABLE IF NOT EXISTS media_detail (
+    media_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    description TEXT,
+    PRIMARY KEY (media_id, source_id),
+    FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS impression (
@@ -171,8 +187,10 @@ export const SCHEMA_SQL = `
 
   -- trigram 分词器（SQLite 3.34+）：支持中文子串匹配（≥3 字符），
   -- 供 searchMedia 走索引代替 LIKE 全表扫；<3 字符关键词仍由 LIKE 兜底。
+  -- 实测（238k 行真实库）：只索引片名三列时 14MB，含 director/cast 时 69MB，
+  -- 故演员/导演不再进 FTS，搜索时以 LIKE 兜底。
   CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
-    title, alias, original_title, director, cast,
+    title, alias, original_title,
     content='media',
     content_rowid='rowid',
     tokenize='trigram'
@@ -181,26 +199,25 @@ export const SCHEMA_SQL = `
   -- FTS5 外部内容表同步触发器：media 行变化时同步 media_fts 索引行。
   -- 缺失这些触发器会导致 searchMedia 的 MATCH 查询永远返回空。
   CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
-    INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
-    VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+    INSERT INTO media_fts(rowid, title, alias, original_title)
+    VALUES (new.rowid, new.title, new.alias, new.original_title);
   END;
 
   CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
-    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
-    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
   END;
 
-  -- 仅当 FTS 索引列（title/alias/original_title/director/cast）真正变化时才同步全文索引，
+  -- 仅当 FTS 索引列（title/alias/original_title）真正变化时才同步全文索引，
   -- 避免 hidden 等非索引列更新（如按子类型隐藏）触发全表 FTS 重建导致卡顿。
   CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
     old.title IS NOT new.title OR old.alias IS NOT new.alias OR
-    old.original_title IS NOT new.original_title OR
-    old.director IS NOT new.director OR old.cast IS NOT new.cast
+    old.original_title IS NOT new.original_title
   BEGIN
-    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
-    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
-    INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
-    VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+    INSERT INTO media_fts(rowid, title, alias, original_title)
+    VALUES (new.rowid, new.title, new.alias, new.original_title);
   END;
 
   CREATE TABLE IF NOT EXISTS system_config (
@@ -283,7 +300,6 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_media_type_updated_at ON media(type, updated_at);
   CREATE INDEX IF NOT EXISTS idx_media_hidden ON media(hidden);
   CREATE INDEX IF NOT EXISTS idx_media_kid_safe ON media(kid_safe);
-  CREATE INDEX IF NOT EXISTS idx_media_personal_score ON media(personal_score, updated_at);
 
   -- 分类页无筛选 COUNT / latest SELECT 的部分索引：
   -- 条件 (hidden IS NULL OR hidden=0) 与业务过滤完全一致，使 COUNT 变成索引内计数，
@@ -310,21 +326,16 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_media_is_short_drama_visible ON media(type, is_short_drama)
     WHERE (hidden IS NULL OR hidden = 0);
 
-  -- 分类页「推荐」排序：沿 type 前缀按推荐分递减扫描 + LIMIT 早停（同 latest 的早停机制）。
-  -- 原实现对全库 ORDER BY personal_score 走临时 B-tree 排序（实测 TV 首屏 5.13s），
-  -- 此索引使首屏 0.007s / 深页 0.001s；year 筛选走 idx_media_type_year_visible。
-  CREATE INDEX IF NOT EXISTS idx_media_type_personal_score_visible
-    ON media(type, personal_score DESC, updated_at DESC)
-    WHERE (hidden IS NULL OR hidden = 0);
+  -- 分类页「推荐」排序：canvas 候选表为准（recommend_candidates），
+  -- media 上不再保留 personal_score 物化列与配套索引。
 
-  -- 无 type 筛选时推荐排序的兜底（全库推荐榜语义下仅首屏使用，实测 INDEXED BY 0.006s）
-  CREATE INDEX IF NOT EXISTS idx_media_personal_score_visible
-    ON media(personal_score DESC, updated_at DESC)
-    WHERE (hidden IS NULL OR hidden = 0);
-
-  -- 采集跳过判定的点查（getMediaByFingerprint/getMediaByVodId），全表扫一次 10-30s
+  -- 采集跳过判定的点查（getMediaByFingerprint），全表扫一次 10-30s
   CREATE INDEX IF NOT EXISTS idx_media_fingerprint ON media(fingerprint);
-  CREATE INDEX IF NOT EXISTS idx_media_vod_id ON media(vod_id);
+
+  -- 索引层点查：按源 + vod_id 反查 media（采集去重、按需详情定位）
+  CREATE INDEX IF NOT EXISTS idx_media_source_source_vod ON media_source(source_id, vod_id);
+  -- 按需详情 LRU 淘汰（按抓取时间取最旧）
+  CREATE INDEX IF NOT EXISTS idx_media_detail_fetched_at ON media_detail(fetched_at);
 
   -- 推荐候选召回（v5）的「最新（explore）池」与画像命中/关键词倒排均带
   -- ORDER BY updated_at DESC LIMIT N；无该索引时对 22 万行全表临时排序实测 8.5s，

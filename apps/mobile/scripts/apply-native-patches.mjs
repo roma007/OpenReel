@@ -1216,6 +1216,30 @@ function patchIOSReactAirplayPodspec() {
   console.log('[patch] iOS react-airplay podspec 已补 AVFoundation');
 }
 
+// ---------- iOS: hermes-engine podspec 中文路径编码补丁 ----------
+// 根因：本项目路径含中文（「我的文档/源码/openreel」），Pod::Executable.execute_command 返回的
+// 字符串是 ASCII-8BIT，与 UTF-8 字面量（podspec 自身的源码编码）拼接时抛
+// `incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8`，pod install 直接失败。
+// 修复：两处 `Pod::Executable.execute_command(...)].strip` 前加 .force_encoding('UTF-8')。
+// 幂等：改后不再存在 `__dir__]).strip` 子串，重复执行会走「已存在，跳过」。
+// 注：路径全为 ASCII 时该补丁无害（ASCII-8BIT 内容本就按 UTF-8 解释）。
+function patchIOSHermesPodspecEncoding() {
+  const rn = resolvePkg('react-native');
+  if (!rn) return;
+  const podspec = join(rn, 'sdks', 'hermes-engine', 'hermes-engine.podspec');
+  if (!existsSync(podspec)) return;
+  const raw = readFileSync(podspec, 'utf8');
+  const target = "__dir__]).strip";
+  if (!raw.includes(target)) {
+    console.log('[patch] iOS hermes-engine podspec 编码补丁已存在，跳过');
+    return;
+  }
+  const patched = raw.split(target).join("__dir__]).force_encoding('UTF-8').strip");
+  writeFileSync(podspec, patched);
+  const count = raw.split(target).length - 1;
+  console.log(`[patch] iOS hermes-engine podspec 已补 UTF-8 编码转换（${count} 处）`);
+}
+
 withPatchLock(() => {
   try {
     patchAndroid();
@@ -1228,6 +1252,7 @@ withPatchLock(() => {
     patchIOStopServer();
     patchIOSTrueCpu();
     patchIOSReactAirplayPodspec();
+    patchIOSHermesPodspecEncoding();
   } catch (e) {
     console.log('[patch] 原生补丁脚本异常（已忽略，不阻断安装）: ' + (e && e.message));
   }

@@ -107,6 +107,19 @@ export function DetailScreen() {
       }
       setMedia(m);
 
+      // 索引采集模式：剧集/播放地址未常驻库中，进入详情页时按需拉取（命中缓存则无网络请求）
+      try {
+        const detail = await getStore().getState().ensureMediaDetail(mediaId);
+        if (detail.ok) {
+          const withDetail = await provider.getMediaById(mediaId);
+          if (withDetail) setMedia(withDetail);
+        } else if (detail.error) {
+          setError(detail.error);
+        }
+      } catch (err) {
+        console.warn('[TV] 按需详情拉取失败:', err);
+      }
+
       // 季数据（对齐桌面 PlayPage loadSeasons + loadSeriesMedia：store 共享 state）
       const st = getStore().getState();
       st.loadSeasons(mediaId);

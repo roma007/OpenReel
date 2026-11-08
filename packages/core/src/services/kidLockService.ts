@@ -113,8 +113,12 @@ export class KidLockService {
         }
       >(
         needsFullRemark
-          ? 'SELECT rowid, id, title, type, genre, description FROM media WHERE rowid > ? ORDER BY rowid LIMIT ?'
-          : 'SELECT rowid, id, title, type, genre, description FROM media WHERE kid_safe IS NULL AND rowid > ? ORDER BY rowid LIMIT ?',
+          ? `SELECT m.rowid, m.id, m.title, m.type, m.genre,
+                    (SELECT d.description FROM media_detail d WHERE d.media_id = m.id AND d.description IS NOT NULL LIMIT 1) AS description
+               FROM media m WHERE m.rowid > ? ORDER BY m.rowid LIMIT ?`
+          : `SELECT m.rowid, m.id, m.title, m.type, m.genre,
+                    (SELECT d.description FROM media_detail d WHERE d.media_id = m.id AND d.description IS NOT NULL LIMIT 1) AS description
+               FROM media m WHERE m.kid_safe IS NULL AND m.rowid > ? ORDER BY m.rowid LIMIT ?`,
         [lastRowId, BATCH]
       );
       if (rows.length === 0) break;

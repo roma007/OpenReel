@@ -34,6 +34,13 @@ export {
 // 服务
 export { CMSAdapter } from './services/cmsAdapter';
 export { CollectorService } from './services/collectorService';
+export { MediaDetailService, type EnsureDetailResult } from './services/mediaDetailService';
+export {
+  setCollectKeepAwakeHandler,
+  beginCollectKeepAwake,
+  endCollectKeepAwake,
+  isCollectKeepAwakeActive,
+} from './services/keepAwake';
 export { SystemConfigService, type CollectConfig, type ShortDramaConfig } from './services/systemConfigService';
 export { KidLockService } from './services/kidLockService';
 export { VideoDurationService, setVideoFetchFn, getVideoFetchFn } from './services/videoDurationService';

@@ -6,8 +6,10 @@ import {
   SystemConfigService,
   getCurrentStoreApiVersion,
   getStoreApiVersion,
+  setCollectKeepAwakeHandler,
   type AppStore,
   type AppState,
+  type CollectTask,
 } from '@openreel/core';
 import { initialsOfMedia } from './services/initials';
 
@@ -65,19 +67,37 @@ export async function initApp(options?: {
     s.store = store;
     s.collector = collector;
 
-    // 清理僵尸采集任务（TV 端被系统杀掉后残留的 RUNNING/PENDING）
+    // 采集期保活：全量采集是小时级长任务，锁屏后系统会回收进程。这里注册 expo-keep-awake，
+    // 采集开始保持屏幕常亮、结束自动释放（桌面端不注册，不产生副作用）。
     try {
-      const staleCount = await store.getState().resetStaleTasks();
-      if (staleCount > 0) console.log(`[TV] 清理了 ${staleCount} 个僵尸采集任务`);
+      const { activateKeepAwakeAsync, deactivateKeepAwake } = await import('expo-keep-awake');
+      setCollectKeepAwakeHandler((active) => {
+        if (active) {
+          activateKeepAwakeAsync('openreel-collect').catch(() => {});
+        } else {
+          deactivateKeepAwake('openreel-collect');
+        }
+      });
     } catch (err) {
-      console.error('[TV] 清理僵尸任务失败:', err);
+      console.warn('[TV] 采集保活不可用（不影响采集）:', err);
     }
 
-    // 启动时自动采集检查
+    // 启动恢复：上次进程被杀残留的 RUNNING/PENDING 任务复位为可续采并排队自动续采
+    let interruptedTasks: CollectTask[] = [];
+    try {
+      interruptedTasks = await store.getState().recoverInterruptedTasks();
+      if (interruptedTasks.length > 0) {
+        console.log(`[TV] 发现 ${interruptedTasks.length} 个被中断的采集任务，将自动续采`);
+      }
+    } catch (err) {
+      console.error('[TV] 恢复中断任务失败:', err);
+    }
+
+    // 启动时自动采集检查（有需续采的任务时让位给续采）
     try {
       const cfgService = new SystemConfigService(provider);
       const config = await cfgService.getCollectConfig();
-      if (config.autoOnStartup) {
+      if (config.autoOnStartup && interruptedTasks.length === 0) {
         const sources = await provider.getEnabledVideoSources();
         if (sources.length > 0) {
           // 延迟触发启动采集，等待网络与界面稳定
@@ -94,6 +114,20 @@ export async function initApp(options?: {
       }
     } catch (err) {
       console.error('[TV] 启动时自动采集检查失败:', err);
+    }
+
+    // 自动续采：延迟到界面稳定、DB 维护跑完之后，顺序逐个源续采
+    if (interruptedTasks.length > 0) {
+      const toResume = interruptedTasks;
+      setTimeout(() => {
+        store
+          .getState()
+          .autoResumeCollectTasks(toResume)
+          .then(({ resumed, failed }) => {
+            console.log(`[TV] 自动续采结束：成功 ${resumed} 个，失败 ${failed} 个`);
+          })
+          .catch((err) => console.error('[TV] 自动续采失败:', err));
+      }, 8000);
     }
 
     // 「越看越懂你」：有变化或无推荐快照时后台重建一次（沿用手机端逻辑，仍属用户可见功能）

@@ -13,6 +13,7 @@ import type { ShortDramaConfig } from './systemConfigService';
 import { VideoDurationService } from './videoDurationService';
 import { RecommendationService } from './recommendationService';
 import { PerfMeter } from './perfMeter';
+import { beginCollectKeepAwake, endCollectKeepAwake } from './keepAwake';
 
 function generateId(): string {
   return `id_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -140,11 +141,83 @@ const REPROBE_CONCURRENCY = 8;
 const REPROBE_PROGRESS_PERSIST_INTERVAL_MS = 1000;
 /** 探测进度/status 写库超时：超时应放弃本次写并继续，绝不能因一次写库挂死整个任务 */
 const REPROBE_DB_WRITE_TIMEOUT_MS = 5000;
+
+/**
+ * 详情分页的跨页并发窗口（页数）。
+ *
+ * 源站忽略 `limit`（实测传 limit=3 仍返回 20 条/页），所以页大小无法加大，
+ * 提速只能靠「一页一请求 + 跨页并发」。3 页在飞 ≈ 3 倍吞吐，同时避免单源
+ * 瞬时并发过高被限流（红牛单页响应可达数百 KB）。
+ */
+const DETAIL_PAGE_CONCURRENCY = 3;
+
+interface FetchedDetailPage {
+  page: number;
+  response: CMSListResponse | null;
+  error?: Error;
+}
+
+/**
+ * 详情分页窗口预取器：保持 `windowSize` 页在飞，调用方按页序 `take()` 取结果。
+ *
+ * 为什么「抓取乱序并发、提交严格按页序」：`currentPage` 是断点续采唯一依据，
+ * 乱序提交会让断点跳到后面的页，中间的页从此永久漏采。
+ */
+class DetailPageWindow {
+  private nextFetchPage: number;
+  private readonly buffer = new Map<number, Promise<FetchedDetailPage>>();
+
+  constructor(
+    private readonly fetchPage: (page: number) => Promise<CMSListResponse>,
+    startPage: number,
+    private readonly windowSize: number,
+    /** 抓取上界：已知 pagecount 后收紧，避免多抓不存在的页 */
+    private readonly maxPage: () => number
+  ) {
+    this.nextFetchPage = startPage;
+  }
+
+  private fill(untilPage: number): void {
+    const limit = Math.min(untilPage + this.windowSize - 1, this.maxPage());
+    while (this.nextFetchPage <= limit) {
+      const page = this.nextFetchPage++;
+      this.buffer.set(
+        page,
+        this.fetchPage(page).then(
+          (response) => ({ page, response }),
+          (err) => ({ page, response: null, error: err instanceof Error ? err : new Error(String(err)) })
+        )
+      );
+    }
+  }
+
+  async take(page: number): Promise<FetchedDetailPage> {
+    this.fill(page);
+    const pending = this.buffer.get(page);
+    this.buffer.delete(page);
+    if (pending) return pending;
+    // 窗口未覆盖（如已越过上界）：直接单页抓取，保持按需语义
+    return this.fetchPage(page).then(
+      (response) => ({ page, response }),
+      (err) => ({ page, response: null, error: err instanceof Error ? err : new Error(String(err)) })
+    );
+  }
+
+  /** 提前结束（取消/任务被删）时等待在飞请求收敛，不遗留未处理拒绝 */
+  async drain(): Promise<void> {
+    this.nextFetchPage = Number.MAX_SAFE_INTEGER;
+    await Promise.allSettled(Array.from(this.buffer.values()));
+    this.buffer.clear();
+  }
+}
+
 export class CollectorService {
   private activeAbortControllers = new Map<string, AbortController>();
   private recommendationService: RecommendationService;
   /** 存量同名合并节流：60s 窗口内只真正执行一次，避免每个采集入口都触发全表扫描 */
   private lastVersionMergeAt = 0;
+  /** 详情分页能力探测缓存（按 baseUrl），进程内只探测一次 */
+  private detailPageSupportCache = new Map<string, boolean>();
 
   constructor(private db: DatabaseProvider) {
     this.recommendationService = new RecommendationService(db);
@@ -442,7 +515,13 @@ sourceUpdatedAt,
    * 页面在「prepare 并行 + commit 串行」模式下执行，大幅降低写锁竞争。
    * 任一步失败整体回滚该 media，语义与逐条独立提交一致。
    */
-  private async commitItem(prep: PreparedMedia, meter?: PerfMeter): Promise<Media> {
+  /**
+   * 提交一条媒体。
+   *
+   * @param withDetail 是否同时写入剧集/播放地址明细。索引采集（全量/增量/关键词）传 false：
+   *   只写 media + media_source，播放地址改为用户打开详情时按需拉取；按需详情服务传 true。
+   */
+  private async commitItem(prep: PreparedMedia, meter?: PerfMeter, withDetail = false): Promise<Media> {
     const trace = meter
       ? <T>(label: string, fn: () => Promise<T>) => meter.trace(label, fn)
       : <T>(_label: string, fn: () => Promise<T>) => fn();
@@ -508,6 +587,17 @@ sourceUpdatedAt,
       }
 
       const sourceId = prep.sourceId;
+
+      // 索引层：记录「该媒体在本源的 vod_id」，按需详情据此拉取播放地址。
+      // 主键是 (media_id, source_id)，合并路径登记的是「另一个源」的同名版本，不会互相覆盖。
+      if (prep.itemVodId != null) {
+        await trace('dbWrite.mediaSource', () =>
+          this.db.upsertMediaSource(writeMediaId, sourceId, String(prep.itemVodId), prep.sourceUpdatedAt)
+        );
+      }
+
+      // 索引采集模式到此为止：不落 episode/play_source（按需详情时再写）
+      if (!withDetail) return media;
       const seasonNumber = prep.seasonNumber;
       const episodesBatch: Episode[] = [];
       const playSourcesBatch: PlaySource[] = [];
@@ -676,7 +766,8 @@ sourceUpdatedAt,
     hours?: number,
     signal?: AbortSignal,
     sourceMeter?: PerfMeter,
-    injectedList?: CMSListResponse | null
+    injectedList?: CMSListResponse | null,
+    detailPageMode: boolean = false
   ): Promise<{ media: Media[]; total: number; pagecount: number; failedCount: number; failedItems: FailedItem[]; error?: string; errorType?: TaskErrorType }> {
     const pageMeter = new PerfMeter();
     const pageStart = Date.now();
@@ -700,28 +791,30 @@ sourceUpdatedAt,
     } else {
       try {
         await this.db.incrementSourceRequestCount(sourceId);
-        response = await pageMeter.trace('getList', () => adapter.getList(page, pageSize, hours, signal));
-        console.log(`[Collector] getList response: code=${response.code}, total=${response.total}, list.length=${response.list?.length || 0}`);
+        response = detailPageMode
+          ? await pageMeter.trace('getDetailPage', () => adapter.getDetailList(page, pageSize, hours, signal))
+          : await pageMeter.trace('getList', () => adapter.getList(page, pageSize, hours, signal));
+        console.log(`[Collector] ${detailPageMode ? 'getDetailPage' : 'getList'} response: code=${response.code}, total=${response.total}, list.length=${response.list?.length || 0}`);
       } catch (err) {
-      await this.db.incrementSourceFailCount(sourceId);
-      const errInstance = err instanceof Error ? err : new Error(String(err));
-      const errorMsg = `[Collector] getList failed: ${errInstance.message}`;
-      const errorType = classifyError(err);
-      console.error(`[Collector] getList 失败 (${errorType}):`, errorMsg);
+        await this.db.incrementSourceFailCount(sourceId);
+        const errInstance = err instanceof Error ? err : new Error(String(err));
+        const errorMsg = `[Collector] ${detailPageMode ? 'getDetailPage' : 'getList'} failed: ${errInstance.message}`;
+        const errorType = classifyError(err);
+        console.error(`[Collector] ${detailPageMode ? 'getDetailPage' : 'getList'} 失败 (${errorType}):`, errorMsg);
 
-      let detailedError = errInstance.message;
-      if (errInstance.message.includes('CORS') || errInstance.message.includes('opaque')) {
-        detailedError = 'CORS错误 - 无法访问外部API。Tauri HTTP插件可能未正确加载。';
-      } else if (errInstance.message.includes('Failed to fetch') || errInstance.message.includes('NetworkError')) {
-        detailedError = '网络错误 - 无法连接到服务器。请检查网络连接。';
-      } else if (errInstance.message.includes('timeout') || errInstance.message.includes('abort')) {
-        detailedError = '请求超时 - 服务器响应时间过长。';
-      }
+        let detailedError = errInstance.message;
+        if (errInstance.message.includes('CORS') || errInstance.message.includes('opaque')) {
+          detailedError = 'CORS错误 - 无法访问外部API。Tauri HTTP插件可能未正确加载。';
+        } else if (errInstance.message.includes('Failed to fetch') || errInstance.message.includes('NetworkError')) {
+          detailedError = '网络错误 - 无法连接到服务器。请检查网络连接。';
+        } else if (errInstance.message.includes('timeout') || errInstance.message.includes('abort')) {
+          detailedError = '请求超时 - 服务器响应时间过长。';
+        }
 
-      this.logPerf('PAGE', { src: sourceId, page, totalMs: Date.now() - pageStart, collected: 0, failed: 0, status: 'getList-failed' }, pageMeter);
-      if (sourceMeter) sourceMeter.merge(pageMeter);
+        this.logPerf('PAGE', { src: sourceId, page, totalMs: Date.now() - pageStart, collected: 0, failed: 0, status: detailPageMode ? 'getDetailPage-failed' : 'getList-failed' }, pageMeter);
+        if (sourceMeter) sourceMeter.merge(pageMeter);
 
-      return { media: [], total: 0, pagecount: 0, failedCount: 0, failedItems: [], error: detailedError, errorType };
+        return { media: [], total: 0, pagecount: 0, failedCount: 0, failedItems: [], error: detailedError, errorType };
       }
     }
 
@@ -732,7 +825,7 @@ sourceUpdatedAt,
     let skipped = 0;
 
     if (config.concurrency > 1 && list.length > 0) {
-      const { failedCount: fc, failedItems, skippedCount } = await this.processItemsWithConcurrency(adapter, list, sourceId, config, results, signal, pageMeter);
+      const { failedCount: fc, failedItems, skippedCount } = await this.processItemsWithConcurrency(adapter, list, sourceId, config, results, signal, pageMeter, detailPageMode);
       failedCount = fc;
       allFailedItems.push(...failedItems);
       skipped = skippedCount;
@@ -741,26 +834,31 @@ sourceUpdatedAt,
         try {
           console.log(`[Collector] Processing: ${listItem.vod_name} (vod_id=${listItem.vod_id})`);
 
-          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, config.minYear, config.ignoreSourceSkip);
+          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, sourceId, config.minYear, config.ignoreSourceSkip);
           if (skippedExisting) {
             skipped++;
             console.log(`[Collector] 跳过(源未变): ${listItem.vod_name}`);
             continue;
           }
 
-          await this.db.incrementSourceRequestCount(sourceId);
-          const detailResponse = await adapter.getDetail(String(listItem.vod_id), signal);
-          console.log(`[Collector] Detail response: code=${detailResponse.code}, list.length=${detailResponse.list?.length || 0}`);
+          // 详情分页模式：listItem 本身就是完整详情（含播放地址），无需再逐条请求
+          let item: CMSMediaItem;
+          if (detailPageMode) {
+            item = listItem;
+          } else {
+            await this.db.incrementSourceRequestCount(sourceId);
+            const detailResponse = await adapter.getDetail(String(listItem.vod_id), signal);
+            console.log(`[Collector] Detail response: code=${detailResponse.code}, list.length=${detailResponse.list?.length || 0}`);
 
-          if (!detailResponse.list || detailResponse.list.length === 0) {
-            await this.db.incrementSourceFailCount(sourceId);
-            console.warn(`[Collector] 获取详情失败: ${listItem.vod_name}`);
-            failedCount++;
-            allFailedItems.push({ vodId: String(listItem.vod_id), title: listItem.vod_name, error: '获取详情返回空' });
-            continue;
+            if (!detailResponse.list || detailResponse.list.length === 0) {
+              await this.db.incrementSourceFailCount(sourceId);
+              console.warn(`[Collector] 获取详情失败: ${listItem.vod_name}`);
+              failedCount++;
+              allFailedItems.push({ vodId: String(listItem.vod_id), title: listItem.vod_name, error: '获取详情返回空' });
+              continue;
+            }
+            item = detailResponse.list[0];
           }
-
-          const item = detailResponse.list[0];
           console.log(`[Collector] Detail item: vod_name=${item.vod_name}, vod_year=${item.vod_year}, type_name=${item.type_name}`);
 
           // 生成指纹以便异常时使用
@@ -780,7 +878,8 @@ sourceUpdatedAt,
             console.log(`[Collector] processItem returned null for: ${item.vod_name}`);
           }
         } catch (err) {
-          await this.db.incrementSourceFailCount(sourceId);
+          // 详情分页模式下条目失败不是源请求失败（整页请求已成功），不累加失败计数
+          if (!detailPageMode) await this.db.incrementSourceFailCount(sourceId);
           const errorMsg = `[Collector] 处理视频 ${listItem.vod_name} 失败: ${err instanceof Error ? err.message : String(err)}`;
           console.error(errorMsg);
           
@@ -811,7 +910,8 @@ sourceUpdatedAt,
     config: { minYear: number; concurrency: number; ignoreSourceSkip: boolean },
     results: Media[],
     signal?: AbortSignal,
-    meter?: PerfMeter
+    meter?: PerfMeter,
+    detailPageMode: boolean = false
   ): Promise<{ failedCount: number; failedItems: FailedItem[]; skippedCount: number }> {
     const trace = meter
       ? <T>(label: string, fn: () => Promise<T>) => meter.trace(label, fn)
@@ -826,7 +926,7 @@ sourceUpdatedAt,
     const allVodIds = Array.from(new Set(items.map((it) => (it && it.vod_id != null ? String(it.vod_id) : '')).filter(Boolean)));
     const vodIdCache = new Map<string, Media | null>();
     if (allVodIds.length > 0) {
-      const existingRows = await this.db.getMediaByVodIdSet(allVodIds);
+      const existingRows = await this.db.getMediaByVodIdSet(sourceId, allVodIds);
       const byVodId = new Map<string, Media>();
       for (const m of existingRows) {
         if (m.vodId) byVodId.set(m.vodId, m);
@@ -847,32 +947,40 @@ sourceUpdatedAt,
         try {
           console.log(`[Collector] Processing (worker): ${listItem.vod_name} (vod_id=${listItem.vod_id}) index=${currentIndex}`);
 
-          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, config.minYear, config.ignoreSourceSkip, vodIdCache);
+          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, sourceId, config.minYear, config.ignoreSourceSkip, vodIdCache);
           if (skippedExisting) {
             skippedCount++;
             console.log(`[Collector] 跳过(源未变): ${listItem.vod_name}`);
             continue;
           }
 
-          await this.db.incrementSourceRequestCount(sourceId);
-          console.log(`[Collector] Worker(${sourceId}) starting processItem for ${listItem.vod_name} at index ${currentIndex}`);
-          const detailResponse = await trace('getDetail', () => adapter.getDetail(String(listItem.vod_id), signal));
-          console.log(`[Collector] Worker(${sourceId}) got detail response with ${detailResponse.list?.length || 0} items for ${listItem.vod_name}`);
+          // 详情分页模式：整页详情已在页级一次拉回（listItem 即完整详情），
+          // 不再逐条请求、也不逐条累加源请求计数（源请求数=页数，不是条目数）。
+          let item: CMSMediaItem;
+          if (detailPageMode) {
+            item = listItem;
+          } else {
+            await this.db.incrementSourceRequestCount(sourceId);
+            console.log(`[Collector] Worker(${sourceId}) starting processItem for ${listItem.vod_name} at index ${currentIndex}`);
+            const detailResponse = await trace('getDetail', () => adapter.getDetail(String(listItem.vod_id), signal));
+            console.log(`[Collector] Worker(${sourceId}) got detail response with ${detailResponse.list?.length || 0} items for ${listItem.vod_name}`);
 
-          if (!detailResponse.list || detailResponse.list.length === 0) {
-            await this.db.incrementSourceFailCount(sourceId);
-            console.warn(`[Collector] 获取详情失败: ${listItem.vod_name}`);
-            failedCount++;
-            preparedErrors[currentIndex] = '获取详情返回空';
-            continue;
+            if (!detailResponse.list || detailResponse.list.length === 0) {
+              await this.db.incrementSourceFailCount(sourceId);
+              console.warn(`[Collector] 获取详情失败: ${listItem.vod_name}`);
+              failedCount++;
+              preparedErrors[currentIndex] = '获取详情返回空';
+              continue;
+            }
+            item = detailResponse.list[0];
           }
 
-          const item = detailResponse.list[0];
           const prep = await this.prepareItem(item, sourceId, '', config.minYear, meter, shortDramaCache);
           prepared[currentIndex] = prep;
           console.log(`[Collector] Worker(${sourceId}) prepared: ${item.vod_name}`);
         } catch (err) {
-          await this.db.incrementSourceFailCount(sourceId);
+          // 详情分页模式下条目失败不是「源请求失败」（整页请求本身已成功），不累加失败计数
+          if (!detailPageMode) await this.db.incrementSourceFailCount(sourceId);
           const errorMsg = `[Collector] 处理视频 ${listItem.vod_name} 失败: ${err instanceof Error ? err.message : String(err)}`;
           console.error(errorMsg);
           failedCount++;
@@ -1011,6 +1119,7 @@ sourceUpdatedAt,
    */
   private async maybeSkipUnchangedSourceItem(
     listItem: CMSMediaItem,
+    sourceId: string,
     minYear: number,
     ignoreSourceSkip: boolean,
     vodIdCache?: Map<string, Media | null>
@@ -1030,7 +1139,7 @@ sourceUpdatedAt,
         : undefined;
     } else {
       existing = listItem.vod_id
-        ? await this.db.getMediaByVodId(String(listItem.vod_id))
+        ? await this.db.getMediaByVodId(sourceId, String(listItem.vod_id))
         : null;
     }
     if (existing?.sourceUpdatedAt) {
@@ -1676,7 +1785,9 @@ const title = await normalizer.normalizeTitle(item.vod_name);
     };
 
     const batchMeter = new PerfMeter();
-    await Promise.all([
+    beginCollectKeepAwake();
+    try {
+      await Promise.all([
       ...sources.map(async (source, si) => {
         const sourceMeter = new PerfMeter();
         const now = new Date().toISOString();
@@ -1863,7 +1974,9 @@ const title = await normalizer.normalizeTitle(item.vod_name);
         this.activeAbortControllers.delete(taskId);
       }
     })]);
-
+    } finally {
+      endCollectKeepAwake();
+    }
     this.logPerf('BATCH', { mode: 'incremental' }, batchMeter);
 
     // 采集全部结束后再做存量整理（串行、一次）：不占采集期的 CPU/写锁。
@@ -1985,6 +2098,50 @@ const title = await normalizer.normalizeTitle(item.vod_name);
     }
   }
 
+  /**
+   * 探测源站是否支持 `ac=detail&pg=N`（一次请求取整页「带播放地址」的详情）。
+   *
+   * 支持时全量/增量采集从「1 次 list + N 次逐条 detail」变成「1 次/页」，
+   * 实测 6 个源全部支持（见 .trae/documents/采集与存储重构_索引优先按需详情_plan.md）。
+   *
+   * 判定条件宁严勿宽（误判会导致整源漏采播放地址）：
+   *  1. 第 1 页非空；
+   *  2. 第 1 页至少 60% 条目带 `vod_play_url`；
+   *  3. 第 2 页非空时，两页 vod_id 必须有差异（防止源站忽略 pg 永远返回第 1 页）。
+   */
+  private async detectDetailPageMode(baseUrl: string, hours?: number, signal?: AbortSignal): Promise<boolean> {
+    const cached = this.detailPageSupportCache.get(baseUrl);
+    if (cached !== undefined) return cached;
+
+    const adapter = new CMSAdapter(baseUrl);
+    let supported = false;
+    try {
+      const [first, second] = await Promise.all([
+        adapter.getDetailList(1, 20, hours, signal),
+        adapter.getDetailList(2, 20, hours, signal).catch(() => null),
+      ]);
+      const list1 = first.list || [];
+      const list2 = second?.list || [];
+      const withPlay = list1.filter((it: CMSMediaItem) => String(it.vod_play_url || '').trim().length > 0).length;
+      const playRatio = list1.length > 0 ? withPlay / list1.length : 0;
+      let distinct = true;
+      if (list1.length > 0 && list2.length > 0) {
+        const ids1 = new Set(list1.map((it: CMSMediaItem) => String(it.vod_id)));
+        distinct = list2.some((it: CMSMediaItem) => !ids1.has(String(it.vod_id)));
+      }
+      supported = list1.length > 0 && playRatio >= 0.6 && distinct;
+      console.log(
+        `[Collector] 详情分页探测 ${baseUrl}: supported=${supported} page1=${list1.length} playRatio=${playRatio.toFixed(2)} distinct=${distinct} pagecount=${first.pagecount}`
+      );
+    } catch (err) {
+      console.warn(`[Collector] 详情分页探测失败 ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+      supported = false;
+    }
+    // 探测失败不缓存，下次采集可重试（源站可能只是临时不可达）
+    if (supported) this.detailPageSupportCache.set(baseUrl, true);
+    return supported;
+  }
+
   private logTaskStep(step: string, sourceCode: string, taskId: string, sinceMs: number): void {
     console.log(`[CollectTask] ${step} source=${sourceCode} task=${taskId || '-'} dt=${Date.now() - sinceMs}ms at=${new Date().toISOString()}`);
   }
@@ -2057,6 +2214,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       hours = Math.min(hoursSinceLast, config.maxIncrementalHours);
     }
 
+    beginCollectKeepAwake();
     try {
       await this.db.updateCollectTask(taskId, {
         status: 'RUNNING' as TaskStatus,
@@ -2070,6 +2228,26 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       let prefetchPromise: Promise<CMSListResponse | null> | null = null;
       let knownPagecount = 0;
 
+      // 增量同样走详情分页模式（实测 h=N 小时参数在 ac=detail 下同样生效）
+      const adapter = new CMSAdapter(source.baseUrl);
+      const detailPageMode = await this.detectDetailPageMode(source.baseUrl, hours, controller.signal);
+      const detailWindow = detailPageMode
+        ? new DetailPageWindow(
+            async (p: number) => {
+              await this.db.incrementSourceRequestCount(source.id);
+              try {
+                return await adapter.getDetailList(p, 20, hours, controller.signal);
+              } catch (err) {
+                await this.db.incrementSourceFailCount(source.id).catch(() => {});
+                throw err;
+              }
+            },
+            page,
+            DETAIL_PAGE_CONCURRENCY,
+            () => (knownPagecount > 0 ? Math.min(knownPagecount, maxPages) : maxPages)
+          )
+        : null;
+
       while (page <= maxPages) {
         const iterationStart = Date.now();
 
@@ -2078,9 +2256,23 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           cancelled = true;
           break;
         }
+        // 显式中止（取消/源被禁用/上层主动 abort）：立刻停，不再把剩余页当失败刷完
+        if (controller.signal.aborted) {
+          cancelled = true;
+          break;
+        }
 
         let injectedList: CMSListResponse | null = null;
-        if (prefetchPromise) {
+        let pageFetchError: Error | null = null;
+
+        if (detailWindow) {
+          const fetched = await detailWindow.take(page);
+          if (fetched.response) {
+            injectedList = fetched.response;
+          } else {
+            pageFetchError = fetched.error ?? new Error(`详情分页第${page}页无数据`);
+          }
+        } else if (prefetchPromise) {
           const cached = await prefetchPromise.catch(() => null);
           prefetchPromise = null;
           if (cached && Array.isArray(cached.list)) {
@@ -2089,15 +2281,19 @@ const title = await normalizer.normalizeTitle(item.vod_name);
         }
 
         try {
-          const runPromise = this.collectFromSource(source.id, source.baseUrl, page, 20, hours, controller.signal, sourceMeter, injectedList);
+          if (pageFetchError) throw pageFetchError;
 
-          const nextPage = page + 1;
-          const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
-          if (shouldPrefetch) {
-            prefetchPromise = new CMSAdapter(source.baseUrl)
-              .getList(nextPage, 20, hours, controller.signal)
-              .then((r) => r)
-              .catch(() => null);
+          const runPromise = this.collectFromSource(source.id, source.baseUrl, page, 20, hours, controller.signal, sourceMeter, injectedList, detailPageMode);
+
+          if (!detailWindow) {
+            const nextPage = page + 1;
+            const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
+            if (shouldPrefetch) {
+              prefetchPromise = new CMSAdapter(source.baseUrl)
+                .getList(nextPage, 20, hours, controller.signal)
+                .then((r) => r)
+                .catch(() => null);
+            }
           }
 
           const result = await runPromise;
@@ -2151,6 +2347,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
         }
       }
 
+      if (detailWindow) await detailWindow.drain();
       if (!cancelled) {
         await this.db.updateCollectTask(taskId, {
           status: 'COMPLETED' as TaskStatus,
@@ -2177,6 +2374,8 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       });
       this.logPerf('SOURCE', { src: source.name, taskId, pages: page, collected, failed, status: 'failed', error: finalErrMsg }, sourceMeter);
       throw err;
+    } finally {
+      endCollectKeepAwake();
     }
   }
 
@@ -2246,6 +2445,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       this.capFailedItems(currentFailedItems);
     }
 
+    beginCollectKeepAwake();
     try {
       await this.db.updateCollectTask(taskId, {
         status: 'RUNNING' as TaskStatus,
@@ -2259,7 +2459,31 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       let prefetchPromise: Promise<CMSListResponse | null> | null = null;
       let knownPagecount = 0;
 
+      // 详情分页模式：整页详情一次请求（替代 1 次 list + 20 次逐条 detail），
+      // 并用 DetailPageWindow 跨页并发预取（抓取乱序、提交按页序）。
+      const adapter = new CMSAdapter(source.baseUrl);
+      const detailPageMode = await this.detectDetailPageMode(source.baseUrl, undefined, controller.signal);
+      const detailWindow = detailPageMode
+        ? new DetailPageWindow(
+            async (p: number) => {
+              await this.db.incrementSourceRequestCount(source.id);
+              try {
+                return await adapter.getDetailList(p, 20, undefined, controller.signal);
+              } catch (err) {
+                await this.db.incrementSourceFailCount(source.id).catch(() => {});
+                throw err;
+              }
+            },
+            page,
+            DETAIL_PAGE_CONCURRENCY,
+            () => (knownPagecount > 0 ? Math.min(knownPagecount, config.maxPages) : config.maxPages)
+          )
+        : null;
+
       this.logTaskStep('loopStart', sourceCode, taskId, perfStart);
+      if (detailPageMode) {
+        this.logTaskStep('detailPageMode', sourceCode, taskId, perfStart);
+      }
       while (page <= config.maxPages) {
         const iterationStart = Date.now();
 
@@ -2268,9 +2492,23 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           cancelled = true;
           break;
         }
+        // 显式中止（取消/源被禁用/上层主动 abort）：立刻停，不再把剩余页当失败刷完
+        if (controller.signal.aborted) {
+          cancelled = true;
+          break;
+        }
 
         let injectedList: CMSListResponse | null = null;
-        if (prefetchPromise) {
+        let pageFetchError: Error | null = null;
+
+        if (detailWindow) {
+          const fetched = await detailWindow.take(page);
+          if (fetched.response) {
+            injectedList = fetched.response;
+          } else {
+            pageFetchError = fetched.error ?? new Error(`详情分页第${page}页无数据`);
+          }
+        } else if (prefetchPromise) {
           const cached = await prefetchPromise.catch(() => null);
           prefetchPromise = null;
           if (cached && Array.isArray(cached.list)) {
@@ -2279,15 +2517,19 @@ const title = await normalizer.normalizeTitle(item.vod_name);
         }
 
         try {
-          const runPromise = this.collectFromSource(source.id, source.baseUrl, page, 20, undefined, controller.signal, sourceMeter, injectedList);
+          if (pageFetchError) throw pageFetchError;
 
-          const nextPage = page + 1;
-          const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
-          if (shouldPrefetch) {
-            prefetchPromise = new CMSAdapter(source.baseUrl)
-              .getList(nextPage, 20, undefined, controller.signal)
-              .then((r) => r)
-              .catch(() => null);
+          const runPromise = this.collectFromSource(source.id, source.baseUrl, page, 20, undefined, controller.signal, sourceMeter, injectedList, detailPageMode);
+
+          if (!detailWindow) {
+            const nextPage = page + 1;
+            const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
+            if (shouldPrefetch) {
+              prefetchPromise = new CMSAdapter(source.baseUrl)
+                .getList(nextPage, 20, undefined, controller.signal)
+                .then((r) => r)
+                .catch(() => null);
+            }
           }
 
           const result = await runPromise;
@@ -2341,6 +2583,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       }
 
       this.logTaskStep('loopEnd', sourceCode, taskId, perfStart);
+      if (detailWindow) await detailWindow.drain();
       if (!cancelled) {
         await this.db.updateCollectTask(taskId, {
           status: 'COMPLETED' as TaskStatus,
@@ -2367,6 +2610,8 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       });
       this.logPerf('SOURCE', { src: source.name, taskId, pages: page, collected, failed, status: 'failed', error: finalErrMsg }, sourceMeter);
       throw err;
+    } finally {
+      endCollectKeepAwake();
     }
   }
 

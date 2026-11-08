@@ -6,6 +6,12 @@ const DETAIL_TIMEOUT_MS = 12000;
 const DETAIL_MAX_RETRIES = 1;
 const LIST_TIMEOUT_MS = 12000;
 const LIST_MAX_RETRIES = 1;
+/**
+ * 详情分页（`ac=detail&pg=N`）单次返回整页 20 条详情，体积是单条详情的数十倍
+ * （实测量子单页 600+KB、无尽首页 9.2s），沿用 12s 会在移动网络下大面积误判超时。
+ * 一页失败等于丢 20 条，故单独放宽到 30s。
+ */
+const DETAIL_PAGE_TIMEOUT_MS = 30000;
 
 export class CMSAdapter {
   private readonly baseUrl: string;
@@ -72,6 +78,23 @@ export class CMSAdapter {
       url += `&h=${hours}`;
     }
     return this.requestWithRetry(url, signal, { timeout: LIST_TIMEOUT_MS, maxRetries: LIST_MAX_RETRIES });
+  }
+
+  /**
+   * 详情分页：一次请求取整页「带播放地址」的详情（`ac=detail&pg=N`）。
+   *
+   * 苹果CMS V10 的 `ac=detail` 既支持 `ids=` 也支持 `pg=`/`limit=`。实测 6 个源均支持
+   * （见 .trae/documents/采集与存储重构_索引优先按需详情_plan.md 的现场验证表），
+   * 因此「1 次整页详情」可以替代「1 次 list + N 次逐条 detail」的 21 次请求。
+   *
+   * 注意：源站普遍忽略 `limit`（实测传 limit=3 仍返回 20 条），页大小以源站返回为准。
+   */
+  async getDetailList(page: number = 1, size: number = 20, hours?: number, signal?: AbortSignal): Promise<CMSListResponse> {
+    let url = `${this.baseUrl}?ac=detail&pg=${page}&limit=${size}`;
+    if (hours !== undefined && hours > 0) {
+      url += `&h=${hours}`;
+    }
+    return this.requestWithRetry(url, signal, { timeout: DETAIL_PAGE_TIMEOUT_MS, maxRetries: DETAIL_MAX_RETRIES });
   }
 
   async search(keyword: string, page: number = 1, signal?: AbortSignal): Promise<CMSListResponse> {

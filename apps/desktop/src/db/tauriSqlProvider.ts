@@ -293,6 +293,175 @@ export class TauriSqlProvider implements DatabaseProvider {
   }
 
   /**
+   * 索引优先改造：老库瘦身（与移动端迁移 v64 等价）。
+   *
+   * 1. 用 `episode.source_id + media.vod_id` 回填 `media_source`（保住已有片库的按需播放能力）；
+   * 2. `DROP TABLE episode/play_source`（旧播放地址全部转按需；DROP 是 O(1)，不产生巨量 WAL）；
+   * 3. 重建 `media` 瘦身表（去掉 description/backdrop_url/personal_score/vod_id），保留原 id；
+   * 4. 重建 media 索引；FTS 交由 initSchema 的 rebuildFts5 重建（新结构为片名三列）。
+   *
+   * 幂等：media 已无 legacy 列时直接跳过（新库/已升级库零成本）。
+   */
+  private async migrateSlimLibrary(): Promise<void> {
+    const cols = await this.db!.select<{ name: string }[]>('PRAGMA table_info(media)');
+    const names = new Set(cols.map((c) => c.name));
+    const isLegacy = names.has('description') || names.has('vod_id') || names.has('personal_score');
+    if (!isLegacy) return;
+
+    const t0 = Date.now();
+    console.log('[DB] 索引优先升级：开始压缩片库结构…');
+
+    // 1) 回填索引层（必须在删除 episode 之前）
+    await this.db!.execute(
+      `INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+         SELECT m.id, e.source_id, m.vod_id, m.source_updated_at
+           FROM media m
+           JOIN (SELECT media_id, MIN(source_id) AS source_id FROM episode
+                  WHERE source_id IS NOT NULL GROUP BY media_id) e ON e.media_id = m.id
+          WHERE m.vod_id IS NOT NULL AND m.vod_id <> ''`
+    );
+    const backfilled = await this.db!.select<{ c: number }[]>('SELECT COUNT(*) AS c FROM media_source');
+    console.log(`[DB] 索引层回填完成：media_source ${backfilled[0]?.c ?? 0} 行`);
+
+    // 2) 释放明细表（O(1) 清空，不逐行 DELETE）
+    await this.db!.execute('PRAGMA foreign_keys = OFF');
+    await this.db!.execute('DROP TABLE IF EXISTS play_source');
+    await this.db!.execute('DROP TABLE IF EXISTS episode');
+    await this.db!.execute(`CREATE TABLE IF NOT EXISTS episode (
+      id INTEGER PRIMARY KEY,
+      media_id INTEGER NOT NULL,
+      season_number INTEGER DEFAULT 1,
+      episode_number INTEGER NOT NULL,
+      title TEXT,
+      duration INTEGER,
+      source_id TEXT,
+      FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE
+    )`);
+    await this.db!.execute(`CREATE TABLE IF NOT EXISTS play_source (
+      id INTEGER PRIMARY KEY,
+      episode_id INTEGER NOT NULL,
+      source_id TEXT NOT NULL,
+      source_name TEXT,
+      url TEXT NOT NULL,
+      quality TEXT,
+      language TEXT,
+      is_active INTEGER DEFAULT 1,
+      fail_count INTEGER DEFAULT 0,
+      last_fail_at TEXT,
+      FOREIGN KEY (episode_id) REFERENCES episode(id) ON DELETE CASCADE
+    )`);
+    for (const stmt of [
+      'CREATE INDEX IF NOT EXISTS idx_episode_media_season_source ON episode(media_id, season_number, source_id)',
+      'CREATE INDEX IF NOT EXISTS idx_episode_source_id_media_id ON episode(source_id, media_id)',
+      'CREATE INDEX IF NOT EXISTS idx_play_source_episode_id ON play_source(episode_id)',
+      'CREATE INDEX IF NOT EXISTS idx_play_source_source_id ON play_source(source_id)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_episode_media_season_ep_source ON episode(media_id, season_number, episode_number, source_id)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_play_source_episode_id_url ON play_source(episode_id, url)',
+    ]) {
+      await this.db!.execute(stmt);
+    }
+
+    // 3) 拆掉引用旧列的 FTS 触发器与虚拟表（重建 media 后由 rebuildFts5 重建）
+    for (const stmt of [
+      'DROP TRIGGER IF EXISTS media_ai',
+      'DROP TRIGGER IF EXISTS media_ad',
+      'DROP TRIGGER IF EXISTS media_au',
+      'DROP TABLE IF EXISTS media_fts_data',
+      'DROP TABLE IF EXISTS media_fts_idx',
+      'DROP TABLE IF EXISTS media_fts_content',
+      'DROP TABLE IF EXISTS media_fts_docsize',
+      'DROP TABLE IF EXISTS media_fts',
+    ]) {
+      await this.db!.execute(stmt).catch(() => undefined);
+    }
+
+    // 4) 重建 media 瘦身表（分批复制，边界控制内存/WAL）
+    await this.db!.execute('DROP TABLE IF EXISTS media_slim');
+    await this.db!.execute(`CREATE TABLE media_slim (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      original_title TEXT,
+      alias TEXT,
+      type TEXT NOT NULL,
+      year INTEGER NOT NULL,
+      area TEXT,
+      genre TEXT,
+      director TEXT,
+      cast TEXT,
+      poster_url TEXT,
+      status TEXT,
+      remarks TEXT,
+      fingerprint TEXT UNIQUE,
+      current_episodes INTEGER,
+      total_episodes INTEGER,
+      is_short_drama INTEGER DEFAULT 0,
+      duration_check_status TEXT,
+      episode_duration INTEGER,
+      view_count INTEGER DEFAULT 0,
+      rating REAL,
+      rating_count INTEGER,
+      rating_source TEXT,
+      rating_updated_at TEXT,
+      hidden INTEGER DEFAULT 0,
+      kid_safe INTEGER,
+      series_group TEXT,
+      series_season INTEGER,
+      source_updated_at TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    )`);
+    const COLS = `title, original_title, alias, type, year, area, genre, director, "cast",
+        poster_url, status, remarks, fingerprint, current_episodes, total_episodes,
+        is_short_drama, duration_check_status, episode_duration, view_count, rating,
+        rating_count, rating_source, rating_updated_at, hidden, kid_safe, series_group,
+        series_season, source_updated_at, created_at, updated_at`;
+    const BATCH = 20000;
+    for (;;) {
+      const lastRow = await this.db!.select<{ id: number | null }[]>('SELECT MAX(id) AS id FROM media_slim');
+      const lastId = lastRow[0]?.id ?? -1;
+      const res = await this.db!.execute(
+        `INSERT INTO media_slim (id, ${COLS})
+           SELECT id, ${COLS} FROM media WHERE id > ? ORDER BY id LIMIT ${BATCH}`,
+        [lastId]
+      );
+      if (!res || (res.rowsAffected ?? 0) === 0) break;
+    }
+    await this.db!.execute('DROP TABLE media');
+    await this.db!.execute('ALTER TABLE media_slim RENAME TO media');
+    await this.db!.execute('PRAGMA foreign_keys = ON');
+
+    // 5) 重建 media 索引（DROP TABLE 时索引已随之消失，SCHEMA_SQL 不会再跑）
+    for (const stmt of [
+      'CREATE INDEX IF NOT EXISTS idx_media_type ON media(type)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_updated_at ON media(type, updated_at)',
+      'CREATE INDEX IF NOT EXISTS idx_media_hidden ON media(hidden)',
+      'CREATE INDEX IF NOT EXISTS idx_media_kid_safe ON media(kid_safe)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_updated_at_visible ON media(type, updated_at) WHERE (hidden IS NULL OR hidden = 0)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_year ON media(type, year)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_area ON media(type, area)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_genre ON media(type, genre)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_year_visible ON media(type, year) WHERE (hidden IS NULL OR hidden = 0)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_area_visible ON media(type, area) WHERE (hidden IS NULL OR hidden = 0)',
+      'CREATE INDEX IF NOT EXISTS idx_media_type_genre_visible ON media(type, genre) WHERE (hidden IS NULL OR hidden = 0)',
+      'CREATE INDEX IF NOT EXISTS idx_media_is_short_drama_visible ON media(type, is_short_drama) WHERE (hidden IS NULL OR hidden = 0)',
+      'CREATE INDEX IF NOT EXISTS idx_media_fingerprint ON media(fingerprint)',
+      'CREATE INDEX IF NOT EXISTS idx_media_updated_at_visible ON media(updated_at) WHERE (hidden IS NULL OR hidden = 0)',
+    ]) {
+      await this.db!.execute(stmt);
+    }
+
+    // 6) 收尾：WAL 截断 + 物理缩库（失败不阻断，页仍会在后续写入中复用）
+    try {
+      await this.db!.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      await this.db!.execute('VACUUM');
+      console.log('[DB] 索引优先升级：VACUUM 完成');
+    } catch (e) {
+      console.warn('[DB] 索引优先升级：VACUUM 跳过（磁盘不足或占用中）', e);
+    }
+    console.log(`[DB] 索引优先升级完成，耗时 ${Date.now() - t0}ms`);
+  }
+
+  /**
    * 检测旧数据库（含 _sqlx_migrations 表），清空所有表和索引，
    * 以便后续 initSchema() 用共享 schema 重建完整结构。
    */
@@ -705,14 +874,13 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.addColumnIfMissing('media', 'series_season', 'INTEGER');
     // 增量迁移：为已有 media 表补齐源侧更新时间列（用于采集时跳过未变更条目）
     await this.addColumnIfMissing('media', 'source_updated_at', 'TEXT');
-    await this.addColumnIfMissing('media', 'vod_id', 'TEXT');
     // 增量迁移：为已有 media 表补齐评分相关列
     await this.addColumnIfMissing('media', 'rating', 'REAL');
     await this.addColumnIfMissing('media', 'rating_count', 'INTEGER');
     await this.addColumnIfMissing('media', 'rating_source', 'TEXT');
     await this.addColumnIfMissing('media', 'rating_updated_at', 'TEXT');
-    // 增量迁移：为已有 media 表补齐「越看越懂你」推荐分列
-    await this.addColumnIfMissing('media', 'personal_score', 'INTEGER');
+    // vod_id / personal_score 已废弃：索引优先改造后 media 不再保存这两列
+    // （vod_id 迁至 media_source，personal_score 的排序改走 recommend_candidates）
     // 增量迁移：search_history.keyword 加 UNIQUE 并清洗存量重复（防止搜索历史重复条目）
     await this.ensureSearchHistoryUnique();
     // 清理历史 CMS 评分补充数据（幂等，评分只保留豆瓣抓取结果）
@@ -745,6 +913,11 @@ export class TauriSqlProvider implements DatabaseProvider {
     // 删除 video_source 表的 rate_limit 列（重建表）
     await this.dropColumnIfExists('video_source', 'rate_limit');
 
+    // 索引优先改造：老库瘦身（删 episode/play_source 明细、重建 media 瘦身表、回填 media_source）。
+    // 必须在 FTS5 重建之前：它会 DROP 掉 media 表，FTS 需在瘦身完成后重建。
+    this.reportProgress(90, '正在升级片库结构（索引优先）…');
+    await this.migrateSlimLibrary();
+
     // 始终重建 FTS5：确保虚拟表和辅助表状态一致，不受历史损坏影响。
     // 分词器升级（trigram，支持中文子串搜索）：旧库 FTS 用默认分词器，MATCH 无法命中子串，
     // 以 system_config 标记 db.ftsTokenizer 判定，仅首次强制重建一次，之后零成本。
@@ -769,13 +942,12 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.db!.execute('DROP TRIGGER IF EXISTS media_au');
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
       old.title IS NOT new.title OR old.alias IS NOT new.alias OR
-      old.original_title IS NOT new.original_title OR
-      old.director IS NOT new.director OR old.cast IS NOT new.cast
+      old.original_title IS NOT new.original_title
     BEGIN
-      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
-      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
-      INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
-      VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+      INSERT INTO media_fts(rowid, title, alias, original_title)
+      VALUES (new.rowid, new.title, new.alias, new.original_title);
     END;`);
 
     // 补齐 collect_task 表（schema.ts 中未包含，桌面端专用）
@@ -1002,8 +1174,16 @@ export class TauriSqlProvider implements DatabaseProvider {
     // force=true（分词器升级为 trigram）时跳过探测，直接走重建。
     if (!force) {
       try {
-        await this.db!.execute('SELECT rowid FROM media_fts LIMIT 1');
-        return; // FTS5 正常，跳过重建
+        // 结构校验：索引列从 (title, alias, original_title, director, cast) 瘦身为
+        // (title, alias, original_title)，旧结构的 FTS 必须重建（体积 69MB → 14MB/23.8 万行）。
+        const ddl = await this.db!.select<{ sql: string }[]>(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='media_fts'"
+        );
+        const ddlSql = ddl[0]?.sql || '';
+        if (!ddlSql.includes('director')) {
+          await this.db!.execute('SELECT rowid FROM media_fts LIMIT 1');
+          return; // FTS5 正常且结构已是最新，跳过重建
+        }
       } catch {
         // FTS5 不可用，继续修复
       }
@@ -1041,7 +1221,7 @@ export class TauriSqlProvider implements DatabaseProvider {
     // ── 阶段 4：重建 FTS5 虚拟表 + 触发器 + 索引 ──
     await this.db!.execute(
       `CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
-        title, alias, original_title, director, cast,
+        title, alias, original_title,
         content='media',
         content_rowid='rowid',
         tokenize='trigram'
@@ -1049,22 +1229,21 @@ export class TauriSqlProvider implements DatabaseProvider {
     );
 
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
-      INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
-      VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+      INSERT INTO media_fts(rowid, title, alias, original_title)
+      VALUES (new.rowid, new.title, new.alias, new.original_title);
     END;`);
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
-      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
-      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
     END;`);
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
       old.title IS NOT new.title OR old.alias IS NOT new.alias OR
-      old.original_title IS NOT new.original_title OR
-      old.director IS NOT new.director OR old.cast IS NOT new.cast
+      old.original_title IS NOT new.original_title
     BEGIN
-      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
-      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
-      INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
-      VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
+      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+      INSERT INTO media_fts(rowid, title, alias, original_title)
+      VALUES (new.rowid, new.title, new.alias, new.original_title);
     END;`);
 
     await this.db!.execute(`INSERT INTO media_fts(media_fts) VALUES('rebuild')`);
@@ -1106,7 +1285,12 @@ export class TauriSqlProvider implements DatabaseProvider {
   }
 
   async getMediaById(id: number): Promise<Media | null> {
-    const rows = await this.db!.select<any[]>('SELECT * FROM media WHERE id = ?', [id]);
+    // description 已移到按需详情缓存 media_detail：命中缓存时随详情一并返回，未命中为 NULL
+    const rows = await this.db!.select<any[]>(
+      `SELECT m.*, (SELECT d.description FROM media_detail d WHERE d.media_id = m.id AND d.description IS NOT NULL LIMIT 1) AS description
+         FROM media m WHERE m.id = ?`,
+      [id]
+    );
     if (!rows[0]) return null;
     // 儿童模式下隐藏非适龄内容，保证收藏/历史等经单条直查的入口同样生效
     if (this.kidModeActive && rows[0].kid_safe !== 1) return null;
@@ -1280,13 +1464,13 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.db!.execute(
       `INSERT INTO media (
         title, original_title, alias, type, year, area, genre, director, "cast",
-        description, poster_url, backdrop_url, status, remarks, fingerprint,
+        poster_url, status, remarks, fingerprint,
         current_episodes, total_episodes, is_short_drama, duration_check_status, episode_duration,
         view_count, rating, rating_count, rating_source, rating_updated_at,
         hidden, kid_safe, series_group, series_season,
-        source_updated_at, vod_id,
+        source_updated_at,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint) DO UPDATE SET
         title = excluded.title,
         original_title = excluded.original_title,
@@ -1295,9 +1479,7 @@ export class TauriSqlProvider implements DatabaseProvider {
         genre = excluded.genre,
         director = excluded.director,
         cast = excluded.cast,
-        description = excluded.description,
         poster_url = excluded.poster_url,
-        backdrop_url = excluded.backdrop_url,
         status = excluded.status,
         remarks = excluded.remarks,
         current_episodes = excluded.current_episodes,
@@ -1308,13 +1490,12 @@ export class TauriSqlProvider implements DatabaseProvider {
         series_group = excluded.series_group,
         series_season = excluded.series_season,
         source_updated_at = excluded.source_updated_at,
-        vod_id = excluded.vod_id,
         updated_at = excluded.updated_at`,
       [
         media.title, media.originalTitle || null, media.alias || null,
         media.type, media.year, media.area || null,
         JSON.stringify(media.genres), JSON.stringify(media.directors), JSON.stringify(media.actors),
-        media.description || null, media.posterUrl || null, media.backdropUrl || null,
+        media.posterUrl || null,
         media.status || null, media.remarks || null, media.fingerprint,
         media.currentEpisodes || null, media.totalEpisodes || null,
         media.isShortDrama ? 1 : 0, media.durationCheckStatus || null, media.episodeDuration || null,
@@ -1324,7 +1505,6 @@ export class TauriSqlProvider implements DatabaseProvider {
         media.kidSafe === undefined ? null : (media.kidSafe ? 1 : 0),
         media.seriesGroup || null, media.seriesSeason ?? null,
         media.sourceUpdatedAt || null,
-        media.vodId || null,
         media.createdAt || now, now,
       ]
     );
@@ -1343,23 +1523,101 @@ export class TauriSqlProvider implements DatabaseProvider {
     );
   }
 
-  async updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, vodId: string | null): Promise<void> {
-    await this.db!.execute(`UPDATE media SET source_updated_at = ?, vod_id = ? WHERE id = ?`, [sourceUpdatedAt, vodId, mediaId]);
+  async updateSourceSync(mediaId: number, sourceUpdatedAt: string | null, _vodId: string | null): Promise<void> {
+    // vod_id 已迁至 media_source（索引层），media 表不再保存
+    await this.db!.execute(`UPDATE media SET source_updated_at = ? WHERE id = ?`, [sourceUpdatedAt, mediaId]);
   }
 
-  async getMediaByVodId(vodId: string): Promise<Media | null> {
-    const rows = await this.db!.select<any[]>('SELECT * FROM media WHERE vod_id = ? LIMIT 1', [vodId]);
+  async getMediaByVodId(sourceId: string, vodId: string): Promise<Media | null> {
+    const rows = await this.db!.select<any[]>(
+      `SELECT m.* FROM media m JOIN media_source ms ON ms.media_id = m.id
+        WHERE ms.source_id = ? AND ms.vod_id = ? LIMIT 1`,
+      [sourceId, vodId]
+    );
     return rows[0] ? rowToMedia(rows[0]) : null;
   }
 
-  async getMediaByVodIdSet(vodIds: string[]): Promise<Media[]> {
+  async getMediaByVodIdSet(sourceId: string, vodIds: string[]): Promise<Media[]> {
     const ids = vodIds.filter((v) => v != null && v !== '');
     if (ids.length === 0) return [];
     const rows = await this.db!.select<any[]>(
-      `SELECT * FROM media WHERE vod_id IN (${ids.map(() => '?').join(',')})`,
-      ids
+      `SELECT m.* FROM media m JOIN media_source ms ON ms.media_id = m.id
+        WHERE ms.source_id = ? AND ms.vod_id IN (${ids.map(() => '?').join(',')})`,
+      [sourceId, ...ids]
     );
     return rows.map(rowToMedia);
+  }
+
+  // —— 索引层 media_source / 按需详情缓存 media_detail ——
+
+  async upsertMediaSource(mediaId: number, sourceId: string, vodId: string, updatedAt: string | null): Promise<void> {
+    await this.db!.execute(
+      `INSERT INTO media_source (media_id, source_id, vod_id, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(media_id, source_id) DO UPDATE SET vod_id = excluded.vod_id, updated_at = excluded.updated_at`,
+      [mediaId, sourceId, vodId, updatedAt]
+    );
+  }
+
+  async getMediaSourcesByMediaId(mediaId: number): Promise<Array<{ sourceId: string; vodId: string; updatedAt: string | null }>> {
+    return await this.db!.select<any[]>(
+      `SELECT source_id AS sourceId, vod_id AS vodId, updated_at AS updatedAt
+         FROM media_source WHERE media_id = ? ORDER BY updated_at DESC`,
+      [mediaId]
+    );
+  }
+
+  async deleteMediaSource(mediaId: number, sourceId: string): Promise<void> {
+    await this.db!.execute('DELETE FROM media_source WHERE media_id = ? AND source_id = ?', [mediaId, sourceId]);
+  }
+
+  async upsertMediaDetail(mediaId: number, sourceId: string, fetchedAt: string, description: string | null): Promise<void> {
+    await this.db!.execute(
+      `INSERT INTO media_detail (media_id, source_id, fetched_at, description) VALUES (?, ?, ?, ?)
+       ON CONFLICT(media_id, source_id) DO UPDATE SET fetched_at = excluded.fetched_at, description = excluded.description`,
+      [mediaId, sourceId, fetchedAt, description]
+    );
+  }
+
+  async getMediaDetailMeta(mediaId: number, sourceId: string): Promise<{ fetchedAt: string; description: string | null } | null> {
+    const rows = await this.db!.select<any[]>(
+      'SELECT fetched_at AS fetchedAt, description FROM media_detail WHERE media_id = ? AND source_id = ?',
+      [mediaId, sourceId]
+    );
+    return rows[0] ? { fetchedAt: rows[0].fetchedAt, description: rows[0].description ?? null } : null;
+  }
+
+  /**
+   * 按需详情 LRU 淘汰：只保留最近抓取的 `keepMediaCount` 条媒体详情。
+   * 有播放进度记录的媒体永不淘汰，避免剧集 id 变化导致续播位置丢失。
+   */
+  async pruneMediaDetailCache(keepMediaCount: number): Promise<number> {
+    const keep = Math.max(1, Math.floor(keepMediaCount));
+    const result = await this.db!.execute(
+      `DELETE FROM media_detail WHERE media_id IN (
+         SELECT media_id FROM media_detail
+          WHERE media_id NOT IN (SELECT media_id FROM watch_history)
+            AND media_id NOT IN (SELECT media_id FROM watch_line_progress)
+          ORDER BY fetched_at DESC
+          LIMIT -1 OFFSET ?
+       )`,
+      [keep]
+    );
+    const removed = result?.rowsAffected ?? 0;
+    if (removed > 0) {
+      await this.db!.execute(
+        `DELETE FROM play_source WHERE episode_id IN (
+           SELECT id FROM episode WHERE media_id NOT IN (SELECT media_id FROM media_detail)
+         )`
+      );
+      await this.db!.execute('DELETE FROM episode WHERE media_id NOT IN (SELECT media_id FROM media_detail)');
+    }
+    return removed;
+  }
+
+  async clearMediaDetailCache(): Promise<void> {
+    await this.db!.execute('DELETE FROM play_source');
+    await this.db!.execute('DELETE FROM episode');
+    await this.db!.execute('DELETE FROM media_detail');
   }
 
   async updateMediaPoster(mediaId: number, posterUrl: string | null, updatedAt: string): Promise<void> {
@@ -1442,7 +1700,37 @@ export class TauriSqlProvider implements DatabaseProvider {
         `SELECT COUNT(*) as count FROM media_fts f JOIN media m ON m.rowid = f.rowid${whereClause}`,
         queryParams
       );
-      const total = countRows[0]?.count || 0;
+      let total = countRows[0]?.count || 0;
+
+      // 演员/导演已移出 FTS 索引（体积：69MB → 14MB/23.8 万行）：片名无命中时用 LIKE 兜底，
+      // 保证「按演员名搜索」仍然可用（仅无结果时触发一次，正常搜索零额外成本）。
+      if (total === 0) {
+        const fbParts: string[] = ['(m.hidden IS NULL OR m.hidden = 0)', '(m.director LIKE ? OR m.cast LIKE ?)'];
+        const like = `%${trimmed}%`;
+        const fbParams: any[] = [like, like];
+        if (this.kidModeActive) fbParts.push('m.kid_safe = 1');
+        if (params.type) { fbParts.push('m.type = ?'); fbParams.push(params.type); }
+        if (params.year) { fbParts.push('m.year = ?'); fbParams.push(params.year); }
+        if (params.area) { fbParts.push('m.area = ?'); fbParams.push(params.area); }
+        if (params.genre) { fbParts.push('m.genre LIKE ?'); fbParams.push(`%${params.genre}%`); }
+        const fbWhere = ' WHERE ' + fbParts.join(' AND ');
+        const fbCountRows = await this.db!.select<{ count: number }[]>(
+          `SELECT COUNT(*) as count FROM media m${fbWhere}`,
+          fbParams
+        );
+        const fbTotal = fbCountRows[0]?.count || 0;
+        if (fbTotal > 0) {
+          const fbRows = await this.db!.select<any[]>(
+            `SELECT m.* FROM media m${fbWhere} ORDER BY m.updated_at DESC LIMIT ? OFFSET ?`,
+            [...fbParams, pageSize, offset]
+          );
+          return {
+            items: fbRows.map(rowToMedia),
+            meta: { page, pageSize, total: fbTotal, totalPages: Math.ceil(fbTotal / pageSize) },
+          };
+        }
+      }
+
       const totalPages = Math.ceil(total / pageSize);
 
       const rows = await this.db!.select<any[]>(
@@ -1706,18 +1994,19 @@ export class TauriSqlProvider implements DatabaseProvider {
   }
 
   async deletePlaySourcesBySourceId(sourceId: string): Promise<void> {
+    await this.db!.execute('DELETE FROM media_source WHERE source_id = ?', [sourceId]);
     await this.db!.execute('DELETE FROM play_source WHERE source_id = ?', [sourceId]);
     await this.db!.execute(`DELETE FROM episode WHERE NOT EXISTS (SELECT 1 FROM play_source WHERE play_source.episode_id = episode.id)`);
-    await this.db!.execute(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM episode WHERE episode.media_id = media.id)`);
+    await this.db!.execute(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM media_source WHERE media_source.media_id = media.id)`);
     await this.db!.execute(`DELETE FROM favorite WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = favorite.media_id)`);
     await this.db!.execute(`DELETE FROM watch_history WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = watch_history.media_id)`);
   }
 
   async getMediaCountBySourceIdMap(): Promise<Map<string, number>> {
+    // 采集只写 media_source（索引层），源媒体数从这里统计；episode 已降级为按需缓存
     const rows = await this.db!.select<{ sourceId: string; count: number }[]>(
       `SELECT source_id as sourceId, COUNT(DISTINCT media_id) as count
-       FROM episode
-       WHERE source_id IS NOT NULL
+       FROM media_source
        GROUP BY source_id`
     );
     const map = new Map<string, number>();
@@ -1743,11 +2032,11 @@ export class TauriSqlProvider implements DatabaseProvider {
     console.log(`[deleteMediaWithoutPlaySource] before media count: ${beforeCount}`);
 
     const mediaWithoutPlaySource = await this.db!.select<{ id: number }[]>(
-      `SELECT m.id FROM media m 
+      // 索引优先：判据从「没有播放地址」改为「没有 media_source（连按需拉取都做不到）」，
+      // 否则全库都会被当成无播源清空
+      `SELECT m.id FROM media m
        WHERE NOT EXISTS (
-         SELECT 1 FROM episode e 
-         JOIN play_source ps ON e.id = ps.episode_id 
-         WHERE e.media_id = m.id
+         SELECT 1 FROM media_source ms WHERE ms.media_id = m.id
        )`
     );
     
@@ -2379,7 +2668,6 @@ async clearWatchHistory(): Promise<void> {
     await this.db!.execute('DELETE FROM impression');
     await this.db!.execute('DELETE FROM user_interest_tag');
     await this.db!.execute('DELETE FROM recommend_candidates');
-    await this.db!.execute('UPDATE media SET personal_score = 0');
   }
 
   async getDislikedMediaDetail(): Promise<{ mediaId: number; title: string; createdAt: string }[]> {

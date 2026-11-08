@@ -33,6 +33,8 @@ Android 无字节级进度回调（Media3 1.9.0 AnalyticsListener 无 onBytesLoa
 - **iOS**：对 `expo-video-cache` 暴露 `maxConcurrency`（best-effort，匹配不到 startServer / 并发符号时只打印手动指引，不破坏原库）。
 - **iOS（功能13）**：对 `expo-video-cache` 的 `NetworkDownloader.swift` `SessionRouter` 注入分片进度跟踪（`Library/Caches/segment_progress.json`）。已做幂等。
   - **Android + iOS（功能19）**：对 `expo-video-cache` 的 Android `ExpoVideoCacheModule.kt` 与 iOS `ExpoVideoCacheModule.swift` 注入 `processCpuPercent`（进程真实 CPU%：Android 读 `/proc/self/stat` utime+stime 差分，iOS 读 clock_gettime 差分），供浮窗主行显示真实 CPU。口径为**占整机全部核的百分比**（分母 = 墙钟增量 × 核数，上限 100%），与 `scripts/emulator-monitor/monitor.py` 一致。均已做幂等。
+- **iOS（构建环境）**：对 `react-native/sdks/hermes-engine/hermes-engine.podspec` 两处 `Pod::Executable.execute_command(...)].strip` 加 `.force_encoding('UTF-8')`，避免项目路径含中文时 `pod install` 报 `incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8`。已做幂等（见文末「iOS 构建环境前置」）。
+- **iOS（构建环境）**：`Podfile` 的 `post_install` 会在 `Pods/libdav1d` 建软链指向 `../libdav1d-local`，供 libavif 找到 `dav1d/dav1d.h`。已做幂等。
 
 因此**一般不需要手动重打**；仅当 iOS 自动补丁未命中时才按下方手动步骤改。
 
@@ -243,3 +245,40 @@ xcrun devicectl device copy from --device 1D4B63FE-82F6-5C8B-9C7F-DAA006E0B13D \
 - 若最后一条是 `DS.diskDone` 缺失：磁盘直读挂起；若 `DS.resp 200` 且请求带 Range：服务端回全长、AVPlayer 等缺字节。
 - `CCH.sentToPlayer` 停在某个值而该连接不 `CCH.done`：代理卡在 send。
 - 恢复标记：重装/清理缓存后 `vc_trace.log` 重建，无残留。
+
+# iOS 构建环境前置（非功能补丁）
+
+> 这三项与本机/项目路径相关，**不影响 app 功能代码**，但缺任何一项都会让 `pod install` / `xcodebuild` 失败。
+> 其中第 1、2 项已自动化入库；第 3 项无法入库（是 git 全局配置），仅换机时需要执行一次。
+
+## 1. hermes-engine podspec 中文路径编码（已自动）
+
+- 现象：`pod install` 报 `[!] Invalid 'hermes-engine.podspec' file: incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8`。
+- 根因：项目路径含中文（`我的文档/源码/openreel`），`Pod::Executable.execute_command` 返回 ASCII-8BIT 字符串，与 UTF-8 源码字面量拼接即抛编码错误。
+- 处理：`scripts/apply-native-patches.mjs` 的 `patchIOSHermesPodspecEncoding()` 给两处
+  `Pod::Executable.execute_command(...)].strip` 加 `.force_encoding('UTF-8')`；`postinstall` 自动执行、幂等。
+- 手动兜底（脚本未命中时）：改 `node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec` 的两处
+  `], __dir__]).strip` → `], __dir__]).force_encoding('UTF-8').strip`。
+
+## 2. Pods/libdav1d 软链（已自动）
+
+- 现象：`xcodebuild` 报 `Pods/libavif/src/codec_dav1d.c:13:10: error: 'dav1d/dav1d.h' file not found`。
+- 根因：libavif 的 xcconfig 按 SDWebImage/libdav1d-Xcode 的约定找 `${PODS_ROOT}/libdav1d/dav1d/include`；
+  本项目 `libdav1d` 是 `:path => './libdav1d-local'` 的本地 pod，CocoaPods 不建 `Pods/libdav1d`。
+- 处理：`ios/Podfile` 的 `post_install` 建软链 `Pods/libdav1d -> ../libdav1d-local`（已存在则跳过）。
+  `Pods/` 在 `ios/.gitignore` 内不入库，但生成逻辑随 `Podfile` 入库，重跑 `pod install` 自动重建。
+- 手动兜底：`cd apps/mobile/ios && ln -sfn ../libdav1d-local Pods/libdav1d`（**注意是 `../` 一级**：`Pods/` 在 `ios/` 下）。
+
+## 3. git 全局 insteadOf：HTTPS → SSH（无法入库，换机时手动一次）
+
+- 现象：`pod install` 卡在 `git clone https://github.com/...` → `Failed to connect to github.com port 443`。
+- 根因：本机 HTTPS 出网被阻断，SSH（22 端口）正常；CocoaPods 在 `/var/folders/.../dXXXX` 临时目录 clone，
+  仓库级 `.git/config` 不生效，只能配 git **全局**。
+- 处理（本机已配，换机/清配置后执行一次）：
+  ```
+  git config --global url."git@github.com:".insteadOf "https://github.com/"
+  ```
+- 校验：`git config --global --get-regexp "url\..*\.insteadof"` 应输出上面这条；
+  `ssh -T git@github.com` 应返回 `Hi <user>!`。
+- 副作用：本机所有 `https://github.com/` clone/push 都会改走 SSH（需本机 SSH key 已授权）。
+  取消：`git config --global --unset url."git@github.com:".insteadof`。

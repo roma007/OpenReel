@@ -68,5 +68,17 @@ target 'MovieApp' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # libavif 编译时需要 `${PODS_ROOT}/libdav1d/dav1d/include`（SDWebImage/libdav1d-Xcode
+    # 约定的 Pods 目录布局），而上面的 `libdav1d` 是 :path 本地 pod，CocoaPods 不会在
+    # Pods/libdav1d 放东西，导致 `'dav1d/dav1d.h' file not found`。
+    # 这里补一个软链指向 ./libdav1d-local，等价于外部 pod 的目录布局；软链本身在
+    # gitignore 的 Pods/ 内不入库，但生成逻辑随 Podfile 入库，重跑 pod install 自动重建。
+    # 幂等：已存在（含已存在的软链）则跳过。
+    dav1d_link = File.join(__dir__, 'Pods', 'libdav1d')
+    unless File.symlink?(dav1d_link) || File.exist?(dav1d_link)
+      File.symlink('../libdav1d-local', dav1d_link)
+      puts "[Podfile] 已创建 Pods/libdav1d -> ../libdav1d-local 软链（libavif 需要 dav1d 头文件）"
+    end
   end
 end

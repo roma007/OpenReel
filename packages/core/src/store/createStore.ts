@@ -147,6 +147,11 @@ export interface AppState {
   loadMediaDetail: (id: number) => Promise<void>;
   fetchMediaRating: (id: number) => Promise<void>;
   loadEpisodes: (mediaId: number, season?: number, sourceId?: string) => Promise<void>;
+  /**
+   * 按需详情：确保该媒体的播放明细已就位（索引采集模式下 episode/play_source 是缓存，
+   * 首次打开未缓存影片时会联网拉取，失败自动切其它源）。
+   */
+  ensureMediaDetail: (mediaId: number, opts?: { sourceId?: string; force?: boolean }) => Promise<EnsureDetailResult>;
   loadSeasonEpisodes: (mediaId: number, season: number) => Promise<string | null>;
   loadPlaySources: (episodeId: number) => Promise<void>;
   loadSeasons: (mediaId: number) => Promise<void>;
@@ -228,6 +233,13 @@ export interface AppState {
   deleteCollectTask: (taskId: string) => Promise<void>;
   deleteOldTasks: (days: number) => Promise<void>;
   resetStaleTasks: () => Promise<number>;
+  /**
+   * 启动恢复：把上次进程被杀残留的 RUNNING/PENDING 采集任务标记为中断，
+   * 并返回这些任务（供自动续采）。必须在 `resetStaleTasks` 语义上先取后复位。
+   */
+  recoverInterruptedTasks: () => Promise<CollectTask[]>;
+  /** 顺序自动续采（同一时刻只跑一个源，避免多源并发把设备拖死） */
+  autoResumeCollectTasks: (tasks: CollectTask[]) => Promise<{ resumed: number; failed: number }>;
 
 hasShortDrama: (type?: string) => Promise<boolean>;
   migrateAiDramaToMovie: () => Promise<{ migrated: number }>;
@@ -277,6 +289,7 @@ import { SystemConfigService } from '../services/systemConfigService';
 import { CollectorService } from '../services/collectorService';
 import { SourceImportService } from '../services/sourceImportService';
 import { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from '../services/recommendationService';
+import { MediaDetailService, type EnsureDetailResult } from '../services/mediaDetailService';
 
 /**
  * Zustand store 工厂函数（依赖注入 DatabaseProvider）。
@@ -287,6 +300,8 @@ export function createAppStore(db: DatabaseProvider) {
   const collectorService = new CollectorService(db);
   const sourceImportService = new SourceImportService(db);
   const recommendationService = new RecommendationService(db);
+  // 按需详情：采集只落索引，用户打开详情/播放时再拉播放地址
+  const mediaDetailService = new MediaDetailService(db);
   const store = create<AppState>((set, get) => ({
     mediaList: [],
     mediaMeta: null,
@@ -390,10 +405,30 @@ export function createAppStore(db: DatabaseProvider) {
       }
     },
 
+    ensureMediaDetail: async (mediaId: number, opts?: { sourceId?: string; force?: boolean }) => {
+      const result = await mediaDetailService.ensureDetail(mediaId, opts);
+      if (!result.ok) set({ error: result.error || '无法获取播放地址' });
+      return result;
+    },
+
     loadEpisodes: async (mediaId: number, season: number = 1, sourceId?: string) => {
       set({ episodesLoading: true });
       try {
-        const episodes = await db.getEpisodesByMediaId(mediaId, season, sourceId);
+        let episodes = await db.getEpisodesByMediaId(mediaId, season, sourceId);
+        if (episodes.length === 0) {
+          // 索引采集模式下没有常驻剧集：首次打开时按需拉取（命中缓存则无网络请求）
+          const result = await mediaDetailService.ensureDetail(mediaId, { sourceId });
+          if (result.ok) {
+            episodes = await db.getEpisodesByMediaId(mediaId, season, result.sourceId || sourceId);
+            // 详情刚联网拉取时，把缓存的简介等文本回填到当前媒体对象
+            if (!result.cached && get().currentMedia?.id === mediaId) {
+              const fresh = await db.getMediaById(mediaId);
+              if (fresh) set({ currentMedia: fresh });
+            }
+          } else {
+            set({ error: result.error || '无法获取播放地址，请检查网络或换源' });
+          }
+        }
         set({ episodes, episodesLoading: false });
       } catch (err: any) {
         set({ error: err.message, episodesLoading: false });
@@ -402,7 +437,11 @@ export function createAppStore(db: DatabaseProvider) {
 
     loadSeasonEpisodes: async (mediaId: number, season: number) => {
       try {
-        const sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        let sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        if (sources.length === 0) {
+          const detail = await mediaDetailService.ensureDetail(mediaId);
+          if (detail.ok) sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        }
         let episodes: any[] = [];
         let firstSourceId: string | null = null;
         if (sources.length > 0) {
@@ -419,7 +458,11 @@ export function createAppStore(db: DatabaseProvider) {
 
     loadEpisodeSources: async (mediaId: number, season?: number) => {
       try {
-        const sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        let sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        if (sources.length === 0) {
+          const detail = await mediaDetailService.ensureDetail(mediaId);
+          if (detail.ok) sources = await db.getEpisodeSourcesByMediaId(mediaId, season);
+        }
         set({ episodeSources: sources });
       } catch (err: any) {
         set({ error: err.message });
@@ -991,6 +1034,46 @@ export function createAppStore(db: DatabaseProvider) {
         set({ error: err.message });
         return 0;
       }
+    },
+
+    recoverInterruptedTasks: async () => {
+      try {
+        const all = await db.getAllCollectTasks();
+        const interrupted = all.filter(
+          (t) => (t.status === 'RUNNING' || t.status === 'PENDING') && (t.type === 'FULL' || t.type === 'INCREMENTAL')
+        );
+        if (interrupted.length > 0) {
+          // 逐条复位为 FAILED（保留 currentPage/collectedCount，续采从这里继续）
+          await db.resetStaleTasks();
+          await get().loadCollectTasks();
+        }
+        return interrupted;
+      } catch (err: any) {
+        console.error('[Store] recoverInterruptedTasks 失败:', err?.message || String(err));
+        return [];
+      }
+    },
+
+    autoResumeCollectTasks: async (tasks: CollectTask[]) => {
+      let resumed = 0;
+      let failed = 0;
+      for (const task of tasks) {
+        try {
+          console.log(`[Store] 自动续采 ${task.sourceName || task.sourceCode}（${task.type}，从第 ${(task.currentPage || 0) + 1} 页）`);
+          const result = await get().resumeCollectTask(task.taskId);
+          if (result.success) {
+            resumed++;
+            console.log(`[Store] 自动续采完成 ${task.sourceName || task.sourceCode}: 新增 ${result.collected} 条 / ${result.pages} 页`);
+          } else {
+            failed++;
+            console.warn(`[Store] 自动续采失败 ${task.sourceName || task.sourceCode}: ${result.error || '未知错误'}`);
+          }
+        } catch (err: any) {
+          failed++;
+          console.error(`[Store] 自动续采异常 ${task.sourceName || task.sourceCode}:`, err?.message || String(err));
+        }
+      }
+      return { resumed, failed };
     },
 
     hasShortDrama: async (type?: string) => {
