@@ -62,6 +62,30 @@ export class MediaDetailService {
    * 命中（TTL 内 + 有剧集）直接返回；否则按源顺序拉取，首个成功即用。
    */
   async ensureDetail(mediaId: number, opts?: { sourceId?: string; force?: boolean }): Promise<EnsureDetailResult> {
+    // 同一媒体并发调用复用同一个飞行中请求：播放页预取与用户真正切换可能同时触发，
+    // 不去重会发两次 ac=detail（浪费带宽、可能互相覆盖写入）。force 显式重拉时不复用。
+    if (!opts?.force) {
+      const existing = MediaDetailService.inflight.get(mediaId);
+      if (existing) return existing;
+    }
+    const task = this.ensureDetailInternal(mediaId, opts);
+    MediaDetailService.inflight.set(mediaId, task);
+    void task
+      .catch(() => undefined)
+      .then(() => {
+        // 仅当仍是自己时清除，避免被后续 force 请求覆盖后误删
+        if (MediaDetailService.inflight.get(mediaId) === task) MediaDetailService.inflight.delete(mediaId);
+      });
+    return task;
+  }
+
+  /** 同一媒体的飞行中拉取（进程级） */
+  private static readonly inflight = new Map<number, Promise<EnsureDetailResult>>();
+
+  private async ensureDetailInternal(
+    mediaId: number,
+    opts?: { sourceId?: string; force?: boolean }
+  ): Promise<EnsureDetailResult> {
     const sources = await this.db.getMediaSourcesByMediaId(mediaId);
     if (sources.length === 0) {
       return { ok: false, sourceId: null, cached: false, error: '该影片没有关联的视频源，请重新采集' };

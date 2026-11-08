@@ -15,7 +15,7 @@ import { ArrowLeft, Star, Settings, ChevronRight, X, Play } from 'lucide-react-n
 // 2026-10-04按用户要求「图标用白色实心」实施：原 lucide 图标为描边风格，
 // 给其加 fill 会因路径开放而畸形（Maximize 4 条开放 path、EyeOff 3 弧+斜线、Cast 3 path+line 等），故换图标集。
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget } from '@openreel/core';
+import { SystemConfigService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget, prefetchPlayTargets } from '@openreel/core';
 import { clearCategoryFilterCache } from '../categoryFilterCache';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1592,6 +1592,18 @@ export default function PlayScreen({ route, navigation }: Props) {
   // 若随 currentEpisodeId 立刻重算，next 会变「下下集」，中央卡在归位前闪出多一集的集数
   const swipePreviewFrozenRef = useRef(false);
 
+  // 预览解析结果缓存：松手切换直接复用同一目标（保证「所见即所得」），
+  // 顺带让预取目标与实际播放目标完全一致；key 用于校验上下文未变。
+  const swipeTargetsRef = useRef<{
+    key: string;
+    next: SwipeTarget;
+    prev: SwipeTarget;
+  } | null>(null);
+  /** 相邻预取的防抖定时器（上下文稳定后才真正发请求） */
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 当前滑动上下文标识：换片/换集/换列表索引都应视为新上下文
+  const swipeContextKey = `${media?.id ?? 0}|${currentEpisodeId ?? 0}|${playContext?.currentIndex ?? -1}`;
+
   const loadSwipePreviews = useCallback(async () => {
     if (swipePreviewFrozenRef.current) return;
     try {
@@ -1604,21 +1616,50 @@ export default function PlayScreen({ route, navigation }: Props) {
         : null;
       setNextPreview(nextInfo);
       setPrevPreview(prevInfo);
+      // 缓存本次解析结果，供 completeSwipe 直接消费（含随机分支，避免预览≠实际）
+      swipeTargetsRef.current = { key: swipeContextKey, next: n, prev: p };
+
+      // 播放中即预取相邻目标的播放地址：换片场景提前拉详情 + 目标集时长探测，
+      // 滑过去时 resolveDefaultPlayTarget 命中缓存（零网络），不再现拉。
+      // 800ms 防抖：进入播放页时 media/episodes/currentIndex 会连续变化几次，
+      // 只对稳定后的邻居预取，避免把中间态的随机邻居也拉一遍。
+      if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+      const neighborIds: number[] = [];
+      for (const t of [n, p]) {
+        if (t && t.kind === 'media') neighborIds.push(t.media.id);
+      }
+      if (neighborIds.length > 0) {
+        const scheduledKey = swipeContextKey;
+        prefetchTimerRef.current = setTimeout(() => {
+          if (swipeTargetsRef.current?.key !== scheduledKey) return;
+          void prefetchPlayTargets(getProvider(), neighborIds);
+        }, 800);
+      }
     } catch {}
     // 依赖 playContext（含 currentIndex）：切换后由 setPlayContext 触发重建
-  }, [media?.type, media?.id, episodes, currentEpisodeId, playContext]);
+  }, [media?.type, media?.id, episodes, currentEpisodeId, playContext, swipeContextKey]);
 
   // 播放目标变化时刷新预览（含列表切换后 currentIndex 变化）
   useEffect(() => {
     void loadSwipePreviews();
   }, [loadSwipePreviews]);
 
+  // 卸载时清掉未触发的预取防抖定时器
+  useEffect(() => () => {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+  }, []);
+
   // 完成一次跟手切换：卡片已滑出一屏后调用（松手且越过阈值）
   const completeSwipe = async (dir: 'next' | 'prev', mode: 'main' | 'fullscreen') => {
     const yVal = mode === 'fullscreen' ? fsAnimatedY : animatedY;
     if (__DEV__) console.log('[MOBSWIPE] completeSwipe', dir, mode);
     try {
-      const target = await resolveSwipeTarget(dir);
+      // 优先复用预览阶段解析出的目标：
+      // 1) 随机分支不会再出现「预览是 A、松手播 B」；
+      // 2) 该目标已被 prefetchPlayTargets 预热，切换瞬间命中详情缓存（零网络等待）。
+      const cachedTargets = swipeTargetsRef.current;
+      const cached = cachedTargets && cachedTargets.key === swipeContextKey ? cachedTargets[dir] : null;
+      const target = cached ?? (await resolveSwipeTarget(dir));
       if (__DEV__) console.log('[MOBSWIPE] target=', target ? `${target.kind}${target.kind === 'episode' ? `/ep#${target.ep.id}` : `/media#${target.media.id}`}` : 'null');
       if (!target) {
         if (__DEV__) console.log('[MOBSWIPE] no-target spring-back');
