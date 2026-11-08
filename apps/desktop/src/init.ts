@@ -288,6 +288,19 @@ export async function initApp(
         }, 8000);
       }
 
+      // 索引体检：收藏 + 观看历史里的片子提前校验/自愈（后台串行，失败静默，不阻塞启动）
+      setTimeout(() => {
+        _store
+          ?.getState()
+          .repairUserMediaIndex()
+          .then((r) => {
+            if (r.checked > 0) {
+              console.log(`[INIT] 索引体检：处理 ${r.checked}/${r.total}，修复 ${r.healed}，失败 ${r.failed}`);
+            }
+          })
+          .catch((err) => console.warn('[INIT] 索引体检失败:', err));
+      }, 12000);
+
       report('Step 4d: 重建「越看越懂你」推荐分（异步）...');
       // 异步执行推荐重算，不阻塞启动流程
       setTimeout(() => {

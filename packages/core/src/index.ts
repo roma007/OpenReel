@@ -48,6 +48,7 @@ export { SourceImportService, exportSourcesToJson } from './services/sourceImpor
 export { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from './services/recommendationService';
 export { resolveDefaultPlayTarget, type DefaultPlayTarget } from './services/playbackTarget';
 export { prefetchPlayTargets, resetPlayPrefetchCache } from './services/playPrefetch';
+export { repairUserMediaIndex, collectRepairCandidates, type IndexRepairResult } from './services/indexRepairService';
 export {
   fetchLatestRelease,
   compareVersions,

@@ -240,6 +240,11 @@ export interface AppState {
   recoverInterruptedTasks: () => Promise<CollectTask[]>;
   /** 顺序自动续采（同一时刻只跑一个源，避免多源并发把设备拖死） */
   autoResumeCollectTasks: (tasks: CollectTask[]) => Promise<{ resumed: number; failed: number }>;
+  /**
+   * 索引体检：对收藏 + 观看历史批量做「详情校验 + 自愈」。
+   * 启动后台调用（界面就绪后延迟执行），命中缓存几乎零成本；返回统计。
+   */
+  repairUserMediaIndex: (opts?: { limit?: number; signal?: AbortSignal }) => Promise<IndexRepairResult>;
 
 hasShortDrama: (type?: string) => Promise<boolean>;
   migrateAiDramaToMovie: () => Promise<{ migrated: number }>;
@@ -290,6 +295,7 @@ import { CollectorService } from '../services/collectorService';
 import { SourceImportService } from '../services/sourceImportService';
 import { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from '../services/recommendationService';
 import { MediaDetailService, type EnsureDetailResult } from '../services/mediaDetailService';
+import { repairUserMediaIndex, type IndexRepairResult } from '../services/indexRepairService';
 
 /**
  * Zustand store 工厂函数（依赖注入 DatabaseProvider）。
@@ -1074,6 +1080,16 @@ export function createAppStore(db: DatabaseProvider) {
         }
       }
       return { resumed, failed };
+    },
+
+    repairUserMediaIndex: async (opts?: { limit?: number; signal?: AbortSignal }) => {
+      // 索引体检：只跑本地库查询 + 必要时联网自愈；任何异常都不影响启动
+      try {
+        return await repairUserMediaIndex(db, opts);
+      } catch (err: any) {
+        console.warn('[Store] 索引体检失败:', err?.message || String(err));
+        return { total: 0, checked: 0, healed: 0, failed: 0 };
+      }
     },
 
     hasShortDrama: async (type?: string) => {

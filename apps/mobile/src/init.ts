@@ -105,6 +105,19 @@ export async function initApp(options?: { onMigrationProgress?: (p: MigrationPro
       }, 8000);
     }
 
+    // 索引体检：收藏 + 观看历史里的片子提前校验/自愈（后台串行，失败静默，不阻塞启动）
+    setTimeout(() => {
+      store
+        .getState()
+        .repairUserMediaIndex()
+        .then((r) => {
+          if (r.checked > 0) {
+            console.log(`[INIT] 索引体检：处理 ${r.checked}/${r.total}，修复 ${r.healed}，失败 ${r.failed}`);
+          }
+        })
+        .catch((err) => console.warn('[INIT] 索引体检失败:', err));
+    }, 12000);
+
     // 「越看越懂你」：仅当有变化或尚无推荐快照时才在后台重建一次，
     // 避免每次启动都跑全量重算（其打分循环在大数据量下会占满主线程导致卡顿）
     try {
