@@ -362,17 +362,32 @@ export class TauriSqlProvider implements DatabaseProvider {
     }
 
     // 3) 拆掉引用旧列的 FTS 触发器与虚拟表（重建 media 后由 rebuildFts5 重建）
+    //
+    // 【顺序铁律】必须先 DROP 虚拟表 media_fts，再 DROP 它的阴影表
+    // （media_fts_data/_idx/_docsize/_config）。
+    // 反过来（先删阴影表、虚拟表残留）会让 media_fts 变成「孤儿虚拟表」：
+    // 之后任何触碰它的语句都要先 xConnect，而阴影表已不存在 →
+    // `vtable constructor failed: media_fts`（SQLITE_CORRUPT_VTAB，实测 code 267），
+    // 连重建时的 `DROP TABLE media_fts` / `CREATE VIRTUAL TABLE media_fts` 都会失败，
+    // 最终导致升级当天首次启动直接「初始化失败」（重启后才自愈）。
+    // 注意：外部内容表（content='media'）没有 media_fts_content，DROP IF EXISTS 仅作兜底。
     for (const stmt of [
       'DROP TRIGGER IF EXISTS media_ai',
       'DROP TRIGGER IF EXISTS media_ad',
       'DROP TRIGGER IF EXISTS media_au',
+      'DROP TABLE IF EXISTS media_fts',
       'DROP TABLE IF EXISTS media_fts_data',
       'DROP TABLE IF EXISTS media_fts_idx',
       'DROP TABLE IF EXISTS media_fts_content',
       'DROP TABLE IF EXISTS media_fts_docsize',
-      'DROP TABLE IF EXISTS media_fts',
+      'DROP TABLE IF EXISTS media_fts_config',
     ]) {
-      await this.db!.execute(stmt).catch(() => undefined);
+      try {
+        await this.db!.execute(stmt);
+      } catch (e) {
+        // 不静默：孤儿虚拟表场景下由 rebuildFts5 的修复分支兜底，这里留痕便于排查
+        console.warn('[DB] 索引优先升级：FTS 拆除语句失败（交由 rebuildFts5 修复）:', stmt, e);
+      }
     }
 
     // 4) 重建 media 瘦身表（分批复制，边界控制内存/WAL）
@@ -1189,7 +1204,12 @@ export class TauriSqlProvider implements DatabaseProvider {
       }
     }
 
-    // ── 阶段 2：尝试常规清理 ──
+    // ── 阶段 2：常规清理 ──
+    // 【顺序铁律】必须先 DROP 虚拟表 media_fts（其阴影表随之删除），再兜底删残留阴影表。
+    // 反序（先删 media_fts_data/_idx/_docsize）会留下「孤儿虚拟表」：之后任何触碰
+    // media_fts 的语句都要 xConnect，阴影表已不存在 →
+    // `vtable constructor failed: media_fts`（SQLITE_CORRUPT_VTAB，实测 code 267），
+    // 连下面阶段 4 的 CREATE 都会失败 → 升级当天首次启动直接「初始化失败」。
     let needWritableView = false;
     try {
       // 先删触发器
@@ -1197,28 +1217,80 @@ export class TauriSqlProvider implements DatabaseProvider {
       await this.db!.execute('DROP TRIGGER IF EXISTS media_ad');
       await this.db!.execute('DROP TRIGGER IF EXISTS media_au');
 
-      // 再删辅助表（普通表，DROP 一定成功）
+      // 再删虚拟表（必须排第一）
+      await this.db!.execute('DROP TABLE IF EXISTS media_fts');
+
+      // 最后兜底删残余阴影表（外部内容表没有 media_fts_content，IF EXISTS 兜底）
       await this.db!.execute('DROP TABLE IF EXISTS media_fts_data');
       await this.db!.execute('DROP TABLE IF EXISTS media_fts_idx');
       await this.db!.execute('DROP TABLE IF EXISTS media_fts_content');
       await this.db!.execute('DROP TABLE IF EXISTS media_fts_docsize');
-
-      // 最后删虚拟表
-      await this.db!.execute('DROP TABLE IF EXISTS media_fts');
-    } catch {
-      // DROP 失败 —— 孤立虚拟表（辅助表缺失，xConnect 无法调用）
+      await this.db!.execute('DROP TABLE IF EXISTS media_fts_config');
+    } catch (e) {
+      // DROP 失败 —— 孤立虚拟表（阴影表缺失，xConnect 无法调用）
+      console.warn('[DB] FTS5 清理失败，转入孤儿虚拟表修复:', e);
       needWritableView = true;
     }
 
     // ── 阶段 3：修复孤立虚拟表 ──
     if (needWritableView) {
-      await this.db!.execute('PRAGMA writable_schema = ON');
-      await this.db!.execute("DELETE FROM sqlite_master WHERE type='table' AND name LIKE 'media_fts%'");
-      await this.db!.execute('PRAGMA writable_schema = OFF');
-      await this.db!.execute('PRAGMA integrity_check');
+      await this.dropOrphanFtsEntries();
     }
 
     // ── 阶段 4：重建 FTS5 虚拟表 + 触发器 + 索引 ──
+    // 失败绝不阻断启动：搜索侧已做 LIKE 兜底，缺 FTS 只损失速度，不该让整个 App 打不开。
+    try {
+      await this.createFts5();
+    } catch (e) {
+      console.warn('[DB] FTS5 重建失败，清理孤儿条目后重试一次:', e);
+      try {
+        await this.dropOrphanFtsEntries();
+        await this.createFts5();
+      } catch (e2) {
+        console.error('[DB] FTS5 重建最终失败（启动继续，搜索降级为 LIKE）:', e2);
+      }
+    }
+  }
+
+  /**
+   * 清理「孤儿 FTS5 虚拟表」的 schema 条目。
+   *
+   * 孤儿 = media_fts 仍在 sqlite_master 里，但它的阴影表（_data/_idx/_docsize/_config）
+   * 已被删掉；此时任何 SQL 触碰它都会 `vtable constructor failed: media_fts`。
+   * 普通 DROP TABLE 做不到，只能改 writable_schema 直接删 schema 行。
+   *
+   * 关键：硬改 sqlite_master 后**当前连接**的 schema 缓存仍是旧的（还记着那个孤儿虚拟表），
+   * 不 bump `PRAGMA schema_version` 的话，紧接着的 CREATE VIRTUAL TABLE 依旧报同一个错
+   * （这正是 2026-11-08 桌面端「初始化失败」的成因）。bump 后 SQLite 重新解析 schema。
+   */
+  private async dropOrphanFtsEntries(): Promise<void> {
+    for (const stmt of [
+      'DROP TRIGGER IF EXISTS media_ai',
+      'DROP TRIGGER IF EXISTS media_ad',
+      'DROP TRIGGER IF EXISTS media_au',
+    ]) {
+      await this.db!.execute(stmt).catch(() => undefined);
+    }
+
+    const verRows = await this.db!.select<{ schema_version: number }[]>('PRAGMA schema_version').catch(() => []);
+    const nextVersion = (verRows[0]?.schema_version ?? 0) + 1;
+
+    await this.db!.execute('PRAGMA writable_schema = ON');
+    await this.db!.execute("DELETE FROM sqlite_master WHERE type='table' AND name LIKE 'media_fts%'");
+    await this.db!.execute('PRAGMA writable_schema = OFF');
+    // 强制当前连接重载 schema（不改则残留条目仍在内存 schema 中）
+    await this.db!.execute(`PRAGMA schema_version = ${nextVersion}`);
+
+    // 硬删留下的孤儿页顺手回收（失败不阻断）
+    try {
+      await this.db!.execute('VACUUM');
+    } catch (e) {
+      console.warn('[DB] 孤儿 FTS 清理后 VACUUM 跳过:', e);
+    }
+  }
+
+  /** 建 FTS5 虚拟表 + 三个同步触发器 + 全量回填。 */
+  private async createFts5(): Promise<void> {
     await this.db!.execute(
       `CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
         title, alias, original_title,
@@ -1661,91 +1733,91 @@ export class TauriSqlProvider implements DatabaseProvider {
     // 含空格/单双字关键词 trigram 不建索引或分词与 LIKE 不一致，退回原 LIKE 语义，结果与旧版一致。
     const useFts = trimmed.length >= 3 && !/\s/.test(trimmed);
 
-    let whereClause: string;
-    let queryParams: any[];
+    // 关键词之外的公共筛选（kid 模式/类型/年份/地区/标签）：FTS 与 LIKE 两条路径共用，
+    // 避免两条路径各写一遍导致行为漂移。
+    const applyCommonFilters = (base: string, prms: any[]): string => {
+      let w = base;
+      if (this.kidModeActive) w += ' AND m.kid_safe = 1';
+      if (params.type) { w += ' AND m.type = ?'; prms.push(params.type); }
+      if (params.year) { w += ' AND m.year = ?'; prms.push(params.year); }
+      if (params.area) { w += ' AND m.area = ?'; prms.push(params.area); }
+      if (params.genre) { w += ' AND m.genre LIKE ?'; prms.push(`%${params.genre}%`); }
+      return w;
+    };
+
     if (useFts) {
       // 短语查询：命中任一索引列中出现的子串；引号内双写转义。
       const ftsQuery = `"${trimmed.replace(/"/g, '""')}"`;
-      whereClause = ' WHERE media_fts MATCH ? AND (m.hidden IS NULL OR m.hidden = 0)';
-      queryParams = [ftsQuery];
-    } else {
-      const like = `%${trimmed}%`;
-      whereClause = ' WHERE (m.hidden IS NULL OR m.hidden = 0) AND (m.title LIKE ? OR m.alias LIKE ? OR m.original_title LIKE ? OR m.director LIKE ? OR m.cast LIKE ?)';
-      queryParams = [like, like, like, like, like];
-    }
-
-    if (this.kidModeActive) {
-      whereClause += ' AND m.kid_safe = 1';
-    }
-
-    if (params.type) {
-      whereClause += ' AND m.type = ?';
-      queryParams.push(params.type);
-    }
-    if (params.year) {
-      whereClause += ' AND m.year = ?';
-      queryParams.push(params.year);
-    }
-    if (params.area) {
-      whereClause += ' AND m.area = ?';
-      queryParams.push(params.area);
-    }
-    if (params.genre) {
-      whereClause += ' AND m.genre LIKE ?';
-      queryParams.push(`%${params.genre}%`);
-    }
-
-    if (useFts) {
-      const countRows = await this.db!.select<{ count: number }[]>(
-        `SELECT COUNT(*) as count FROM media_fts f JOIN media m ON m.rowid = f.rowid${whereClause}`,
-        queryParams
+      const ftsParams: any[] = [ftsQuery];
+      const whereClause = applyCommonFilters(
+        ' WHERE media_fts MATCH ? AND (m.hidden IS NULL OR m.hidden = 0)',
+        ftsParams
       );
-      let total = countRows[0]?.count || 0;
 
-      // 演员/导演已移出 FTS 索引（体积：69MB → 14MB/23.8 万行）：片名无命中时用 LIKE 兜底，
-      // 保证「按演员名搜索」仍然可用（仅无结果时触发一次，正常搜索零额外成本）。
-      if (total === 0) {
-        const fbParts: string[] = ['(m.hidden IS NULL OR m.hidden = 0)', '(m.director LIKE ? OR m.cast LIKE ?)'];
-        const like = `%${trimmed}%`;
-        const fbParams: any[] = [like, like];
-        if (this.kidModeActive) fbParts.push('m.kid_safe = 1');
-        if (params.type) { fbParts.push('m.type = ?'); fbParams.push(params.type); }
-        if (params.year) { fbParts.push('m.year = ?'); fbParams.push(params.year); }
-        if (params.area) { fbParts.push('m.area = ?'); fbParams.push(params.area); }
-        if (params.genre) { fbParts.push('m.genre LIKE ?'); fbParams.push(`%${params.genre}%`); }
-        const fbWhere = ' WHERE ' + fbParts.join(' AND ');
-        const fbCountRows = await this.db!.select<{ count: number }[]>(
-          `SELECT COUNT(*) as count FROM media m${fbWhere}`,
-          fbParams
+      try {
+        const countRows = await this.db!.select<{ count: number }[]>(
+          `SELECT COUNT(*) as count FROM media_fts f JOIN media m ON m.rowid = f.rowid${whereClause}`,
+          ftsParams
         );
-        const fbTotal = fbCountRows[0]?.count || 0;
-        if (fbTotal > 0) {
-          const fbRows = await this.db!.select<any[]>(
-            `SELECT m.* FROM media m${fbWhere} ORDER BY m.updated_at DESC LIMIT ? OFFSET ?`,
-            [...fbParams, pageSize, offset]
+        const total = countRows[0]?.count || 0;
+
+        // 演员/导演已移出 FTS 索引（体积：69MB → 14MB/23.8 万行）：片名无命中时用 LIKE 兜底，
+        // 保证「按演员名搜索」仍然可用（仅无结果时触发一次，正常搜索零额外成本）。
+        if (total === 0) {
+          const fbParts: string[] = ['(m.hidden IS NULL OR m.hidden = 0)', '(m.director LIKE ? OR m.cast LIKE ?)'];
+          const like = `%${trimmed}%`;
+          const fbParams: any[] = [like, like];
+          if (this.kidModeActive) fbParts.push('m.kid_safe = 1');
+          if (params.type) { fbParts.push('m.type = ?'); fbParams.push(params.type); }
+          if (params.year) { fbParts.push('m.year = ?'); fbParams.push(params.year); }
+          if (params.area) { fbParts.push('m.area = ?'); fbParams.push(params.area); }
+          if (params.genre) { fbParts.push('m.genre LIKE ?'); fbParams.push(`%${params.genre}%`); }
+          const fbWhere = ' WHERE ' + fbParts.join(' AND ');
+          const fbCountRows = await this.db!.select<{ count: number }[]>(
+            `SELECT COUNT(*) as count FROM media m${fbWhere}`,
+            fbParams
           );
-          return {
-            items: fbRows.map(rowToMedia),
-            meta: { page, pageSize, total: fbTotal, totalPages: Math.ceil(fbTotal / pageSize) },
-          };
+          const fbTotal = fbCountRows[0]?.count || 0;
+          if (fbTotal > 0) {
+            const fbRows = await this.db!.select<any[]>(
+              `SELECT m.* FROM media m${fbWhere} ORDER BY m.updated_at DESC LIMIT ? OFFSET ?`,
+              [...fbParams, pageSize, offset]
+            );
+            return {
+              items: fbRows.map(rowToMedia),
+              meta: { page, pageSize, total: fbTotal, totalPages: Math.ceil(fbTotal / pageSize) },
+            };
+          }
         }
+
+        const rows = await this.db!.select<any[]>(
+          `SELECT m.* FROM media_fts f JOIN media m ON m.rowid = f.rowid
+           ${whereClause}
+           ORDER BY m.updated_at DESC
+           LIMIT ? OFFSET ?`,
+          [...ftsParams, pageSize, offset]
+        );
+        return {
+          items: rows.map(rowToMedia),
+          meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+        };
+      } catch (e) {
+        // FTS 索引缺失/损坏时不能让搜索整个失败：退回 LIKE 全表匹配（慢但可用）。
+        console.warn('[DB] FTS5 查询失败，本次搜索退回 LIKE:', e);
       }
-
-      const totalPages = Math.ceil(total / pageSize);
-
-      const rows = await this.db!.select<any[]>(
-        `SELECT m.* FROM media_fts f JOIN media m ON m.rowid = f.rowid
-         ${whereClause}
-         ORDER BY m.updated_at DESC
-         LIMIT ? OFFSET ?`,
-        [...queryParams, pageSize, offset]
-      );
-      return { items: rows.map(rowToMedia), meta: { page, pageSize, total, totalPages } };
     }
+
+    // LIKE 路径（含演员/导演；单双字/含空格关键词也走这里）
+    const like = `%${trimmed}%`;
+    const likeParams: any[] = [like, like, like, like, like];
+    const whereClause = applyCommonFilters(
+      ' WHERE (m.hidden IS NULL OR m.hidden = 0) AND (m.title LIKE ? OR m.alias LIKE ? OR m.original_title LIKE ? OR m.director LIKE ? OR m.cast LIKE ?)',
+      likeParams
+    );
 
     const countRows = await this.db!.select<{ count: number }[]>(
       `SELECT COUNT(*) as count FROM media m${whereClause}`,
-      queryParams
+      likeParams
     );
     const total = countRows[0]?.count || 0;
     const totalPages = Math.ceil(total / pageSize);
@@ -1755,7 +1827,7 @@ export class TauriSqlProvider implements DatabaseProvider {
        ${whereClause}
        ORDER BY m.updated_at DESC
        LIMIT ? OFFSET ?`,
-      [...queryParams, pageSize, offset]
+      [...likeParams, pageSize, offset]
     );
 
     return { items: rows.map(rowToMedia), meta: { page, pageSize, total, totalPages } };

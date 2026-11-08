@@ -464,15 +464,18 @@ const MIGRATIONS: Migration[] = [
   },
   {
     version: 50,
+    // 顺序铁律：必须先 DROP 虚拟表 media_fts，再 DROP 阴影表；反序会留下「孤儿虚拟表」，
+    // 之后任何语句都报 vtable constructor failed: media_fts（SQLITE_CORRUPT_VTAB，桌面端实测 code 267）。
     description: 'rebuild_media_fts_with_trigram_tokenizer',
     sql: `DROP TRIGGER IF EXISTS media_ai;
           DROP TRIGGER IF EXISTS media_ad;
           DROP TRIGGER IF EXISTS media_au;
+          DROP TABLE IF EXISTS media_fts;
           DROP TABLE IF EXISTS media_fts_data;
           DROP TABLE IF EXISTS media_fts_idx;
           DROP TABLE IF EXISTS media_fts_content;
           DROP TABLE IF EXISTS media_fts_docsize;
-          DROP TABLE IF EXISTS media_fts;
+          DROP TABLE IF EXISTS media_fts_config;
           CREATE VIRTUAL TABLE media_fts USING fts5(
             title, alias, original_title, director, cast,
             content='media',
