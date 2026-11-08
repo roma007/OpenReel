@@ -222,6 +222,7 @@ export interface CollectPreviewItem {
 }
 
 export interface HiddenCollectItem {
+  mediaId: number;
   title: string;
   genres: string[];
 }

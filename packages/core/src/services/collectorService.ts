@@ -1264,7 +1264,7 @@ const title = await normalizer.normalizeTitle(item.vod_name);
               return media.genres.some(g => g.toLowerCase().includes(needle));
             });
             if (matched.length > 0) {
-              hiddenItems.push({ title: media.title, genres: matched });
+              hiddenItems.push({ mediaId: media.id, title: media.title, genres: matched });
             }
           }
         }

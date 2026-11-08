@@ -600,6 +600,18 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE search_history_new RENAME TO search_history;
     `,
   },
+  {
+    version: 63,
+    description: 'create_media_hidden_exempt_table',
+    // 「仅显示该视频」长期豁免：采集结果里选择“仅显示该视频”时按 media_id 登记，
+    // syncHiddenByGenres 规则重扫跳过这些行；删除 media 时由外键级联清理。
+    sql: `
+      CREATE TABLE IF NOT EXISTS media_hidden_exempt (
+        media_id INTEGER PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+        created_at TEXT
+      );
+    `,
+  },
 ];
 
 /**
@@ -2490,6 +2502,37 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     return { unhidden: result?.count || 0 };
   }
 
+  async unhideMediaByIds(ids: number[]): Promise<{ unhidden: number }> {
+    const validIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+    if (validIds.length === 0) return { unhidden: 0 };
+    // 取消隐藏改变可见集，推荐视图缓存必须立即失效
+    this.recommendViewCache = null;
+
+    const now = new Date().toISOString();
+    let unhidden = 0;
+    // 分片：避开 SQLite 变量数量上限（预览条数通常很小，仅作兜底）
+    const CHUNK = 500;
+    for (let i = 0; i < validIds.length; i += CHUNK) {
+      const chunk = validIds.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      // 先登记豁免再取消隐藏：避免「已可见但未免疫」的中间态被同步逻辑重新隐藏
+      await this.db!.runAsync(
+        `INSERT OR IGNORE INTO media_hidden_exempt (media_id, created_at) SELECT id, ? FROM media WHERE id IN (${placeholders})`,
+        [now, ...chunk]
+      );
+      await this.db!.runAsync(
+        `UPDATE media SET hidden = 0 WHERE id IN (${placeholders})`,
+        chunk
+      );
+      const result = await this.db!.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) as count FROM media WHERE hidden = 0 AND id IN (${placeholders})`,
+        chunk
+      );
+      unhidden += result?.count || 0;
+    }
+    return { unhidden };
+  }
+
   async getHiddenGenres(): Promise<string[]> {
     // 采集 prepare 每条新片都会读（事务外）：走独立读连接，不被写事务阻塞
     const rows = await (this.readDb ?? this.db!).getAllAsync<{ sub_type: string }>(
@@ -2520,7 +2563,7 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     const uncategorizedCondition =
       "(genre IS NULL OR genre = '' OR genre = '[]' OR json_extract(genre, '$[0]') IS NULL OR json_extract(genre, '$[0]') = '')";
     const whereClause =
-      `(hidden IS NULL OR hidden = 0) AND (` +
+      `(hidden IS NULL OR hidden = 0) AND NOT EXISTS (SELECT 1 FROM media_hidden_exempt e WHERE e.media_id = media.id) AND (` +
       `EXISTS (SELECT 1 FROM hidden_genre hg WHERE hg.sub_type != ? AND media.genre LIKE '%' || hg.sub_type || '%')` +
       ` OR (EXISTS (SELECT 1 FROM hidden_genre WHERE sub_type = ?) AND ${uncategorizedCondition})` +
       `)`;

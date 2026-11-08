@@ -27,7 +27,7 @@ export default function KeywordCollectScreen({ navigation, route }: Props) {
 
   const {
     previewResults, previewLoading,
-    searchKeywordPreview, saveSelectedPreviewItems, clearPreviewResults, unhideMediaByGenres,
+    searchKeywordPreview, saveSelectedPreviewItems, clearPreviewResults, unhideMediaByGenres, unhideMediaByIds,
   } = useAppStore();
 
   const [keywordInput, setKeywordInput] = useState('');
@@ -125,13 +125,15 @@ export default function KeywordCollectScreen({ navigation, route }: Props) {
             ? `${titles.slice(0, 8).join('、')}等${titles.length}部`
             : titles.join('、');
           const genres = [...new Set(result.hiddenItems.flatMap((h) => h.genres))];
+          const mediaIds = [...new Set(result.hiddenItems.map((h) => h.mediaId).filter((id) => id > 0))];
+          const single = result.hiddenItems.length === 1;
           Alert.alert(
             '部分视频已被隐藏',
-            `「${titleText}」视频名被隐藏，恢复显示「${genres.join('、')}」类视频后就可以找到。是否取消隐藏这些子类型？`,
+            `「${titleText}」所属类型「${genres.join('、')}」处于隐藏状态，暂时在列表和搜索中找不到。你可以恢复显示这些类型，或仅显示这些视频（类型仍保持隐藏）。`,
             [
               { text: '取消', style: 'cancel' },
               {
-                text: '取消隐藏',
+                text: '恢复显示类型',
                 onPress: () => {
                   unhideMediaByGenres(genres)
                     .then((res) => {
@@ -142,6 +144,22 @@ export default function KeywordCollectScreen({ navigation, route }: Props) {
                     .catch((err) => {
                       console.error('[COLLECT] 取消隐藏子类型失败:', err);
                       Alert.alert('操作失败', '取消隐藏失败，请重试');
+                    });
+                },
+              },
+              {
+                text: single ? '仅显示该视频' : '仅显示这些视频',
+                onPress: () => {
+                  if (mediaIds.length === 0) return;
+                  unhideMediaByIds(mediaIds)
+                    .then((res) => {
+                      if (res.unhidden > 0) {
+                        Alert.alert('已显示', `${single ? '该视频已显示' : `已显示 ${res.unhidden} 部视频`}，相关类型仍保持隐藏`);
+                      }
+                    })
+                    .catch((err) => {
+                      console.error('[COLLECT] 仅显示视频失败:', err);
+                      Alert.alert('操作失败', '显示视频失败，请重试');
                     });
                 },
               },
@@ -161,7 +179,7 @@ export default function KeywordCollectScreen({ navigation, route }: Props) {
     } finally {
       setIsSaving(false);
     }
-  }, [previewResults, selectedPreviewIds, saveSelectedPreviewItems, clearPreviewResults, relaxYear, navigation, unhideMediaByGenres]);
+  }, [previewResults, selectedPreviewIds, saveSelectedPreviewItems, clearPreviewResults, relaxYear, navigation, unhideMediaByGenres, unhideMediaByIds]);
 
   const styles = useMemo(() => StyleSheet.create({
     container: { flex: 1 },

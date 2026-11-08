@@ -30,7 +30,7 @@ interface KeywordCollectDialogProps {
 export function KeywordCollectDialog({ open, onOpenChange, initialKeyword, initialRelaxYear }: KeywordCollectDialogProps) {
   const {
     previewResults, previewLoading,
-    searchKeywordPreview, saveSelectedPreviewItems, clearPreviewResults, unhideMediaByGenres,
+    searchKeywordPreview, saveSelectedPreviewItems, clearPreviewResults, unhideMediaByGenres, unhideMediaByIds,
   } = useAppStore();
   const toast = useToast();
 
@@ -268,13 +268,16 @@ export function KeywordCollectDialog({ open, onOpenChange, initialKeyword, initi
                   ? `${titles.slice(0, MAX_DISPLAY_TITLES).join('、')}等${titles.length}部`
                   : titles.join('、');
                 const genres = [...new Set(hiddenAlert.flatMap((h) => h.genres))];
-                return `「${titleText}」视频名被隐藏，恢复显示「${genres.join('、')}」类视频后就可以找到。`;
+                return `「${titleText}」所属类型「${genres.join('、')}」处于隐藏状态，暂时在列表和搜索中找不到。你可以恢复显示这些类型，或仅显示这些视频（类型仍保持隐藏）。`;
               })()}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm" onClick={() => setHiddenAlert(null)}>知道了</Button>
+            </DialogClose>
             <Button
-              variant="default"
+              variant="outline"
               size="sm"
               onClick={async () => {
                 const genres = hiddenAlert ? [...new Set(hiddenAlert.flatMap((h) => h.genres))] : [];
@@ -289,11 +292,27 @@ export function KeywordCollectDialog({ open, onOpenChange, initialKeyword, initi
                 }
               }}
             >
-              取消隐藏
+              恢复显示「{hiddenAlert ? [...new Set(hiddenAlert.flatMap((h) => h.genres))].join('、') : ''}」类型
             </Button>
-            <DialogClose asChild>
-              <Button variant="outline" size="sm" onClick={() => setHiddenAlert(null)}>知道了</Button>
-            </DialogClose>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={async () => {
+                const ids = hiddenAlert ? [...new Set(hiddenAlert.map((h) => h.mediaId).filter((id) => id > 0))] : [];
+                const single = hiddenAlert ? hiddenAlert.length === 1 : false;
+                setHiddenAlert(null);
+                if (ids.length === 0) return;
+                try {
+                  const res = await unhideMediaByIds(ids);
+                  toast(`已显示${single ? '该视频' : ` ${res.unhidden} 部视频`}，相关类型仍保持隐藏`);
+                } catch (err: any) {
+                  toast('显示视频失败', 'error');
+                  console.error('[KeywordCollect] 仅显示视频失败:', err);
+                }
+              }}
+            >
+              {hiddenAlert && hiddenAlert.length === 1 ? '仅显示该视频' : '仅显示这些视频'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -146,6 +146,12 @@ export interface DatabaseProvider {
   deleteNonMediaPlaySources(): Promise<number>;
   hideMediaByGenres(genres: string[]): Promise<{ hidden: number }>;
   unhideMediaByGenres(genres: string[]): Promise<{ unhidden: number }>;
+  /**
+   * 仅恢复指定 media 的显示（不动 hidden_genre），并登记「类型规则长期豁免」：
+   * 之后 syncHiddenByGenres 不会再因 genre 命中而隐藏这些 media。
+   * 用户主动 hideMediaByGenres 仍会隐藏它们（豁免只挡规则自动重扫）。
+   */
+  unhideMediaByIds(ids: number[]): Promise<{ unhidden: number }>;
   getHiddenGenres(): Promise<string[]>;
   getHiddenMediaCount(): Promise<number>;
   /** 对账：把已隐藏子类型重新套用到现有媒体（genre 变更后 hidden 可能过期），返回新增隐藏数。 */

@@ -217,6 +217,14 @@ export const SCHEMA_SQL = `
     created_at TEXT
   );
 
+  -- 「仅显示该视频」豁免：这些 media 即使 genre 命中 hidden_genre，也不参与
+  -- syncHiddenByGenres 的规则自动重隐藏（用户主动 hideMediaByGenres 仍会隐藏它们）。
+  -- 采集结果提示中的「仅显示该视频」按 media_id 登记；删除 media 时级联清理。
+  CREATE TABLE IF NOT EXISTS media_hidden_exempt (
+    media_id INTEGER PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+    created_at TEXT
+  );
+
   -- 「越看越懂你」用户兴趣标签画像（v2 抖音式推荐）
   CREATE TABLE IF NOT EXISTS user_interest_tag (
     tag TEXT NOT NULL,

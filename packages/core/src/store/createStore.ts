@@ -252,6 +252,7 @@ hasShortDrama: (type?: string) => Promise<boolean>;
   deleteMediaWithoutPlaySource: () => Promise<number>;
   hideMediaByGenres: (genres: string[]) => Promise<{ hidden: number }>;
   unhideMediaByGenres: (genres: string[]) => Promise<{ unhidden: number }>;
+  unhideMediaByIds: (ids: number[]) => Promise<{ unhidden: number }>;
   getHiddenMediaCount: () => Promise<number>;
   getHiddenGenres: () => Promise<string[]>;
   getUncategorizedCount: (type?: string, includeHidden?: boolean) => Promise<number>;
@@ -1219,6 +1220,13 @@ export function createAppStore(db: DatabaseProvider) {
 
     unhideMediaByGenres: async (genres: string[]) => {
       const result = await db.unhideMediaByGenres(genres);
+      clearMediaFilterCache();
+      await get().loadMediaList();
+      return result;
+    },
+
+    unhideMediaByIds: async (ids: number[]) => {
+      const result = await db.unhideMediaByIds(ids);
       clearMediaFilterCache();
       await get().loadMediaList();
       return result;
