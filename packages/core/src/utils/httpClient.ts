@@ -72,7 +72,20 @@ function createDefaultHttpClient(): HttpClient {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        const data = await response.json();
+        // 源站偶发返回未转义的裸控制字符（如 \u0001），JSON.parse 会直接失败。
+        // 这里只读一次文本：先直接解析，失败再清洗控制字符重试（不重复缓冲响应体）。
+        const rawText = await response.text();
+        let data: any;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          try {
+            data = JSON.parse(rawText.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' '));
+            console.warn('[HTTP Client] JSON 含非法控制字符，已清洗后解析');
+          } catch {
+            throw new Error(`响应不是合法 JSON：${rawText.slice(0, 80)}`);
+          }
+        }
         console.log(`[HTTP Client] 成功: ${response.status}, 数据长度: ${JSON.stringify(data).length}`);
         
         return {

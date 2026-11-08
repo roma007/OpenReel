@@ -645,10 +645,22 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_media_source_source_vod ON media_source(source_id, vod_id);
       CREATE INDEX IF NOT EXISTS idx_media_detail_fetched_at ON media_detail(fetched_at);
       INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
-        SELECT m.id, e.source_id, m.vod_id, m.source_updated_at
+        SELECT m.id, s.source_id, m.vod_id, m.source_updated_at
           FROM media m
-          JOIN (SELECT media_id, MIN(source_id) AS source_id FROM episode
-                 WHERE source_id IS NOT NULL GROUP BY media_id) e ON e.media_id = m.id
+          JOIN (SELECT media_id, MIN(source_id) AS source_id
+                  FROM episode
+                 WHERE source_id IS NOT NULL
+                 GROUP BY media_id
+                HAVING COUNT(DISTINCT source_id) = 1) s ON s.media_id = m.id
+         WHERE m.vod_id IS NOT NULL AND m.vod_id <> '';
+      INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+        SELECT m.id, s.source_id, '', m.source_updated_at
+          FROM media m
+          JOIN (SELECT DISTINCT media_id, source_id FROM episode WHERE source_id IS NOT NULL) s
+            ON s.media_id = m.id
+          JOIN (SELECT media_id FROM episode WHERE source_id IS NOT NULL
+                 GROUP BY media_id HAVING COUNT(DISTINCT source_id) > 1) mu
+            ON mu.media_id = m.id
          WHERE m.vod_id IS NOT NULL AND m.vod_id <> '';
       PRAGMA foreign_keys = OFF;
       DROP TABLE IF EXISTS play_source;

@@ -312,12 +312,35 @@ export class TauriSqlProvider implements DatabaseProvider {
     console.log('[DB] 索引优先升级：开始压缩片库结构…');
 
     // 1) 回填索引层（必须在删除 episode 之前）
+    //
+    // 【关键】旧 media.vod_id 只属于「最后一次采集写入的那一个源」，而旧库没有记录它属于谁。
+    // 早期实现用 `MIN(episode.source_id)` 配 `m.vod_id`，等于按字母序赌一个源——
+    // 多源媒体的配对会系统性错配（实测本机 30 条抽样里 7 条错：vod_id 是红牛/无尽的，
+    // 源却记成百度云），点开时按错源拉详情 → 「无法获取播放地址」，更糟时拉到别的影片。
+    // 因此改为：
+    //   - 单源媒体：源归属唯一，直接沿用 m.vod_id；
+    //   - 多源媒体：保留全部候选源，但 vod_id 置空（无法确定归属，不猜）；
+    //     首次打开时由 MediaDetailService 按片名解析并回写正确的 (source_id, vod_id)。
     await this.db!.execute(
       `INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
-         SELECT m.id, e.source_id, m.vod_id, m.source_updated_at
+         SELECT m.id, s.source_id, m.vod_id, m.source_updated_at
            FROM media m
-           JOIN (SELECT media_id, MIN(source_id) AS source_id FROM episode
-                  WHERE source_id IS NOT NULL GROUP BY media_id) e ON e.media_id = m.id
+           JOIN (SELECT media_id, MIN(source_id) AS source_id
+                   FROM episode
+                  WHERE source_id IS NOT NULL
+                  GROUP BY media_id
+                 HAVING COUNT(DISTINCT source_id) = 1) s ON s.media_id = m.id
+          WHERE m.vod_id IS NOT NULL AND m.vod_id <> ''`
+    );
+    await this.db!.execute(
+      `INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+         SELECT m.id, s.source_id, '', m.source_updated_at
+           FROM media m
+           JOIN (SELECT DISTINCT media_id, source_id FROM episode WHERE source_id IS NOT NULL) s
+             ON s.media_id = m.id
+           JOIN (SELECT media_id FROM episode WHERE source_id IS NOT NULL
+                  GROUP BY media_id HAVING COUNT(DISTINCT source_id) > 1) mu
+             ON mu.media_id = m.id
           WHERE m.vod_id IS NOT NULL AND m.vod_id <> ''`
     );
     const backfilled = await this.db!.select<{ c: number }[]>('SELECT COUNT(*) AS c FROM media_source');

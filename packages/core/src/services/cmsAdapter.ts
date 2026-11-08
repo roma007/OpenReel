@@ -108,6 +108,17 @@ export class CMSAdapter {
     return this.requestWithRetry(url, signal, { timeout: DETAIL_TIMEOUT_MS, maxRetries: DETAIL_MAX_RETRIES });
   }
 
+  /**
+   * 按片名取详情（苹果CMS `ac=detail&wd=关键词`）。
+   *
+   * 用于「索引里的 vod_id 不可用」时的自愈：源站可能改过 id、或旧库把 vod_id 记到了
+   * 错误的源上（实测 6 源均支持该接口，且返回体直接自带 vod_play_url，可一次请求拿到播放地址）。
+   */
+  async getDetailByKeyword(keyword: string, signal?: AbortSignal): Promise<CMSListResponse> {
+    const url = `${this.baseUrl}?ac=detail&wd=${encodeURIComponent(keyword)}`;
+    return this.requestWithRetry(url, signal, { timeout: DETAIL_TIMEOUT_MS, maxRetries: DETAIL_MAX_RETRIES });
+  }
+
   async getTypes(signal?: AbortSignal): Promise<any> {
     const url = `${this.baseUrl}?ac=types`;
     return this.requestWithRetry(url, signal);
