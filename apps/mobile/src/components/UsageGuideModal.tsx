@@ -16,6 +16,10 @@ const OPTIONS: { type: UserUsageType; label: string; desc: string; icon: any }[]
   { type: 'TV_SERIES', label: '追剧/综艺', desc: '追更电视剧/综艺，追完再增量采集', icon: Tv },
 ];
 
+// 引导展示规则（用户确认的设计）：App 每次启动展示一次，本次运行内不重复。
+// 模块级变量在进程重启后归零；不能用数据库/持久化标记，否则只会弹一次。
+let usageGuideShown = false;
+
 export default function UsageGuideModal() {
   const colors = useThemeColors();
   const cardOpacity = useThemeStore((s) => s.cardOpacity);
@@ -23,7 +27,7 @@ export default function UsageGuideModal() {
   const s = useScaledFontSize();
   const [visible, setVisible] = useState(false);
   const [selected, setSelected] = useState<Set<UserUsageType>>(new Set());
-  const { setUserUsageTypes, checkGuideShown, markGuideShown } = useAppStore();
+  const { setUserUsageTypes } = useAppStore();
 
   const styles = useMemo(() => StyleSheet.create({
     overlay: {
@@ -103,9 +107,9 @@ export default function UsageGuideModal() {
   }), [colors, cardBg, s]);
 
   useEffect(() => {
-    checkGuideShown().then((shown) => {
-      if (!shown) setVisible(true);
-    });
+    if (usageGuideShown) return;
+    usageGuideShown = true;
+    setVisible(true);
   }, []);
 
   const handleToggle = (type: UserUsageType) => {
@@ -118,7 +122,6 @@ export default function UsageGuideModal() {
   };
 
   const dismiss = async () => {
-    await markGuideShown();
     setVisible(false);
   };
 

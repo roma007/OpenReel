@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useState, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { useAppStore } from '../useAppStore';
+import { useAppStore, getStore } from '../useAppStore';
 import { getKidLockService } from '../stores/kidLockStore';
 import { getUpdateBadgeStore } from '@openreel/core';
 
@@ -102,16 +102,20 @@ function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// 引导展示规则（用户确认的设计）：App 每次启动展示一次，本次运行内不重复。
+// 必须用模块级变量而不是 localStorage/数据库标记：后者会“装过一次就永远不弹”。
+// 进程重启 → 模块重新加载 → 标记归零 → 下次打开必弹。
+let launchGuideShown = false;
+let usageGuideShownThisLaunch = false;
+
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.228');
+  const [appVersion, setAppVersion] = useState('1.0.229');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
   const closeAiImport = useImportDialogStore((s) => s.closeAiImport);
   const { loadVideoSources, videoSources } = useAppStore();
   const hasUpdate = getUpdateBadgeStore()((s) => s.hasUpdate);
-
-  const USAGE_GUIDE_KEY = 'movie_app_usage_guide_seen';
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -125,25 +129,28 @@ export function Layout() {
 
   useEffect(() => {
     if (!sourcesLoaded) return;
-    const guideSeen = localStorage.getItem(USAGE_GUIDE_KEY);
-    if (guideSeen) return;
+    if (launchGuideShown) return;
+    launchGuideShown = true;
 
     if (videoSources.length === 0) {
+      // 无视频源：每次启动都先引导添加源（不受“使用说明已看过”影响）
       useImportDialogStore.getState().openAiImport();
     } else {
+      usageGuideShownThisLaunch = true;
       setShowUsageGuide(true);
     }
   }, [sourcesLoaded, videoSources.length]);
 
   const handleImportClosed = (open: boolean) => {
-    if (!open) {
-      closeAiImport();
-      loadVideoSources();
-      const guideSeen = localStorage.getItem(USAGE_GUIDE_KEY);
-      if (!guideSeen) {
+    if (open) return;
+    closeAiImport();
+    void loadVideoSources().then(() => {
+      const count = getStore().getState().videoSources.length;
+      if (count > 0 && !usageGuideShownThisLaunch) {
+        usageGuideShownThisLaunch = true;
         setTimeout(() => setShowUsageGuide(true), 300);
       }
-    }
+    });
   };
 
   return (
@@ -152,9 +159,6 @@ export function Layout() {
       <UsageGuideDialog
         open={showUsageGuide}
         onOpenChange={(v) => {
-          if (!v) {
-            localStorage.setItem(USAGE_GUIDE_KEY, '1');
-          }
           setShowUsageGuide(v);
         }}
       />

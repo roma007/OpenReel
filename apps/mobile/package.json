@@ -1,6 +1,6 @@
 {
   "name": "@openreel/mobile",
-  "version": "1.0.228",
+  "version": "1.0.229",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
