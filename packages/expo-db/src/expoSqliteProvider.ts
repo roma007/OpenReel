@@ -662,6 +662,12 @@ const MIGRATIONS: Migration[] = [
                  GROUP BY media_id HAVING COUNT(DISTINCT source_id) > 1) mu
             ON mu.media_id = m.id
          WHERE m.vod_id IS NOT NULL AND m.vod_id <> '';
+      INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+        SELECT DISTINCT m.id, e.source_id, '', m.source_updated_at
+          FROM media m
+          JOIN episode e ON e.media_id = m.id
+         WHERE e.source_id IS NOT NULL
+           AND (m.vod_id IS NULL OR m.vod_id = '');
       PRAGMA foreign_keys = OFF;
       DROP TABLE IF EXISTS play_source;
       DROP TABLE IF EXISTS episode;
@@ -805,6 +811,49 @@ const MIGRATIONS: Migration[] = [
         WHERE (hidden IS NULL OR hidden = 0);
       CREATE INDEX IF NOT EXISTS idx_media_source_source_vod ON media_source(source_id, vod_id);
       CREATE INDEX IF NOT EXISTS idx_media_detail_fetched_at ON media_detail(fetched_at);
+    `,
+  },
+  {
+    version: 66,
+    description: 'restore_fts_director_cast_columns',
+    // v64 建 media_fts 时只索引 (title, alias, original_title)，与桌面端 S2 瘦身一致；
+    // 但这会让「≥3 字演员/导演名」在 FTS 路径搜不到（MATCH 命中 0 且不回落 LIKE）。
+    // 这里恢复 5 列并重建索引；新装用户 v64→v66 顺序执行，最终结构一致。
+    sql: `
+      DROP TRIGGER IF EXISTS media_ai;
+      DROP TRIGGER IF EXISTS media_ad;
+      DROP TRIGGER IF EXISTS media_au;
+      DROP TABLE IF EXISTS media_fts;
+      DROP TABLE IF EXISTS media_fts_data;
+      DROP TABLE IF EXISTS media_fts_idx;
+      DROP TABLE IF EXISTS media_fts_content;
+      DROP TABLE IF EXISTS media_fts_docsize;
+      DROP TABLE IF EXISTS media_fts_config;
+      CREATE VIRTUAL TABLE media_fts USING fts5(
+        title, alias, original_title, director, cast,
+        content='media',
+        content_rowid='rowid',
+        tokenize='trigram'
+      );
+      CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
+        INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+        VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
+        INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+        VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
+        old.title IS NOT new.title OR old.alias IS NOT new.alias OR
+        old.original_title IS NOT new.original_title OR
+        old.director IS NOT new.director OR old.cast IS NOT new.cast
+      BEGIN
+        INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+        VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+        INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+        VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
+      END;
+      INSERT INTO media_fts(media_fts) VALUES('rebuild');
     `,
   },
 ];
@@ -2663,6 +2712,46 @@ export class ExpoSqliteProvider implements DatabaseProvider {
 
   async updateEpisodeDuration(episodeId: number, duration: number | null): Promise<void> {
     await this.db!.runAsync('UPDATE episode SET duration = ? WHERE id = ?', [duration ?? null, episodeId]);
+  }
+
+  async deleteEpisodesNotInKeys(mediaId: number, sourceId: string, keepKeys: string[]): Promise<number> {
+    const keep = new Set(keepKeys);
+    const rows = await this.db!.getAllAsync<{ id: number; season_number: number; episode_number: number }>(
+      'SELECT id, season_number, episode_number FROM episode WHERE media_id = ? AND source_id = ?',
+      [mediaId, sourceId]
+    );
+    const stale = rows
+      .filter((r) => !keep.has(`${r.season_number}:${r.episode_number}:${sourceId}`))
+      .map((r) => r.id);
+    for (let i = 0; i < stale.length; i += 100) {
+      const chunk = stale.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      await this.db!.runAsync(`DELETE FROM play_source WHERE episode_id IN (${ph})`, chunk);
+      await this.db!.runAsync(`DELETE FROM episode WHERE id IN (${ph})`, chunk);
+    }
+    return stale.length;
+  }
+
+  async deletePlaySourcesNotInUrls(episodeId: number, keepUrls: string[]): Promise<number> {
+    const keep = new Set(keepUrls);
+    const rows = await this.db!.getAllAsync<{ id: number; url: string }>(
+      'SELECT id, url FROM play_source WHERE episode_id = ?',
+      [episodeId]
+    );
+    const stale = rows.filter((r) => !keep.has(r.url)).map((r) => r.id);
+    for (let i = 0; i < stale.length; i += 100) {
+      const chunk = stale.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      await this.db!.runAsync(`DELETE FROM play_source WHERE id IN (${ph})`, chunk);
+    }
+    return stale.length;
+  }
+
+  async updateMediaCurrentEpisodes(mediaId: number, currentEpisodes: number): Promise<void> {
+    await this.db!.runAsync(
+      'UPDATE media SET current_episodes = ? WHERE id = ? AND (current_episodes IS NULL OR current_episodes < ?)',
+      [currentEpisodes, mediaId, currentEpisodes]
+    );
   }
 
   async deleteEpisodesByMediaIdAndSourceId(mediaId: number, sourceId: string): Promise<void> {

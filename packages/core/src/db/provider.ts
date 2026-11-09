@@ -145,6 +145,13 @@ export interface DatabaseProvider {
   /** 写入单集已探测到的视频时长（秒），供播放页剧集列表复用，避免重复探测。 */
   updateEpisodeDuration(episodeId: number, duration: number | null): Promise<void>;
   deleteEpisodesByMediaIdAndSourceId(mediaId: number, sourceId: string): Promise<void>;
+  /** 删除该媒体+源下「不在保留键集合」里的剧集（键 `${seasonNumber}:${episodeNumber}:${sourceId}`），返回删除条数。
+   *  按需刷新用：先 upsert 再清理，保住未变化剧集的 rowid（播放进度按 episode_id 记忆）。 */
+  deleteEpisodesNotInKeys(mediaId: number, sourceId: string, keepKeys: string[]): Promise<number>;
+  /** 删除指定剧集下「不在保留 URL 集合」里的播放线路，返回删除条数（按需刷新清理用）。 */
+  deletePlaySourcesNotInUrls(episodeId: number, keepUrls: string[]): Promise<number>;
+  /** 按需拉取后回写「已更新集数」（只增不减，避免覆盖采集写入的更大值）。 */
+  updateMediaCurrentEpisodes(mediaId: number, currentEpisodes: number): Promise<void>;
   /** 判断指定媒体+源下是否存在「版本合并痕迹」（play_source.language 非空），用于 commitItem 保护：存在时跳过先删后写，防止覆盖已追加的其他语言线路。 */
   hasVersionEpisodes(mediaId: number, sourceId: string): Promise<boolean>;
   getSeasonsByMediaId(mediaId: number): Promise<number[]>;

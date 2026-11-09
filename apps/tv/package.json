@@ -1,6 +1,6 @@
 {
   "name": "@openreel/tv",
-  "version": "1.0.227",
+  "version": "1.0.228",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",

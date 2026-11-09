@@ -190,7 +190,7 @@ export const SCHEMA_SQL = `
   -- 实测（238k 行真实库）：只索引片名三列时 14MB，含 director/cast 时 69MB，
   -- 故演员/导演不再进 FTS，搜索时以 LIKE 兜底。
   CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
-    title, alias, original_title,
+    title, alias, original_title, director, cast,
     content='media',
     content_rowid='rowid',
     tokenize='trigram'
@@ -199,25 +199,26 @@ export const SCHEMA_SQL = `
   -- FTS5 外部内容表同步触发器：media 行变化时同步 media_fts 索引行。
   -- 缺失这些触发器会导致 searchMedia 的 MATCH 查询永远返回空。
   CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
-    INSERT INTO media_fts(rowid, title, alias, original_title)
-    VALUES (new.rowid, new.title, new.alias, new.original_title);
+    INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+    VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
   END;
 
   CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
-    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
-    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
   END;
 
   -- 仅当 FTS 索引列（title/alias/original_title）真正变化时才同步全文索引，
   -- 避免 hidden 等非索引列更新（如按子类型隐藏）触发全表 FTS 重建导致卡顿。
   CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
     old.title IS NOT new.title OR old.alias IS NOT new.alias OR
-    old.original_title IS NOT new.original_title
+    old.original_title IS NOT new.original_title OR
+    old.director IS NOT new.director OR old.cast IS NOT new.cast
   BEGIN
-    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
-    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
-    INSERT INTO media_fts(rowid, title, alias, original_title)
-    VALUES (new.rowid, new.title, new.alias, new.original_title);
+    INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+    VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+    INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+    VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
   END;
 
   CREATE TABLE IF NOT EXISTS system_config (

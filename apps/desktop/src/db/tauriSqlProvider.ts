@@ -343,6 +343,17 @@ export class TauriSqlProvider implements DatabaseProvider {
              ON mu.media_id = m.id
           WHERE m.vod_id IS NOT NULL AND m.vod_id <> ''`
     );
+    // 3) vod_id 为空但有剧集的 media（更早版本没写 media.vod_id）。
+    //    若跳过，下一步 DROP episode 会把它们全部变成不可播（线上实测 44,453 部）；
+    //    vod_id 置空，首次打开按片名（含版本基准标题）解析并回写。
+    await this.db!.execute(
+      `INSERT OR IGNORE INTO media_source (media_id, source_id, vod_id, updated_at)
+         SELECT DISTINCT m.id, e.source_id, '', m.source_updated_at
+           FROM media m
+           JOIN episode e ON e.media_id = m.id
+          WHERE e.source_id IS NOT NULL
+            AND (m.vod_id IS NULL OR m.vod_id = '')`
+    );
     const backfilled = await this.db!.select<{ c: number }[]>('SELECT COUNT(*) AS c FROM media_source');
     console.log(`[DB] 索引层回填完成：media_source ${backfilled[0]?.c ?? 0} 行`);
 
@@ -1212,13 +1223,13 @@ export class TauriSqlProvider implements DatabaseProvider {
     // force=true（分词器升级为 trigram）时跳过探测，直接走重建。
     if (!force) {
       try {
-        // 结构校验：索引列从 (title, alias, original_title, director, cast) 瘦身为
-        // (title, alias, original_title)，旧结构的 FTS 必须重建（体积 69MB → 14MB/23.8 万行）。
+        // 结构校验：索引列必须是 (title, alias, original_title, director, cast)。
+        // S2 曾把 director/cast 删掉（3 列），导致 ≥3 字演员/导演名搜不到；这里缺列就重建。
         const ddl = await this.db!.select<{ sql: string }[]>(
           "SELECT sql FROM sqlite_master WHERE type='table' AND name='media_fts'"
         );
         const ddlSql = ddl[0]?.sql || '';
-        if (!ddlSql.includes('director')) {
+        if (ddlSql.includes('director') && ddlSql.includes('cast')) {
           await this.db!.execute('SELECT rowid FROM media_fts LIMIT 1');
           return; // FTS5 正常且结构已是最新，跳过重建
         }
@@ -1316,7 +1327,7 @@ export class TauriSqlProvider implements DatabaseProvider {
   private async createFts5(): Promise<void> {
     await this.db!.execute(
       `CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
-        title, alias, original_title,
+        title, alias, original_title, director, cast,
         content='media',
         content_rowid='rowid',
         tokenize='trigram'
@@ -1324,21 +1335,22 @@ export class TauriSqlProvider implements DatabaseProvider {
     );
 
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
-      INSERT INTO media_fts(rowid, title, alias, original_title)
-      VALUES (new.rowid, new.title, new.alias, new.original_title);
+      INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+      VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
     END;`);
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
-      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
-      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
+      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
     END;`);
     await this.db!.execute(`CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media WHEN
       old.title IS NOT new.title OR old.alias IS NOT new.alias OR
-      old.original_title IS NOT new.original_title
+      old.original_title IS NOT new.original_title OR
+      old.director IS NOT new.director OR old.cast IS NOT new.cast
     BEGIN
-      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title)
-      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title);
-      INSERT INTO media_fts(rowid, title, alias, original_title)
-      VALUES (new.rowid, new.title, new.alias, new.original_title);
+      INSERT INTO media_fts(media_fts, rowid, title, alias, original_title, director, cast)
+      VALUES ('delete', old.rowid, old.title, old.alias, old.original_title, old.director, old.cast);
+      INSERT INTO media_fts(rowid, title, alias, original_title, director, cast)
+      VALUES (new.rowid, new.title, new.alias, new.original_title, new.director, new.cast);
     END;`);
 
     await this.db!.execute(`INSERT INTO media_fts(media_fts) VALUES('rebuild')`);
@@ -2080,6 +2092,46 @@ export class TauriSqlProvider implements DatabaseProvider {
 
   async updateEpisodeDuration(episodeId: number, duration: number | null): Promise<void> {
     await this.db!.execute('UPDATE episode SET duration = ? WHERE id = ?', [duration ?? null, episodeId]);
+  }
+
+  async deleteEpisodesNotInKeys(mediaId: number, sourceId: string, keepKeys: string[]): Promise<number> {
+    const keep = new Set(keepKeys);
+    const rows = await this.db!.select<{ id: number; season_number: number; episode_number: number }[]>(
+      'SELECT id, season_number, episode_number FROM episode WHERE media_id = ? AND source_id = ?',
+      [mediaId, sourceId]
+    );
+    const stale = rows
+      .filter((r) => !keep.has(`${r.season_number}:${r.episode_number}:${sourceId}`))
+      .map((r) => r.id);
+    for (let i = 0; i < stale.length; i += 100) {
+      const chunk = stale.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      await this.db!.execute(`DELETE FROM play_source WHERE episode_id IN (${ph})`, chunk);
+      await this.db!.execute(`DELETE FROM episode WHERE id IN (${ph})`, chunk);
+    }
+    return stale.length;
+  }
+
+  async deletePlaySourcesNotInUrls(episodeId: number, keepUrls: string[]): Promise<number> {
+    const keep = new Set(keepUrls);
+    const rows = await this.db!.select<{ id: number; url: string }[]>(
+      'SELECT id, url FROM play_source WHERE episode_id = ?',
+      [episodeId]
+    );
+    const stale = rows.filter((r) => !keep.has(r.url)).map((r) => r.id);
+    for (let i = 0; i < stale.length; i += 100) {
+      const chunk = stale.slice(i, i + 100);
+      const ph = chunk.map(() => '?').join(',');
+      await this.db!.execute(`DELETE FROM play_source WHERE id IN (${ph})`, chunk);
+    }
+    return stale.length;
+  }
+
+  async updateMediaCurrentEpisodes(mediaId: number, currentEpisodes: number): Promise<void> {
+    await this.db!.execute(
+      'UPDATE media SET current_episodes = ? WHERE id = ? AND (current_episodes IS NULL OR current_episodes < ?)',
+      [currentEpisodes, mediaId, currentEpisodes]
+    );
   }
 
   async deleteEpisodesByMediaIdAndSourceId(mediaId: number, sourceId: string): Promise<void> {
