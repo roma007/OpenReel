@@ -1003,18 +1003,28 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     this.kidModeActive = kidModeRow?.value === '1';
     mark('kid_mode');
 
-    // 启动收束 WAL：把上次会话残留的 WAL 回写主库并把 -wal 文件截断（低端机磁盘保护）。
+    // 启动收束 WAL：仅当上次会话残留的 -wal 文件超过阈值才 TRUNCATE。
+    // 小 WAL（<8MB）截断收益极小，却要在启动关键路径上做一次全量回写；阈值化后
+    // 「异常退出残留几百 MB WAL」的场景仍会收束，正常启动则跳过（回写由 autocheckpoint 兜住）。
     // 位置必须在「打开读连接」之前，且此刻 UI 尚未渲染（各端 App 均以 ready 门控，init 返回前
     // 不挂任何页面）→ 写连接独占、无在飞语句，必然成功。
-    // 原先放在 postInitMaintenance（init 返回后的后台任务）里，会与同连接并发的首屏长查询相撞，
-    // SQLite 直接返回 SQLITE_LOCKED（"database table is locked"）；实测 PASSIVE/FULL 同样会报，
-    // 且 PASSIVE 不缩小 WAL 文件，故只能靠「挪到无并发的位置」规避，不能降级。
-    const tWal = Date.now();
+    // 取不到文件大小（API 异常）时按「未知」处理 → 仍执行截断（保持旧行为，不做静默降级）。
+    const WAL_TRUNCATE_THRESHOLD_BYTES = 8 * 1024 * 1024;
+    let walBytes = -1;
     try {
-      await wrappedDb.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
-    } catch (err) {
-      // 失败不阻断启动：仅损失本次 WAL 文件截断（回写由 autocheckpoint 兜住）
-      console.error('[DB] WAL checkpoint 失败:', err);
+      const walFile = new File(Paths.document, 'SQLite/movieapp.db-wal');
+      walBytes = walFile.exists ? Number(walFile.size ?? 0) : 0;
+    } catch {
+      walBytes = -1;
+    }
+    const tWal = Date.now();
+    if (walBytes < 0 || walBytes >= WAL_TRUNCATE_THRESHOLD_BYTES) {
+      try {
+        await wrappedDb.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+      } catch (err) {
+        // 失败不阻断启动：仅损失本次 WAL 文件截断（回写由 autocheckpoint 兜住）
+        console.error('[DB] WAL checkpoint 失败:', err);
+      }
     }
     timing.wal_checkpoint = Date.now() - tWal;
 
