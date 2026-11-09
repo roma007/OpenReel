@@ -1869,7 +1869,7 @@ export class ExpoSqliteProvider implements DatabaseProvider {
         hidden, kid_safe, series_group, series_season,
         source_updated_at,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fingerprint) DO UPDATE SET
         title = excluded.title,
         original_title = excluded.original_title,
@@ -3665,7 +3665,6 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   async withTransactionAsync<T>(fn: () => Promise<T>): Promise<T> {
     const db = this.db!;
     if (this.txDepth > 0) return fn();
-
     const run = async (): Promise<T> => {
       this.txDepth++;
       try {
