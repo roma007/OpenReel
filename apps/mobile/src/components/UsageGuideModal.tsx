@@ -20,7 +20,16 @@ const OPTIONS: { type: UserUsageType; label: string; desc: string; icon: any }[]
 // 模块级变量在进程重启后归零；不能用数据库/持久化标记，否则只会弹一次。
 let usageGuideShown = false;
 
-export default function UsageGuideModal() {
+/** 本次启动是否还会弹「选择使用方式」（供首页决定何时轮到「添加视频源」引导） */
+export function willShowUsageGuideThisLaunch(): boolean {
+  return !usageGuideShown;
+}
+
+interface Props {
+  onDismissed?: () => void;
+}
+
+export default function UsageGuideModal({ onDismissed }: Props = {}) {
   const colors = useThemeColors();
   const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const cardBg = hexToRgba(colors.card, cardOpacity / 100);
@@ -123,6 +132,7 @@ export default function UsageGuideModal() {
 
   const dismiss = async () => {
     setVisible(false);
+    onDismissed?.();
   };
 
   const handleConfirm = async () => {

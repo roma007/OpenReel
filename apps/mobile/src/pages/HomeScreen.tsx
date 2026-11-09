@@ -12,7 +12,7 @@ import MediaCard from '../components/MediaCard';
 import PosterImage from '../components/PosterImage';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import UsageGuideModal from '../components/UsageGuideModal';
+import UsageGuideModal, { willShowUsageGuideThisLaunch } from '../components/UsageGuideModal';
 import CategoryHeader from '../components/CategoryHeader';
 import BlurredBackground from '../components/BlurredBackground';
 import { KidLockBanner } from '../components/KidLockBanner';
@@ -283,6 +283,8 @@ export default function HomeScreen() {
   // 为界：有源时复位标记，冷启动内存标记自然复位（未配源时下次打开仍会弹）。
   const sourceGuideShownRef = useRef(false);
   const [sourceGuideVisible, setSourceGuideVisible] = useState(false);
+  // 本次启动的「选择使用方式」是否已结束（结束后才轮到「添加视频源」引导）
+  const [usageGuideDone, setUsageGuideDone] = useState(false);
   // 隐私政策未同意前不弹首页引导：RN Modal 在原生层，会盖住隐私弹窗的正文与复选框
   const privacyAgreed = usePrivacyConsentStore((st) => st.agreed);
 
@@ -303,16 +305,21 @@ export default function HomeScreen() {
   useEffect(() => {
     // 隐私政策同意前不弹引导弹窗，同意后（privacyAgreed 变 true）effect 重跑自动补齐
     if (!privacyAgreed) return;
+    // 顺序：先「选择你的使用方式」，关闭后再（无源时）弹「添加视频源」
+    if (willShowUsageGuideThisLaunch()) {
+      setUsageGuideDone(false);
+      return;
+    }
     if (videoSources.length > 0) {
       sourceGuideShownRef.current = false;
       setSourceGuideVisible(false);
       return;
     }
-    if (sourcesChecked && !sourceGuideShownRef.current) {
+    if (sourcesChecked && usageGuideDone && !sourceGuideShownRef.current) {
       sourceGuideShownRef.current = true;
       setSourceGuideVisible(true);
     }
-  }, [sourcesChecked, videoSources, privacyAgreed]);
+  }, [sourcesChecked, videoSources, privacyAgreed, usageGuideDone]);
 
   useEffect(() => {
     loadUserUsageTypes();
@@ -828,7 +835,13 @@ export default function HomeScreen() {
         {renderHistoryCard()}
         {renderFavoritesCard()}
       </ScrollView>
-      {videoSources.length > 0 && privacyAgreed && <UsageGuideModal />}
+      {privacyAgreed && (
+        <UsageGuideModal
+          onDismissed={() => {
+            setUsageGuideDone(true);
+          }}
+        />
+      )}
       <Modal
         visible={sourceGuideVisible && privacyAgreed}
         transparent

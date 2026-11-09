@@ -1,5 +1,6 @@
 import { NavLink, Link, Outlet } from 'react-router-dom';
 import { UsageGuideDialog } from './UsageGuideDialog';
+import { SourceGuideDialog } from './SourceGuideDialog';
 import { AiSourceImportDialog } from './AiSourceImportDialog';
 import { CollectProgressDialog } from './CollectProgressDialog';
 import { BackgroundLayer } from './BackgroundLayer';
@@ -107,11 +108,13 @@ function ToastProvider({ children }: { children: ReactNode }) {
 // 进程重启 → 模块重新加载 → 标记归零 → 下次打开必弹。
 let launchGuideShown = false;
 let usageGuideShownThisLaunch = false;
+let sourceGuideShownThisLaunch = false;
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.229');
+  const [appVersion, setAppVersion] = useState('1.0.230');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
+  const [showSourceGuide, setShowSourceGuide] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
   const closeAiImport = useImportDialogStore((s) => s.closeAiImport);
   const { loadVideoSources, videoSources } = useAppStore();
@@ -127,30 +130,30 @@ export function Layout() {
     getKidLockService().backfillKidSafe().catch(() => {});
   }, []);
 
+  // 使用方式引导关闭后：本次启动还没弹过「添加视频源」且确实没有任何源 → 补弹
+  const maybeShowSourceGuide = () => {
+    if (sourceGuideShownThisLaunch) return;
+    const count = getStore().getState().videoSources.length;
+    if (count === 0) {
+      sourceGuideShownThisLaunch = true;
+      setShowSourceGuide(true);
+    }
+  };
+
   useEffect(() => {
     if (!sourcesLoaded) return;
     if (launchGuideShown) return;
     launchGuideShown = true;
-
-    if (videoSources.length === 0) {
-      // 无视频源：每次启动都先引导添加源（不受“使用说明已看过”影响）
-      useImportDialogStore.getState().openAiImport();
-    } else {
-      usageGuideShownThisLaunch = true;
-      setShowUsageGuide(true);
-    }
-  }, [sourcesLoaded, videoSources.length]);
+    // 每次启动都先弹「选择你的使用方式」；无源时等它关闭后再弹「添加视频源」
+    usageGuideShownThisLaunch = true;
+    setShowUsageGuide(true);
+  }, [sourcesLoaded]);
 
   const handleImportClosed = (open: boolean) => {
     if (open) return;
     closeAiImport();
-    void loadVideoSources().then(() => {
-      const count = getStore().getState().videoSources.length;
-      if (count > 0 && !usageGuideShownThisLaunch) {
-        usageGuideShownThisLaunch = true;
-        setTimeout(() => setShowUsageGuide(true), 300);
-      }
-    });
+    // 导入完成后刷新源列表，供后续判断/页面使用
+    void loadVideoSources();
   };
 
   return (
@@ -160,8 +163,10 @@ export function Layout() {
         open={showUsageGuide}
         onOpenChange={(v) => {
           setShowUsageGuide(v);
+          if (!v) setTimeout(maybeShowSourceGuide, 250);
         }}
       />
+      <SourceGuideDialog open={showSourceGuide} onOpenChange={setShowSourceGuide} />
       <AiSourceImportDialog
         open={aiImportOpen}
         onOpenChange={handleImportClosed}
