@@ -857,16 +857,61 @@ export function createAppStore(db: DatabaseProvider) {
     },
 
     collectAll: async () => {
-      set({ isCollecting: true, error: null });
+      // 注意：不能调用 collectorService.collectAll()——那条路径直接逐页采集，
+      // 不写 collect_task，任务列表永远是空的、也无法中止/续采（用户实测反馈）。
+      // 改为逐源走 collectSourceAll（会创建 FULL 任务、更新 last_collected_at）。
+      set({ isCollecting: true, error: null, collectSourceProgress: null });
+      let totalCollected = 0;
+      let totalPages = 0;
       try {
-        const result = await collectorService.collectAll();
+        const sources = await db.getEnabledVideoSources();
+        if (sources.length === 0) {
+          console.log('[STORE] collectAll: 无启用视频源，跳过全量采集');
+          return { totalCollected: 0, totalPages: 0 };
+        }
+        set({
+          collectSourceProgress: sources.map((s) => ({
+            sourceCode: s.code,
+            sourceName: s.name,
+            currentPage: 0,
+            totalPages: 0,
+            collected: 0,
+            status: 'running' as const,
+          })),
+        });
+
+        for (const source of sources) {
+          const r = await get().collectSourceAll(source.code);
+          if (r.success) {
+            totalCollected += r.collected;
+            totalPages += r.pages;
+          }
+          set((state) => {
+            if (!state.collectSourceProgress) return state;
+            const updated = [...state.collectSourceProgress];
+            const idx = updated.findIndex((p) => p.sourceCode === source.code);
+            if (idx >= 0) {
+              updated[idx] = {
+                ...updated[idx],
+                status: r.success ? 'done' : 'failed',
+                error: r.error,
+                collected: r.success ? r.collected : updated[idx].collected,
+                currentPage: r.success ? r.pages : updated[idx].currentPage,
+                totalPages: r.success ? r.pages : updated[idx].totalPages,
+              };
+            }
+            return { collectSourceProgress: updated };
+          });
+        }
+
         await get().loadMediaList();
-        return result;
+        await get().loadCollectTasks();
+        return { totalCollected, totalPages };
       } catch (err: any) {
         set({ error: err.message });
-        return { totalCollected: 0, totalPages: 0 };
+        return { totalCollected, totalPages };
       } finally {
-        set({ isCollecting: false });
+        set({ isCollecting: false, collectSourceProgress: null });
       }
     },
 
