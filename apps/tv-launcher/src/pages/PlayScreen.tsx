@@ -12,6 +12,7 @@ import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { VideoView, createVideoPlayer } from 'expo-video';
 import type { Episode, Media, PlaySource, VideoSource } from '@openreel/core';
+import { loadEpisodesForSource } from '@openreel/core';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
 
 import { useAppStore, getProvider } from '../useAppStore';
@@ -200,7 +201,8 @@ export function PlayScreen() {
     const provider = getProvider();
     let cancelled = false;
     (async () => {
-      const eps = await provider.getEpisodesByMediaId(activeMediaId, currentSeason, currentSourceId);
+      // 该源可能尚未缓存剧集（源列表含全部源）：按需拉详情
+      const eps = await loadEpisodesForSource(provider, activeMediaId, currentSeason, currentSourceId);
       if (cancelled) return;
       const sorted = [...(eps || [])].sort((a, b) => a.episodeNumber - b.episodeNumber);
       setEpisodes(sorted);

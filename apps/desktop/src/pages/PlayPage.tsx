@@ -5,7 +5,7 @@ import { useBackgroundStore } from '../themes/backgroundStore';
 import { usePlayerStore } from '../stores/playerStore';
 import { getProvider } from '../init';
 import type { PlaySource } from '@openreel/core';
-import { UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget } from '@openreel/core';
+import { MediaDetailService, UNCATEGORIZED_GENRE, VideoDurationService, resolveDefaultPlayTarget } from '@openreel/core';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -96,17 +96,19 @@ export default function PlayPage() {
     }
     let cancelled = false;
     (async () => {
-      try {
-        const provider = getProvider();
+      const provider = getProvider();
+      // 聚合「已缓存剧集」的全部线路
+      const aggregate = async () => {
         const eps = await provider.getEpisodesByMediaId(media.id);
-        if (cancelled) return;
         const lists = await Promise.all(
           eps.map(async (ep) => {
             const ps = await provider.getPlaySourcesByEpisodeId(ep.id);
             return ps.map((s) => ({ episodeId: ep.id, source: s }));
           }),
         );
-        if (cancelled) return;
+        return { eps, lists };
+      };
+      const apply = (lists: { episodeId: number; source: PlaySource }[][]) => {
         setMovieLines(lists.flat().filter((l) => !!l.source.url));
         // 自动选第一个语言（仅首次或当前选择无效时）
         const unique = [...new Set(lists.flat().map((l) => l.source.language).filter(Boolean))] as string[];
@@ -115,6 +117,29 @@ export default function PlayPage() {
         } else {
           setSelectedLanguage(null); // 不足两种语言时不显示语言筛选
         }
+      };
+      try {
+        let { eps, lists } = await aggregate();
+        if (cancelled) return;
+        apply(lists);
+
+        // 源列表含「该片在所有源的存在性」，但剧集是按需缓存：
+        // 未缓存的源补拉一次详情再重新聚合，否则多源电影只会显示已缓存那个源的线路。
+        const cachedSourceIds = new Set(eps.map((e: any) => e.sourceId).filter(Boolean));
+        const allSources = await provider.getMediaSourcesByMediaId(media.id);
+        const detailService = new MediaDetailService(provider);
+        let fetchedAny = false;
+        for (const src of allSources) {
+          if (cancelled) return;
+          if (cachedSourceIds.has(src.sourceId)) continue;
+          // 串行：同一媒体的飞行中去重按 media 维度，并发会互相复用同一个请求
+          const r = await detailService.ensureDetail(media.id, { sourceId: src.sourceId }).catch(() => null);
+          if (r?.ok) fetchedAny = true;
+        }
+        if (!fetchedAny || cancelled) return;
+        ({ eps, lists } = await aggregate());
+        if (cancelled) return;
+        apply(lists);
       } catch {
         if (!cancelled) setMovieLines([]);
       }
@@ -157,13 +182,15 @@ export default function PlayPage() {
     return m;
   }, [tvLangInfo]);
   const tvLanguages = useMemo(() => [...tvLangSources.keys()], [tvLangSources]);
+  // 有语言信息的源（语言来自已缓存剧集的 play_source）：没有信息的源是「未知」，不能当成「不含该语言」
+  const tvLangKnownSources = useMemo(() => new Set(tvLangInfo.map((i) => i.sourceId)), [tvLangInfo]);
   const shownSources = useMemo(() => {
     if (!selectedLanguage) return episodeSources;
     const langs = tvLangSources.get(selectedLanguage);
     if (!langs) return episodeSources;
-    const filtered = episodeSources.filter((s) => langs.has(s.id));
+    const filtered = episodeSources.filter((s) => !tvLangKnownSources.has(s.id) || langs.has(s.id));
     return filtered.length > 0 ? filtered : episodeSources;
-  }, [episodeSources, selectedLanguage, tvLangSources]);
+  }, [episodeSources, selectedLanguage, tvLangSources, tvLangKnownSources]);
   const filteredEpisodes = useMemo(() => {
     if (!selectedLanguage) return episodes;
     return episodes.filter((ep: any) => tvLangMap.get(ep.id) === selectedLanguage);
@@ -173,10 +200,11 @@ export default function PlayPage() {
   useEffect(() => {
     if (media?.type === 'MOVIE' || !selectedLanguage || !selectedSourceId) return;
     const srcs = tvLangSources.get(selectedLanguage);
-    if (!srcs || srcs.has(selectedSourceId)) return;
+    // 当前源语言未知（未缓存剧集）时不强切，等它按需拉取后再判断
+    if (!srcs || srcs.has(selectedSourceId) || !tvLangKnownSources.has(selectedSourceId)) return;
     const first = srcs.values().next().value;
     if (first && first !== selectedSourceId) switchCmsSource(first);
-  }, [selectedLanguage, selectedSourceId, tvLangSources, media?.type, switchCmsSource]);
+  }, [selectedLanguage, selectedSourceId, tvLangSources, tvLangKnownSources, media?.type, switchCmsSource]);
 
   useEffect(() => {
     if (episodes.length === 0) return;

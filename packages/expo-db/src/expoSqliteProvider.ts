@@ -2572,21 +2572,37 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   }
 
   async getEpisodeSourcesByMediaId(mediaId: number, season?: number): Promise<VideoSource[]> {
-    let sql: string;
+    // 源列表必须反映「该片在所有源的存在性」，不能只靠已缓存剧集反推：
+    // S2 之后 episode 是按需拉取的 LRU 缓存（ensureDetail 只拉一个源就返回），
+    // 只用 episode JOIN 会恒剩一个源（真实库 247 个多源影片里 246 个如此）。
+    // 因此取并集：已缓存剧集的源（旧语义，兼容历史库）+ media_source 全部源；
+    // 已缓存剧集的源排前，保证默认选中的源首屏就有剧集。
     const params: any[] = [mediaId];
-    if (season !== undefined) {
-      sql = `SELECT DISTINCT vs.* FROM video_source vs
-             JOIN episode e ON e.source_id = vs.id
-             WHERE e.media_id = ? AND e.season_number = ?`;
-      params.push(season);
-    } else {
-      sql = `SELECT DISTINCT vs.* FROM video_source vs
+    let cachedSql = `SELECT DISTINCT vs.* FROM video_source vs
              JOIN episode e ON e.source_id = vs.id
              WHERE e.media_id = ?`;
+    if (season !== undefined) {
+      cachedSql += ' AND e.season_number = ?';
+      params.push(season);
     }
-    sql += ' ORDER BY vs.name ASC';
-    const rows = await this.db!.getAllAsync<any>(sql, params);
-    return rows.map(rowToVideoSource);
+    cachedSql += ' ORDER BY vs.name ASC';
+    const cachedRows = await (this.readDb ?? this.db!).getAllAsync<any>(cachedSql, params);
+    const allRows = await (this.readDb ?? this.db!).getAllAsync<any>(
+      `SELECT DISTINCT vs.* FROM video_source vs
+         JOIN media_source ms ON ms.source_id = vs.id
+        WHERE ms.media_id = ?
+        ORDER BY vs.name ASC`,
+      [mediaId]
+    );
+    const merged: VideoSource[] = [];
+    const seen = new Set<string>();
+    for (const row of [...cachedRows, ...allRows]) {
+      const src = rowToVideoSource(row);
+      if (seen.has(src.id)) continue;
+      seen.add(src.id);
+      merged.push(src);
+    }
+    return merged;
   }
 
   async getEpisodeById(id: number): Promise<Episode | null> {

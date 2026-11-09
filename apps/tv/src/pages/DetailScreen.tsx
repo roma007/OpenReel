@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Image, Modal, ActivityIndicator } f
 import { useNavigation, useRoute, useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Episode, Media, PlaySource, VideoSource, WatchHistory } from '@openreel/core';
-import { resolveDefaultPlayTarget, UNCATEGORIZED_GENRE } from '@openreel/core';
+import { MediaDetailService, resolveDefaultPlayTarget, loadEpisodesForSource, UNCATEGORIZED_GENRE } from '@openreel/core';
 import { useThemeColors, useScaledFontSize } from '@openreel/expo-ui';
 
 import { useAppStore, getProvider, getStore } from '../useAppStore';
@@ -198,15 +198,17 @@ export function DetailScreen() {
     }
     let alive = true;
     (async () => {
-      try {
-        const provider = getProvider();
+      const provider = getProvider();
+      const aggregate = async (eps: Episode[]) => {
         const lists = await Promise.all(
-          episodes.map(async (ep) => {
+          eps.map(async (ep) => {
             const ps = await provider.getPlaySourcesByEpisodeId(ep.id);
             return ps.map((s) => ({ episodeId: ep.id, source: s }));
           }),
         );
-        if (!alive) return;
+        return lists;
+      };
+      const apply = (lists: { episodeId: number; source: PlaySource }[][]) => {
         setMovieLines(lists.flat().filter((l) => !!l.source.url));
         const unique = [...new Set(lists.flat().map((l) => l.source.language).filter(Boolean))] as string[];
         if (unique.length > 1) {
@@ -214,6 +216,32 @@ export function DetailScreen() {
         } else {
           setSelectedLanguage(null);
         }
+      };
+      try {
+        let lists = await aggregate(episodes);
+        if (!alive) return;
+        apply(lists);
+
+        // 源列表含「该片在所有源的存在性」，但剧集按需缓存：
+        // 未缓存的源补拉一次详情后重新聚合，否则多源电影只剩已缓存源的线路。
+        const cachedSourceIds = new Set(episodes.map((e) => e.sourceId).filter(Boolean));
+        const allSources = await getProvider().getMediaSourcesByMediaId(mediaId);
+        const detailService = new MediaDetailService(provider);
+        let fetchedAny = false;
+        for (const src of allSources) {
+          if (!alive) return;
+          if (cachedSourceIds.has(src.sourceId)) continue;
+          // 串行：ensureDetail 的飞行中去重按 media 维度，并发会复用同一个请求
+          const r = await detailService.ensureDetail(mediaId, { sourceId: src.sourceId }).catch(() => null);
+          if (r?.ok) fetchedAny = true;
+        }
+        if (!fetchedAny || !alive) return;
+        const freshEps = await provider.getEpisodesByMediaId(mediaId);
+        if (!alive) return;
+        setEpisodes([...freshEps].sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber));
+        lists = await aggregate(freshEps);
+        if (!alive) return;
+        apply(lists);
       } catch {
         if (alive) setMovieLines([]);
       }
@@ -221,7 +249,7 @@ export function DetailScreen() {
     return () => {
       alive = false;
     };
-  }, [media?.type, episodes]);
+  }, [media?.type, episodes, mediaId]);
 
   // 切季时按季重查可播源（对齐桌面 loadEpisodeSources(media.id, currentSeason)），
   // 当前源失效时回落到该季第一个源（对齐桌面 PlayPage 源校正 effect）。
@@ -250,9 +278,8 @@ export function DetailScreen() {
     let alive = true;
     setEpsLoading(true);
     const provider = getProvider();
-    const req = currentSourceId
-      ? provider.getEpisodesByMediaId(mediaId, currentSeason, currentSourceId)
-      : provider.getEpisodesByMediaId(mediaId, currentSeason);
+    // 源列表已含「所有有该片的源」，未缓存的源在这里按需拉详情（否则切源后剧集为空）
+    const req = loadEpisodesForSource(provider, mediaId, currentSeason, currentSourceId);
     req
       .then((eps) => {
         if (!alive) return;

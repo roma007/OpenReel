@@ -318,3 +318,23 @@ export class MediaDetailService {
     });
   }
 }
+
+/**
+ * 取「媒体 + 季 + 源」的剧集；该源尚未缓存剧集时按需拉详情再回查。
+ *
+ * 与 `store.loadEpisodes` 同语义，供直接用 provider 的页面（TV 详情/播放页）复用，
+ * 避免「切到未缓存的源 → 空剧集列表」。
+ */
+export async function loadEpisodesForSource(
+  db: DatabaseProvider,
+  mediaId: number,
+  season: number | undefined,
+  sourceId?: string | null
+): Promise<Episode[]> {
+  const cached = await db.getEpisodesByMediaId(mediaId, season, sourceId ?? undefined);
+  if (cached.length > 0) return cached;
+  // 未缓存：按需拉该源详情（ensureDetail 内部有飞行中去重；失败会自动尝试其它源）
+  const detail = await new MediaDetailService(db).ensureDetail(mediaId, sourceId ? { sourceId } : undefined);
+  if (!detail.ok) return [];
+  return db.getEpisodesByMediaId(mediaId, season, detail.sourceId ?? sourceId ?? undefined);
+}

@@ -454,6 +454,14 @@ export function createAppStore(db: DatabaseProvider) {
           firstSourceId = sources[0].id;
           episodes = await db.getEpisodesByMediaId(mediaId, season, firstSourceId);
         }
+        if (firstSourceId && episodes.length === 0) {
+          // 该源尚未缓存剧集（S2 按需模型：源列表含全部源，剧集不一定在库里）：
+          // 拉一次详情再回查，避免首屏空列表。
+          const detail = await mediaDetailService.ensureDetail(mediaId, { sourceId: firstSourceId });
+          if (detail.ok) {
+            episodes = await db.getEpisodesByMediaId(mediaId, season, detail.sourceId || firstSourceId);
+          }
+        }
         set({ episodeSources: sources, episodes });
         return firstSourceId;
       } catch (err: any) {

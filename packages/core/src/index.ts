@@ -34,7 +34,7 @@ export {
 // 服务
 export { CMSAdapter } from './services/cmsAdapter';
 export { CollectorService } from './services/collectorService';
-export { MediaDetailService, type EnsureDetailResult } from './services/mediaDetailService';
+export { MediaDetailService, loadEpisodesForSource, type EnsureDetailResult } from './services/mediaDetailService';
 export {
   setCollectKeepAwakeHandler,
   beginCollectKeepAwake,

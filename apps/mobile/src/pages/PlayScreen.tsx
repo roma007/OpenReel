@@ -872,6 +872,8 @@ export default function PlayScreen({ route, navigation }: Props) {
     return m;
   }, [tvLangInfo]);
   const tvLanguages = useMemo(() => [...tvLangSources.keys()], [tvLangSources]);
+  // 有语言信息的源（语言来自已缓存剧集的 play_source）：没有信息的源是「未知」，不能当成「不含该语言」
+  const tvLangKnownSources = useMemo(() => new Set(tvLangInfo.map((i) => i.sourceId)), [tvLangInfo]);
   const applyTvLang = (lang: string) => {
     setSelectedLang(lang);
     const srcs = tvLangSources.get(lang);
@@ -890,18 +892,19 @@ export default function PlayScreen({ route, navigation }: Props) {
     if (tvLanguages.length <= 1) return episodeSources;
     const langs = tvLangSources.get(selectedLang);
     if (!langs) return episodeSources;
-    const filtered = episodeSources.filter((s) => langs.has(s.id));
+    const filtered = episodeSources.filter((s) => !tvLangKnownSources.has(s.id) || langs.has(s.id));
     return filtered.length > 0 ? filtered : episodeSources;
-  }, [episodeSources, selectedLang, tvLanguages, tvLangSources]);
+  }, [episodeSources, selectedLang, tvLanguages, tvLangSources, tvLangKnownSources]);
 
   // TV：首帧选中语言默认切换到该语言的首个片源（当前源不含该语言时），剧集列表不空
   useEffect(() => {
     if (media?.type === 'MOVIE' || !selectedLang || !selectedSourceId) return;
     const srcs = tvLangSources.get(selectedLang);
-    if (!srcs || srcs.has(selectedSourceId)) return;
+    // 当前源语言未知（未缓存剧集）时不强切，等它按需拉取后再判断
+    if (!srcs || srcs.has(selectedSourceId) || !tvLangKnownSources.has(selectedSourceId)) return;
     const first = srcs.values().next().value;
     if (first && first !== selectedSourceId) handleSourceChange(first);
-  }, [selectedLang, selectedSourceId, tvLangSources, media?.type]);
+  }, [selectedLang, selectedSourceId, tvLangSources, tvLangKnownSources, media?.type]);
 
   useEffect(() => {
     if (!mediaId) return;
