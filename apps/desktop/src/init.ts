@@ -1,5 +1,5 @@
 import { TauriSqlProvider, type MigrationProgress } from './db/tauriSqlProvider';
-import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, type AppStore, type AppState, type HttpClient, type CollectTask } from '@openreel/core';
+import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, setFreeDiskProvider, type AppStore, type AppState, type HttpClient, type CollectTask } from '@openreel/core';
 
 let _provider: TauriSqlProvider | null = null;
 let _store: AppStore | null = null;
@@ -239,6 +239,18 @@ export async function initApp(
         console.error('[INIT] 恢复中断任务失败:', err);
       }
       report(`Step 4b: 恢复完成（${interruptedTasks.length} 个待续采任务）`);
+
+      // 存储守卫：注册可用空间查询（采集前会校验，空间不足直接拒绝启动）
+      try {
+        const pathModule = await import('@tauri-apps/api/path');
+        const { invoke } = await import('@tauri-apps/api/core');
+        setFreeDiskProvider(async () => {
+          const v = await invoke<number>('disk_free_bytes', { path: await pathModule.appDataDir() });
+          return Number.isFinite(Number(v)) ? Number(v) : null;
+        });
+      } catch (err) {
+        console.warn('[INIT] 存储守卫不可用（不影响采集）:', err);
+      }
 
       report('Step 4c: 检查启动时自动采集...');
       try {

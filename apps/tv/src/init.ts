@@ -10,6 +10,10 @@ import {
   type AppStore,
   type AppState,
   type CollectTask,
+  setFreeDiskProvider,
+  getFreeDiskBytes,
+  formatBytes,
+  LOW_FREE_BYTES_WARN,
 } from '@openreel/core';
 import { initialsOfMedia } from './services/initials';
 
@@ -85,6 +89,22 @@ export async function initApp(options?: {
       });
     } catch (err) {
       console.warn('[TV] 采集保活不可用（不影响采集）:', err);
+    }
+
+    // 存储守卫：注册可用空间查询；空间偏低时顺手清理详情缓存（采集前还会再校验）
+    try {
+      const { getFreeDiskStorageAsync } = await import('expo-file-system/legacy');
+      setFreeDiskProvider(async () => {
+        const v = await getFreeDiskStorageAsync();
+        return Number.isFinite(Number(v)) ? Number(v) : null;
+      });
+      const free = await getFreeDiskBytes(true);
+      if (free !== null && free < LOW_FREE_BYTES_WARN) {
+        console.warn(`[TV] 磁盘空间偏低（可用 ${formatBytes(free)}），清理详情缓存`);
+        await getProvider().pruneMediaDetailCache(50).catch(() => 0);
+      }
+    } catch (err) {
+      console.warn('[TV] 存储守卫不可用（不影响采集）:', err);
     }
 
     // 启动恢复：上次进程被杀残留的 RUNNING/PENDING 任务复位为可续采并排队自动续采

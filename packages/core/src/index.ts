@@ -50,6 +50,14 @@ export { resolveDefaultPlayTarget, type DefaultPlayTarget } from './services/pla
 export { prefetchPlayTargets, resetPlayPrefetchCache } from './services/playPrefetch';
 export { repairUserMediaIndex, collectRepairCandidates, type IndexRepairResult } from './services/indexRepairService';
 export {
+  setFreeDiskProvider,
+  getFreeDiskBytes,
+  ensureStorageForCollect,
+  formatBytes,
+  MIN_FREE_BYTES_FOR_COLLECT,
+  LOW_FREE_BYTES_WARN,
+} from './services/storageGuard';
+export {
   fetchLatestRelease,
   compareVersions,
   pickApkAsset,

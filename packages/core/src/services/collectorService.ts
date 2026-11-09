@@ -9,6 +9,7 @@ import type { DatabaseProvider } from '../db/provider';
 import { UNCATEGORIZED_GENRE } from '../db/provider';
 import type { CMSMediaItem, CMSListResponse, Media, Episode, PlaySource, VideoSource, CollectTask, TaskStatus, TaskErrorType, CollectPreviewItem, HiddenCollectItem, SavePreviewResult, FailedItem, MediaType } from '../types';
 import { SystemConfigService } from './systemConfigService';
+import { ensureStorageForCollect, formatBytes } from './storageGuard';
 import type { ShortDramaConfig } from './systemConfigService';
 import { VideoDurationService } from './videoDurationService';
 import { RecommendationService } from './recommendationService';
@@ -2150,6 +2151,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
     const source = await this.db.getVideoSourceByCode(sourceCode);
     if (!source || !source.isEnabled) return { taskId: '', collected: 0 };
 
+    // 存储守卫：空间不足直接拒绝启动，避免写到一半失败（TV/低端机磁盘紧张时最易踩）
+    const storage = await ensureStorageForCollect();
+    if (!storage.ok) {
+      console.warn(`[Collector] 拒绝启动采集：可用空间 ${formatBytes(storage.freeBytes)}`);
+      throw new Error(storage.message || '磁盘空间不足，请清理后再采集');
+    }
+
     const runningTasks = await this.db.getRunningTasksBySourceCode(sourceCode);
     if (runningTasks.some(t => t.type === 'INCREMENTAL' && (t.status === 'RUNNING' || t.status === 'PENDING'))) {
       throw new Error('该视频源已有增量采集任务正在运行，请等待完成后再启动');
@@ -2385,6 +2393,13 @@ const title = await normalizer.normalizeTitle(item.vod_name);
     const source = await this.db.getVideoSourceByCode(sourceCode);
     this.logTaskStep('sourceLoaded', sourceCode, resumeTaskId || '', perfStart);
     if (!source || !source.isEnabled) return { taskId: '', collected: 0, pages: 0 };
+
+    // 存储守卫：空间不足直接拒绝启动，避免写到一半失败（TV/低端机磁盘紧张时最易踩）
+    const storage = await ensureStorageForCollect();
+    if (!storage.ok) {
+      console.warn(`[Collector] 拒绝启动采集：可用空间 ${formatBytes(storage.freeBytes)}`);
+      throw new Error(storage.message || '磁盘空间不足，请清理后再采集');
+    }
 
     const runningTasks = await this.db.getRunningTasksBySourceCode(sourceCode);
     this.logTaskStep('runningChecked', sourceCode, resumeTaskId || '', perfStart);

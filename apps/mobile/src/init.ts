@@ -1,6 +1,20 @@
 import { ExpoSqliteProvider, type MigrationProgress } from './db/expoSqliteProvider';
 import { DevSettings } from 'react-native';
-import { createAppStore, CollectorService, SystemConfigService, getCurrentStoreApiVersion, getStoreApiVersion, setCollectKeepAwakeHandler, type AppStore, type AppState, type CollectTask } from '@openreel/core';
+import {
+  createAppStore,
+  CollectorService,
+  SystemConfigService,
+  getCurrentStoreApiVersion,
+  getStoreApiVersion,
+  setCollectKeepAwakeHandler,
+  type AppStore,
+  type AppState,
+  type CollectTask,
+  setFreeDiskProvider,
+  getFreeDiskBytes,
+  formatBytes,
+  LOW_FREE_BYTES_WARN,
+} from '@openreel/core';
 
 /**
  * 单例容器挂在 globalThis 上，保证 RN Fast Refresh（模块重执行）后单例不丢失。
@@ -59,6 +73,22 @@ export async function initApp(options?: { onMigrationProgress?: (p: MigrationPro
       });
     } catch (err) {
       console.warn('[INIT] 采集保活不可用（不影响采集）:', err);
+    }
+
+    // 存储守卫：注册可用空间查询；空间偏低时顺手清理详情缓存（采集前还会再校验）
+    try {
+      const { getFreeDiskStorageAsync } = await import('expo-file-system/legacy');
+      setFreeDiskProvider(async () => {
+        const v = await getFreeDiskStorageAsync();
+        return Number.isFinite(Number(v)) ? Number(v) : null;
+      });
+      const free = await getFreeDiskBytes(true);
+      if (free !== null && free < LOW_FREE_BYTES_WARN) {
+        console.warn(`[INIT] 磁盘空间偏低（可用 ${formatBytes(free)}），清理详情缓存`);
+        await getProvider().pruneMediaDetailCache(50).catch(() => 0);
+      }
+    } catch (err) {
+      console.warn('[INIT] 存储守卫不可用（不影响采集）:', err);
     }
 
     // 启动恢复：上次进程被系统杀掉时残留的 RUNNING/PENDING 任务不再直接判死，
