@@ -71,11 +71,16 @@ export async function initApp(options?: {
     // 采集开始保持屏幕常亮、结束自动释放（桌面端不注册，不产生副作用）。
     try {
       const { activateKeepAwakeAsync, deactivateKeepAwake } = await import('expo-keep-awake');
+      // Android 额外挂前台服务：锁屏/切后台时进程优先级更高，采集不易被系统回收。
+      // iOS 无此模块（requireOptionalNativeModule 返回 null），自动退化为仅 keep-awake。
+      const { startCollectionForeground, stopCollectionForeground } = await import('expo-collection-foreground');
       setCollectKeepAwakeHandler((active) => {
         if (active) {
           activateKeepAwakeAsync('openreel-collect').catch(() => {});
+          startCollectionForeground('正在采集片库', '采集会在后台继续，完成后自动结束');
         } else {
           deactivateKeepAwake('openreel-collect');
+          stopCollectionForeground();
         }
       });
     } catch (err) {

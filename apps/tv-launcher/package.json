@@ -1,6 +1,6 @@
 {
   "name": "@openreel/tv-launcher",
-  "version": "1.0.220",
+  "version": "1.0.221",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -36,7 +36,8 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.25.2",
     "react-native-svg": "~15.15.5",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "expo-collection-foreground": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
