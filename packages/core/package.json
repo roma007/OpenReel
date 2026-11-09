@@ -1,6 +1,6 @@
 {
   "name": "@openreel/core",
-  "version": "1.0.230",
+  "version": "1.0.231",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {

@@ -1,6 +1,7 @@
 import { NavLink, Link, Outlet } from 'react-router-dom';
 import { UsageGuideDialog } from './UsageGuideDialog';
 import { SourceGuideDialog } from './SourceGuideDialog';
+import { CollectGuideDialog } from './CollectGuideDialog';
 import { AiSourceImportDialog } from './AiSourceImportDialog';
 import { CollectProgressDialog } from './CollectProgressDialog';
 import { BackgroundLayer } from './BackgroundLayer';
@@ -23,7 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useState, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { useAppStore, getStore } from '../useAppStore';
+import { useAppStore, getStore, getProvider } from '../useAppStore';
 import { getKidLockService } from '../stores/kidLockStore';
 import { getUpdateBadgeStore } from '@openreel/core';
 
@@ -109,12 +110,16 @@ function ToastProvider({ children }: { children: ReactNode }) {
 let launchGuideShown = false;
 let usageGuideShownThisLaunch = false;
 let sourceGuideShownThisLaunch = false;
+let collectGuideShownThisLaunch = false;
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.230');
+  const [appVersion, setAppVersion] = useState('1.0.231');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const [showSourceGuide, setShowSourceGuide] = useState(false);
+  const [showCollectGuide, setShowCollectGuide] = useState(false);
+  // 「选择使用方式」是否已结束（结束后才轮到添加源/去采集引导）
+  const [usageGuideDone, setUsageGuideDone] = useState(false);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
   const closeAiImport = useImportDialogStore((s) => s.closeAiImport);
   const { loadVideoSources, videoSources } = useAppStore();
@@ -140,14 +145,53 @@ export function Layout() {
     }
   };
 
+  // 有源但片库为空 → 「去采集」引导（每次启动最多一次）
+  const maybeShowCollectGuide = async () => {
+    if (collectGuideShownThisLaunch) return;
+    try {
+      const res = await getProvider().listMedia({ page: 1, pageSize: 1 });
+      if ((res.meta?.total ?? 0) === 0) {
+        collectGuideShownThisLaunch = true;
+        setShowCollectGuide(true);
+      }
+    } catch {
+      // 取不到计数时不误报，等下次触发
+    }
+  };
+
+  const handleUsageGuideClosed = () => {
+    setUsageGuideDone(true);
+    setTimeout(() => {
+      const count = getStore().getState().videoSources.length;
+      if (count === 0) {
+        if (!sourceGuideShownThisLaunch) {
+          sourceGuideShownThisLaunch = true;
+          setShowSourceGuide(true);
+        }
+      } else {
+        void maybeShowCollectGuide();
+      }
+    }, 250);
+  };
+
   useEffect(() => {
     if (!sourcesLoaded) return;
     if (launchGuideShown) return;
     launchGuideShown = true;
-    // 每次启动都先弹「选择你的使用方式」；无源时等它关闭后再弹「添加视频源」
+    // 每次启动都先弹「选择你的使用方式」；关闭后再按有无源依次补弹
     usageGuideShownThisLaunch = true;
     setShowUsageGuide(true);
   }, [sourcesLoaded]);
+
+  // 添加源/导入完成后（videoSources 变化）：若已无其他引导且片库仍为空 → 补弹「去采集」
+  useEffect(() => {
+    if (!sourcesLoaded || !usageGuideDone) return;
+    if (showUsageGuide || showSourceGuide || showCollectGuide) return;
+    if (collectGuideShownThisLaunch) return;
+    if (videoSources.length === 0) return;
+    void maybeShowCollectGuide();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoSources.length, sourcesLoaded, usageGuideDone, showUsageGuide, showSourceGuide, showCollectGuide]);
 
   const handleImportClosed = (open: boolean) => {
     if (open) return;
@@ -163,10 +207,11 @@ export function Layout() {
         open={showUsageGuide}
         onOpenChange={(v) => {
           setShowUsageGuide(v);
-          if (!v) setTimeout(maybeShowSourceGuide, 250);
+          if (!v) handleUsageGuideClosed();
         }}
       />
       <SourceGuideDialog open={showSourceGuide} onOpenChange={setShowSourceGuide} />
+      <CollectGuideDialog open={showCollectGuide} onOpenChange={setShowCollectGuide} />
       <AiSourceImportDialog
         open={aiImportOpen}
         onOpenChange={handleImportClosed}

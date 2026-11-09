@@ -13,6 +13,7 @@ import PosterImage from '../components/PosterImage';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import UsageGuideModal, { willShowUsageGuideThisLaunch } from '../components/UsageGuideModal';
+import CollectGuideModal from '../components/CollectGuideModal';
 import CategoryHeader from '../components/CategoryHeader';
 import BlurredBackground from '../components/BlurredBackground';
 import { KidLockBanner } from '../components/KidLockBanner';
@@ -285,6 +286,9 @@ export default function HomeScreen() {
   const [sourceGuideVisible, setSourceGuideVisible] = useState(false);
   // 本次启动的「选择使用方式」是否已结束（结束后才轮到「添加视频源」引导）
   const [usageGuideDone, setUsageGuideDone] = useState(false);
+  // 本次启动的「去采集」引导状态（有源但片库为空时弹一次）
+  const [collectGuideVisible, setCollectGuideVisible] = useState(false);
+  const collectGuideShownRef = useRef(false);
   // 隐私政策未同意前不弹首页引导：RN Modal 在原生层，会盖住隐私弹窗的正文与复选框
   const privacyAgreed = usePrivacyConsentStore((st) => st.agreed);
 
@@ -320,6 +324,27 @@ export default function HomeScreen() {
       setSourceGuideVisible(true);
     }
   }, [sourcesChecked, videoSources, privacyAgreed, usageGuideDone]);
+
+  // 有视频源但片库为空 → 弹「去采集」引导（每次启动最多一次）
+  useEffect(() => {
+    if (!privacyAgreed || !sourcesChecked || !usageGuideDone) return;
+    if (videoSources.length === 0) return;
+    if (collectGuideShownRef.current) return;
+    let cancelled = false;
+    provider
+      .listMedia({ page: 1, pageSize: 1 })
+      .then((r) => {
+        if (cancelled || collectGuideShownRef.current) return;
+        if (((r as any)?.meta?.total ?? 0) === 0) {
+          collectGuideShownRef.current = true;
+          setCollectGuideVisible(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [privacyAgreed, sourcesChecked, usageGuideDone, videoSources.length, provider]);
 
   useEffect(() => {
     loadUserUsageTypes();
@@ -840,6 +865,12 @@ export default function HomeScreen() {
           onDismissed={() => {
             setUsageGuideDone(true);
           }}
+        />
+      )}
+      {privacyAgreed && (
+        <CollectGuideModal
+          visible={collectGuideVisible}
+          onClose={() => setCollectGuideVisible(false)}
         />
       )}
       <Modal
