@@ -248,6 +248,7 @@ export async function initApp(
           const v = await invoke<number>('disk_free_bytes', { path: await pathModule.appDataDir() });
           return Number.isFinite(Number(v)) ? Number(v) : null;
         });
+        console.log('[INIT] 存储守卫已注册（采集前会校验可用空间）');
       } catch (err) {
         console.warn('[INIT] 存储守卫不可用（不影响采集）:', err);
       }

@@ -83,6 +83,7 @@ export async function initApp(options?: { onMigrationProgress?: (p: MigrationPro
         return Number.isFinite(Number(v)) ? Number(v) : null;
       });
       const free = await getFreeDiskBytes(true);
+      console.log(`[INIT] 可用存储 ${formatBytes(free)}`);
       if (free !== null && free < LOW_FREE_BYTES_WARN) {
         console.warn(`[INIT] 磁盘空间偏低（可用 ${formatBytes(free)}），清理详情缓存`);
         await getProvider().pruneMediaDetailCache(50).catch(() => 0);

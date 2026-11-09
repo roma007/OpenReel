@@ -92,8 +92,8 @@ android {
         applicationId 'com.openreel.tvlauncher'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 224
-        versionName "1.0.224"
+        versionCode 225
+        versionName "1.0.225"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
