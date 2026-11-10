@@ -1,6 +1,6 @@
 {
   "name": "@openreel/expo-ui",
-  "version": "1.0.234",
+  "version": "1.0.235",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {

@@ -2792,6 +2792,14 @@ export class ExpoSqliteProvider implements DatabaseProvider {
   async deleteAllMedia(): Promise<void> {
     await this.db!.runAsync('DELETE FROM play_source');
     await this.db!.runAsync('DELETE FROM episode');
+    await this.db!.runAsync('DELETE FROM media_source');
+    // 无 media 外键、不随 DELETE FROM media 级联的表：必须显式清理，
+    // 否则 media id 复用会把旧的曝光/推荐/不喜欢记录错误套到新片子上。
+    await this.db!.runAsync('DELETE FROM watch_line_progress');
+    await this.db!.runAsync('DELETE FROM impression');
+    await this.db!.runAsync('DELETE FROM recommend_candidates');
+    await this.db!.runAsync('DELETE FROM media_change_log');
+    await this.db!.runAsync('DELETE FROM dislike');
     await this.db!.runAsync('DELETE FROM media');
     await this.db!.runAsync('DELETE FROM favorite');
     await this.db!.runAsync('DELETE FROM watch_history');

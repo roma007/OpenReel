@@ -2166,6 +2166,14 @@ export class TauriSqlProvider implements DatabaseProvider {
   async deleteAllMedia(): Promise<void> {
     await this.db!.execute('DELETE FROM play_source');
     await this.db!.execute('DELETE FROM episode');
+    await this.db!.execute('DELETE FROM media_source');
+    // 以下表没有 media 外键，不会随 DELETE FROM media 级联：
+    // 清空片库后若残留，media id 复用会把旧记录错误套到新片子上（实测 impression 残留 88 行）。
+    await this.db!.execute('DELETE FROM watch_line_progress');
+    await this.db!.execute('DELETE FROM impression');
+    await this.db!.execute('DELETE FROM recommend_candidates');
+    await this.db!.execute('DELETE FROM media_change_log');
+    await this.db!.execute('DELETE FROM dislike');
     await this.db!.execute('DELETE FROM media');
     await this.db!.execute('DELETE FROM favorite');
     await this.db!.execute('DELETE FROM watch_history');
