@@ -314,6 +314,11 @@ export default function HomeScreen() {
       setUsageGuideDone(false);
       return;
     }
+    // 本会话的使用方式引导已经处理完（弹过或因为已选过而跳过）→ 允许后续引导
+    if (!usageGuideDone) {
+      setUsageGuideDone(true);
+      return;
+    }
     if (videoSources.length > 0) {
       sourceGuideShownRef.current = false;
       setSourceGuideVisible(false);

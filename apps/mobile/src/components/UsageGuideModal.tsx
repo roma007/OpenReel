@@ -6,7 +6,7 @@ import { useScaledFontSize } from '../themes/useScaledFontSize';
 import { radius } from '../themes/radiusTokens';
 import { hexToRgba } from '../themes/colorUtils';
 import { Button } from './ui/Button';
-import { useAppStore } from '../useAppStore';
+import { useAppStore, getStore } from '../useAppStore';
 import type { UserUsageType } from '@openreel/core';
 import { Search, Film, Tv, Check } from 'lucide-react-native';
 
@@ -117,8 +117,16 @@ export default function UsageGuideModal({ onDismissed }: Props = {}) {
 
   useEffect(() => {
     if (usageGuideShown) return;
-    usageGuideShown = true;
-    setVisible(true);
+    void (async () => {
+      // 已保存过使用偏好 → 不再弹；只点过「跳过」没保存的，下次启动仍会弹
+      const hasChoice = await getStore().getState().hasUserUsageTypeChoice();
+      usageGuideShown = true;
+      if (hasChoice) {
+        onDismissed?.();
+        return;
+      }
+      setVisible(true);
+    })();
   }, []);
 
   const handleToggle = (type: UserUsageType) => {

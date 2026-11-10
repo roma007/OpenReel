@@ -114,7 +114,7 @@ let sourceGuideShownThisLaunch = false;
 let collectGuideShownThisLaunch = false;
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.233');
+  const [appVersion, setAppVersion] = useState('1.0.234');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const [showSourceGuide, setShowSourceGuide] = useState(false);
@@ -163,28 +163,40 @@ export function Layout() {
     }
   };
 
+  // 使用方式结束后，按「有无视频源 / 片库是否为空」决定下一步引导
+  const decideNextAfterUsage = () => {
+    const count = getStore().getState().videoSources.length;
+    if (count === 0) {
+      if (!sourceGuideShownThisLaunch) {
+        sourceGuideShownThisLaunch = true;
+        setShowSourceGuide(true);
+      }
+    } else {
+      void maybeShowCollectGuide();
+    }
+  };
+
   const handleUsageGuideClosed = () => {
     setUsageGuideDone(true);
-    setTimeout(() => {
-      const count = getStore().getState().videoSources.length;
-      if (count === 0) {
-        if (!sourceGuideShownThisLaunch) {
-          sourceGuideShownThisLaunch = true;
-          setShowSourceGuide(true);
-        }
-      } else {
-        void maybeShowCollectGuide();
-      }
-    }, 250);
+    setTimeout(decideNextAfterUsage, 250);
   };
 
   useEffect(() => {
     if (!sourcesLoaded) return;
     if (launchGuideShown) return;
     launchGuideShown = true;
-    // 每次启动都先弹「选择你的使用方式」；关闭后再按有无源依次补弹
-    usageGuideShownThisLaunch = true;
-    setShowUsageGuide(true);
+    void (async () => {
+      // 已保存过使用偏好（用户确认过多选）→ 不再重复弹「选择你的使用方式」；
+      // 只点过「跳过」没保存的，本次/下次启动仍会弹。
+      const hasChoice = await getStore().getState().hasUserUsageTypeChoice();
+      if (hasChoice) {
+        setUsageGuideDone(true);
+        setTimeout(decideNextAfterUsage, 300);
+        return;
+      }
+      usageGuideShownThisLaunch = true;
+      setShowUsageGuide(true);
+    })();
   }, [sourcesLoaded]);
 
   // 启动 45 秒后（UI 已就绪、用户不在等首屏）检查是否需要压缩数据库。

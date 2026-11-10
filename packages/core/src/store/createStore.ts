@@ -285,6 +285,8 @@ hasShortDrama: (type?: string) => Promise<boolean>;
 
   userUsageTypes: UserUsageType[];
   loadUserUsageTypes: () => Promise<void>;
+  /** 用户是否确认过使用偏好（没存过时 getUserUsageTypes 会返回默认值，不能用它判断） */
+  hasUserUsageTypeChoice: () => Promise<boolean>;
   setUserUsageTypes: (types: UserUsageType[]) => Promise<void>;
   checkGuideShown: () => Promise<boolean>;
   markGuideShown: () => Promise<void>;
@@ -1438,6 +1440,14 @@ export function createAppStore(db: DatabaseProvider) {
         set({ userUsageTypes: types });
       } catch (err: any) {
         console.error('[STORE] loadUserUsageTypes failed:', err);
+      }
+    },
+
+    hasUserUsageTypeChoice: async () => {
+      try {
+        return await configService.hasSavedUserUsageTypes();
+      } catch {
+        return false;
       }
     },
 

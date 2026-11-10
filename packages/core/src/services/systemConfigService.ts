@@ -259,6 +259,12 @@ export class SystemConfigService {
     return ['SEARCH_FIRST'];
   }
 
+  /** 是否「用户确认过」使用偏好（区分默认值 SEARCH_FIRST 与真正保存过） */
+  async hasSavedUserUsageTypes(): Promise<boolean> {
+    const stored = await this.getJSON<UserUsageType[]>('user.usageType', []);
+    return Array.isArray(stored) && stored.length > 0;
+  }
+
   async setUserUsageTypes(types: UserUsageType[]): Promise<void> {
     const valid = types.filter((t) => t === 'SEARCH_FIRST' || t === 'NEW_MOVIES' || t === 'TV_SERIES');
     await this.setJSON('user.usageType', valid.length > 0 ? valid : ['SEARCH_FIRST']);
