@@ -2,6 +2,7 @@ import { NavLink, Link, Outlet } from 'react-router-dom';
 import { UsageGuideDialog } from './UsageGuideDialog';
 import { SourceGuideDialog } from './SourceGuideDialog';
 import { CollectGuideDialog } from './CollectGuideDialog';
+import { DbMaintenanceService } from '@openreel/core';
 import { AiSourceImportDialog } from './AiSourceImportDialog';
 import { CollectProgressDialog } from './CollectProgressDialog';
 import { BackgroundLayer } from './BackgroundLayer';
@@ -113,13 +114,16 @@ let sourceGuideShownThisLaunch = false;
 let collectGuideShownThisLaunch = false;
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.232');
+  const [appVersion, setAppVersion] = useState('1.0.233');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const [showSourceGuide, setShowSourceGuide] = useState(false);
   const [showCollectGuide, setShowCollectGuide] = useState(false);
   // 「选择使用方式」是否已结束（结束后才轮到添加源/去采集引导）
   const [usageGuideDone, setUsageGuideDone] = useState(false);
+  // 数据库维护（VACUUM）状态：启动空闲后自动执行，也可在设置里手动触发
+  const [maintenanceBusy, setMaintenanceBusy] = useState<string | null>(null);
+  const [maintenanceDone, setMaintenanceDone] = useState<string | null>(null);
   const aiImportOpen = useImportDialogStore((s) => s.aiImportOpen);
   const closeAiImport = useImportDialogStore((s) => s.closeAiImport);
   const { loadVideoSources, videoSources } = useAppStore();
@@ -183,6 +187,36 @@ export function Layout() {
     setShowUsageGuide(true);
   }, [sourcesLoaded]);
 
+  // 启动 45 秒后（UI 已就绪、用户不在等首屏）检查是否需要压缩数据库。
+  // 只在「全量采集完成标记 / 迁移失败标记 / freelist 过大」且磁盘足够时执行。
+  useEffect(() => {
+    if (!sourcesLoaded) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const svc = new DbMaintenanceService(getProvider());
+        const decision = await svc.shouldAutoRun();
+        if (cancelled || !decision.ok) return;
+        setMaintenanceBusy(`正在优化数据库（约 ${Math.round(decision.snapshot.bytes / 1048576)}MB），请勿关闭应用…`);
+        const r = await svc.runVacuum();
+        if (cancelled) return;
+        setMaintenanceBusy(null);
+        if (r.ok) {
+          setMaintenanceDone(
+            `数据库优化完成：${Math.round(r.beforeBytes / 1048576)}MB → ${Math.round(r.afterBytes / 1048576)}MB`
+          );
+          setTimeout(() => setMaintenanceDone(null), 6000);
+        }
+      } catch {
+        if (!cancelled) setMaintenanceBusy(null);
+      }
+    }, 45_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sourcesLoaded]);
+
   // 添加源/导入完成后（videoSources 变化）：若已无其他引导且片库仍为空 → 补弹「去采集」
   useEffect(() => {
     if (!sourcesLoaded || !usageGuideDone) return;
@@ -212,6 +246,19 @@ export function Layout() {
       />
       <SourceGuideDialog open={showSourceGuide} onOpenChange={setShowSourceGuide} />
       <CollectGuideDialog open={showCollectGuide} onOpenChange={setShowCollectGuide} />
+      {maintenanceBusy && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70">
+          <div className="rounded-lg bg-background px-6 py-5 text-center shadow-xl">
+            <div className="text-sm font-medium">{maintenanceBusy}</div>
+            <div className="mt-2 text-xs text-muted-foreground">压缩期间会短暂占用磁盘，请勿退出</div>
+          </div>
+        </div>
+      )}
+      {maintenanceDone && (
+        <div className="fixed bottom-6 right-6 z-[100] rounded-md bg-background px-4 py-3 text-sm shadow-lg">
+          {maintenanceDone}
+        </div>
+      )}
       <AiSourceImportDialog
         open={aiImportOpen}
         onOpenChange={handleImportClosed}

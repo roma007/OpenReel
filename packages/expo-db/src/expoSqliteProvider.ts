@@ -23,6 +23,7 @@ import {
   resolveCollectTaskCutoff,
   expandSubTypes,
   extractFirstSubtypes,
+  DbMaintenanceService,
 } from '@openreel/core';
 import type { DatabaseProvider } from '@openreel/core';
 import type {
@@ -1116,6 +1117,8 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       await this.db!.execAsync('CREATE INDEX IF NOT EXISTS idx_play_source_episode_id ON play_source(episode_id);');
       // favorite 不再建普通索引 idx_favorite_media_id（v57 起改由 UNIQUE 索引 uq_favorite_media_id 承担）
       await this.db!.execAsync('CREATE INDEX IF NOT EXISTS idx_watch_history_media_id ON watch_history(media_id);');
+      // 刷新查询规划统计（毫秒级）：全量采集后行分布变化大
+      await this.db!.execAsync('PRAGMA optimize;').catch(() => undefined);
       timing.post_indexes = Date.now() - tIdx;
 
       const tSync = Date.now();
@@ -1135,15 +1138,33 @@ export class ExpoSqliteProvider implements DatabaseProvider {
       await this.pruneMediaDetailCache(300).catch(() => 0);
       timing.post_detail_prune = Date.now() - tDetail;
 
-      // 升级后空间回收：索引优先迁移 DROP 了 episode/play_source（约 2GB 页转 freelist），
-      // 库文件不会自动缩小。freelist 过大时后台 VACUUM 一次；失败（磁盘不足/占用）不影响使用。
+      // 升级/大采集后的空间与碎片整理：
+      //  - 迁移 DROP episode/play_source 会留下大量 freelist 页（库文件不自动缩小）；
+      //  - 全量采集后行在文件里散落，回表查询会变慢（实测 1770ms → VACUUM 后 47ms）。
+      // 只在「有 pending 标记或 freelist 超阈值」且磁盘够用时执行；失败保留 pending 下次重试。
       const tVacuum = Date.now();
       try {
-        const fl = await this.db!.getFirstAsync<{ c: number }>('PRAGMA freelist_count');
-        if ((fl?.c ?? 0) > 20000) {
-          console.log(`[DB] freelist ${fl?.c} 页，后台执行 VACUUM 回收空间…`);
-          await this.db!.execAsync('VACUUM');
-          console.log('[DB] VACUUM 完成');
+        const maintenance = new DbMaintenanceService(this, {
+          freeBytes: async () => {
+            try {
+              const v = await getFreeDiskStorageAsync();
+              return typeof v === 'number' && Number.isFinite(v) ? v : null;
+            } catch {
+              return null;
+            }
+          },
+        });
+        const decision = await maintenance.shouldAutoRun();
+        if (decision.ok) {
+          console.log(`[DB] 启动维护：${decision.reason}，执行 VACUUM…`);
+          const r = await maintenance.runVacuum();
+          if (r.ok) {
+            console.log(
+              `[DB] VACUUM 完成 ${(r.beforeBytes / 1048576).toFixed(0)}MB → ${(r.afterBytes / 1048576).toFixed(0)}MB`
+            );
+          } else {
+            console.warn('[DB] VACUUM 失败（保留 pending 下次重试）:', r.error);
+          }
         }
       } catch (e) {
         console.warn('[DB] VACUUM 跳过:', e instanceof Error ? e.message : String(e));
@@ -2786,6 +2807,22 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     await this.db!.runAsync(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM media_source WHERE media_source.media_id = media.id)`);
     await this.db!.runAsync(`DELETE FROM favorite WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = favorite.media_id)`);
     await this.db!.runAsync(`DELETE FROM watch_history WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = watch_history.media_id)`);
+  }
+
+  async getDbSizeInfo(): Promise<{ pageCount: number; pageSize: number; freelistPages: number }> {
+    const pc = await this.db!.getFirstAsync<{ page_count: number }>('SELECT * FROM pragma_page_count');
+    const ps = await this.db!.getFirstAsync<{ page_size: number }>('SELECT * FROM pragma_page_size');
+    const fl = await this.db!.getFirstAsync<{ freelist_count: number }>('SELECT * FROM pragma_freelist_count');
+    return {
+      pageCount: Number(pc?.page_count ?? 0),
+      pageSize: Number(ps?.page_size ?? 0),
+      freelistPages: Number(fl?.freelist_count ?? 0),
+    };
+  }
+
+  async runVacuum(): Promise<void> {
+    await this.db!.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
+    await this.db!.execAsync('VACUUM');
   }
 
   async getMediaCountBySourceIdMap(): Promise<Map<string, number>> {

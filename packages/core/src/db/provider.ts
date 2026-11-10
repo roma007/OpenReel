@@ -160,6 +160,10 @@ export interface DatabaseProvider {
   deleteAllMedia(): Promise<void>;
   deletePlaySourcesBySourceId(sourceId: string): Promise<void>;
   getMediaCountBySourceIdMap(): Promise<Map<string, number>>;
+  /** 数据库物理尺寸信息（维护/压缩判断用）：页数、页大小、空闲页数 */
+  getDbSizeInfo(): Promise<{ pageCount: number; pageSize: number; freelistPages: number }>;
+  /** 执行 WAL checkpoint(TRUNCATE) + VACUUM；调用方负责时机与磁盘空间校验 */
+  runVacuum(): Promise<void>;
   deleteMediaCompletely(mediaId: number): Promise<void>;
   deleteMediaWithoutPlaySource(): Promise<number>;
   deleteNonMediaPlaySources(): Promise<number>;

@@ -26,6 +26,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/Layout';
 import { getProvider } from '../init';
+import { getStore } from '../useAppStore';
+import { DbMaintenanceService } from '@openreel/core';
 
 type OverviewTable = { name: string; kind: 'table' | 'view' | 'fts' | 'shadow'; rowCount: number };
 type InspectorOverview = {
@@ -148,6 +150,8 @@ export default function DbToolPage() {
   const [sqlResult, setSqlResult] = useState<{ columns: string[]; rows: any[][]; elapsed: number } | null>(null);
   const [sqlError, setSqlError] = useState<string | null>(null);
   const [sqlRunning, setSqlRunning] = useState(false);
+  const [dbMaintenance, setDbMaintenance] = useState<{ bytes: number; freelistBytes: number; lastVacuumAt: string } | null>(null);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -166,6 +170,47 @@ export default function DbToolPage() {
   useEffect(() => {
     loadOverview();
   }, [loadOverview]);
+
+  const loadDbMaintenance = useCallback(async () => {
+    try {
+      const svc = new DbMaintenanceService(getProvider());
+      const snap = await svc.getSnapshot();
+      setDbMaintenance({
+        bytes: snap.bytes,
+        freelistBytes: snap.freelistBytes,
+        lastVacuumAt: await svc.getLastVacuumAt(),
+      });
+    } catch {
+      setDbMaintenance(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDbMaintenance();
+  }, [loadDbMaintenance]);
+
+  const handleOptimizeDb = useCallback(async () => {
+    if (getStore().getState().isCollecting) {
+      toast('正在采集，暂时不能优化数据库', 'error');
+      return;
+    }
+    setMaintenanceBusy(true);
+    try {
+      const svc = new DbMaintenanceService(getProvider());
+      const r = await svc.runVacuum();
+      if (r.ok) {
+        toast(`数据库优化完成：${formatBytes(r.beforeBytes)} → ${formatBytes(r.afterBytes)}`);
+        await loadOverview();
+        await loadDbMaintenance();
+      } else {
+        toast('优化失败：' + (r.error || '未知错误'), 'error');
+      }
+    } catch (e: any) {
+      toast('优化失败：' + (e?.message || String(e)), 'error');
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }, [toast, loadOverview, loadDbMaintenance]);
 
   const loadDetail = useCallback(async (table: string) => {
     setDetailLoading(true);
@@ -262,6 +307,29 @@ export default function DbToolPage() {
           </Button>
         </div>
       </header>
+
+      {dbMaintenance && (
+        <div className="flex shrink-0 items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          <span>库文件 {formatBytes(dbMaintenance.bytes)}</span>
+          <span>·</span>
+          <span>可回收 {formatBytes(dbMaintenance.freelistBytes)}</span>
+          <span>·</span>
+          <span>
+            上次优化：
+            {dbMaintenance.lastVacuumAt ? new Date(dbMaintenance.lastVacuumAt).toLocaleString('zh-CN') : '从未'}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            disabled={maintenanceBusy}
+            onClick={handleOptimizeDb}
+          >
+            {maintenanceBusy ? <Loader2 className="size-4 animate-spin" /> : <Zap className="size-4" />}
+            优化数据库
+          </Button>
+        </div>
+      )}
 
       <Tabs defaultValue="browse" className="flex min-h-0 flex-1 flex-col">
         <TabsList className="w-fit shrink-0">

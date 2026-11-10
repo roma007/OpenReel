@@ -295,6 +295,7 @@ import { CollectorService } from '../services/collectorService';
 import { SourceImportService } from '../services/sourceImportService';
 import { RecommendationService, type RecommendationOverview, type DislikedMediaItem, type TagBlacklistItem } from '../services/recommendationService';
 import { MediaDetailService, type EnsureDetailResult } from '../services/mediaDetailService';
+import { DbMaintenanceService } from '../services/dbMaintenanceService';
 import { repairUserMediaIndex, type IndexRepairResult } from '../services/indexRepairService';
 
 /**
@@ -906,6 +907,7 @@ export function createAppStore(db: DatabaseProvider) {
 
         await get().loadMediaList();
         await get().loadCollectTasks();
+        void new DbMaintenanceService(db).markPending('full-collect');
         return { totalCollected, totalPages };
       } catch (err: any) {
         set({ error: err.message });
@@ -959,6 +961,8 @@ export function createAppStore(db: DatabaseProvider) {
         const result = await collectorService.collectSourceAll(sourceCode);
         clearMediaFilterCache();
         clearVideoSourceCountCache();
+        // 全量采集会写入大量行并频繁 UPDATE，标记待压缩：下次启动空闲时自动 VACUUM
+        void new DbMaintenanceService(db).markPending('full-collect');
         await get().loadMediaList();
         await get().loadVideoSources();
         return { success: true, taskId: result.taskId, collected: result.collected, pages: result.pages };

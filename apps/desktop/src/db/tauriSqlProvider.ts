@@ -290,6 +290,13 @@ export class TauriSqlProvider implements DatabaseProvider {
     } catch (err) {
       console.error('[DB] WAL checkpoint 失败:', err);
     }
+
+    // 9. 刷新查询规划统计（毫秒级）：全量采集后行分布变化大，统计陈旧会让索引选择变差
+    try {
+      await this.db!.execute('PRAGMA optimize;');
+    } catch (err) {
+      console.warn('[DB] PRAGMA optimize 失败:', err);
+    }
   }
 
   /**
@@ -505,7 +512,15 @@ export class TauriSqlProvider implements DatabaseProvider {
       await this.db!.execute('VACUUM');
       console.log('[DB] 索引优先升级：VACUUM 完成');
     } catch (e) {
-      console.warn('[DB] 索引优先升级：VACUUM 跳过（磁盘不足或占用中）', e);
+      console.warn('[DB] 索引优先升级：VACUUM 跳过（磁盘不足或占用中），挂起下次启动重试', e);
+      try {
+        await this.db!.execute(
+          `INSERT INTO system_config (key, value, value_type) VALUES ('db.maintenance.pending', 'slim-migration', 'string')
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        );
+      } catch {
+        // 标记失败不影响迁移本体的可用性
+      }
     }
     console.log(`[DB] 索引优先升级完成，耗时 ${Date.now() - t0}ms`);
   }
@@ -2163,6 +2178,22 @@ export class TauriSqlProvider implements DatabaseProvider {
     await this.db!.execute(`DELETE FROM media WHERE NOT EXISTS (SELECT 1 FROM media_source WHERE media_source.media_id = media.id)`);
     await this.db!.execute(`DELETE FROM favorite WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = favorite.media_id)`);
     await this.db!.execute(`DELETE FROM watch_history WHERE NOT EXISTS (SELECT 1 FROM media WHERE media.id = watch_history.media_id)`);
+  }
+
+  async getDbSizeInfo(): Promise<{ pageCount: number; pageSize: number; freelistPages: number }> {
+    const pc = await this.db!.select<{ page_count: number }[]>('PRAGMA page_count');
+    const ps = await this.db!.select<{ page_size: number }[]>('PRAGMA page_size');
+    const fl = await this.db!.select<{ freelist_count: number }[]>('PRAGMA freelist_count');
+    return {
+      pageCount: Number(pc[0]?.page_count ?? 0),
+      pageSize: Number(ps[0]?.page_size ?? 0),
+      freelistPages: Number(fl[0]?.freelist_count ?? 0),
+    };
+  }
+
+  async runVacuum(): Promise<void> {
+    await this.db!.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+    await this.db!.execute('VACUUM');
   }
 
   async getMediaCountBySourceIdMap(): Promise<Map<string, number>> {

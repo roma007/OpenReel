@@ -14,7 +14,7 @@ import BlurredBackground from '../components/BlurredBackground';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import type { ShortDramaConfig } from '@openreel/core';
-import { UNCATEGORIZED_GENRE } from '@openreel/core';
+import { UNCATEGORIZED_GENRE, DbMaintenanceService } from '@openreel/core';
 
 interface Props {
   navigation: any;
@@ -202,6 +202,10 @@ export default function VideoManagementScreen({ navigation }: Props) {
 
   const [mediaStats, setMediaStats] = useState<{ total: number; byType: { type: string; count: number }[] } | null>(null);
   const [cacheSize, setCacheSize] = useState(0);
+  // 数据库维护（压缩）状态
+  const [dbInfo, setDbInfo] = useState<{ bytes: number; freelistBytes: number } | null>(null);
+  const [lastVacuumAt, setLastVacuumAt] = useState('');
+  const [optimizing, setOptimizing] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
@@ -307,6 +311,54 @@ export default function VideoManagementScreen({ navigation }: Props) {
       startReprobePolling(runningReprobeTask.taskId);
     }
   }, [runningReprobeTask, startReprobePolling]);
+
+  const loadDbInfo = useCallback(async () => {
+    try {
+      const svc = new DbMaintenanceService(getProvider());
+      const snap = await svc.getSnapshot();
+      setDbInfo({ bytes: snap.bytes, freelistBytes: snap.freelistBytes });
+      setLastVacuumAt(await svc.getLastVacuumAt());
+    } catch {
+      setDbInfo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDbInfo();
+  }, [loadDbInfo]);
+
+  const handleOptimizeDb = useCallback(() => {
+    Alert.alert(
+      '优化数据库',
+      '将重建数据库文件以回收空间、整理碎片。期间请不要操作应用，可能需要几十秒。确定继续？',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '开始优化',
+          onPress: async () => {
+            setOptimizing(true);
+            try {
+              const svc = new DbMaintenanceService(getProvider());
+              const r = await svc.runVacuum();
+              if (r.ok) {
+                Alert.alert(
+                  '优化完成',
+                  `${formatBytes(r.beforeBytes)} → ${formatBytes(r.afterBytes)}`
+                );
+              } else {
+                Alert.alert('优化失败', r.error || '未知错误');
+              }
+              await loadDbInfo();
+            } catch (e: any) {
+              Alert.alert('优化失败', e?.message || String(e));
+            } finally {
+              setOptimizing(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [loadDbInfo]);
 
   const handleClearCache = () => {
     Alert.alert(
@@ -639,6 +691,21 @@ export default function VideoManagementScreen({ navigation }: Props) {
             </View>
             <Button variant="destructive" size="sm" loading={clearingCache} onPress={handleClearCache}>
               清理缓存
+            </Button>
+          </View>
+
+          <View style={styles.infoRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoText}>
+                数据库大小：<Text style={styles.infoBold}>{dbInfo ? formatBytes(dbInfo.bytes) : '—'}</Text>
+              </Text>
+              <Text style={styles.configDesc}>
+                上次优化：{lastVacuumAt ? new Date(lastVacuumAt).toLocaleString('zh-CN') : '从未'}
+                {dbInfo && dbInfo.freelistBytes > 0 ? ` · 可回收 ${formatBytes(dbInfo.freelistBytes)}` : ''}
+              </Text>
+            </View>
+            <Button variant="secondary" size="sm" loading={optimizing} onPress={handleOptimizeDb}>
+              优化数据库
             </Button>
           </View>
         </View>

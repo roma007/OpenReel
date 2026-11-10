@@ -35,6 +35,7 @@ export {
 export { CMSAdapter } from './services/cmsAdapter';
 export { CollectorService } from './services/collectorService';
 export { MediaDetailService, loadEpisodesForSource, type EnsureDetailResult } from './services/mediaDetailService';
+export { DbMaintenanceService, MIN_VACUUM_DB_BYTES, VACUUM_FREE_MARGIN_BYTES, FREELIST_PAGES_THRESHOLD } from './services/dbMaintenanceService';
 export {
   setCollectKeepAwakeHandler,
   beginCollectKeepAwake,
