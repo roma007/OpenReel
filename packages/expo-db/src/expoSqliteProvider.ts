@@ -2043,6 +2043,19 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     return rows.map(rowToMedia);
   }
 
+  async getMediaSourceSyncedAtSet(sourceId: string, vodIds: string[]): Promise<Map<string, string | null>> {
+    const ids = vodIds.filter((v) => v != null && v !== '');
+    const map = new Map<string, string | null>();
+    if (ids.length === 0) return map;
+    const rows = await this.db!.getAllAsync<any>(
+      `SELECT vod_id AS vodId, updated_at AS updatedAt FROM media_source
+        WHERE source_id = ? AND vod_id IN (${ids.map(() => '?').join(',')})`,
+      [sourceId, ...ids]
+    );
+    for (const r of rows) map.set(String(r.vodId), r.updatedAt ?? null);
+    return map;
+  }
+
   // —— 索引层 media_source / 按需详情缓存 media_detail ——
 
   async upsertMediaSource(mediaId: number, sourceId: string, vodId: string, updatedAt: string | null): Promise<void> {

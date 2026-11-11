@@ -98,8 +98,8 @@ android {
         applicationId 'com.openreel.android'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 240
-        versionName "1.0.240"
+        versionCode 241
+        versionName "1.0.241"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

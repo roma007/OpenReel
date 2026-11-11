@@ -33,12 +33,16 @@ function captureWebviewErrors() {
     log(`[unhandledrejection] ${reason}`);
   });
 
+  // 落盘白名单：采集性能 + 索引体检/补齐（后者是「播放页为什么只有部分源」的取证通道）
+  const FORWARD_PREFIXES = ['[CollectorPerf]', '[IndexRepair]', '[IndexBackfill]'];
+  const shouldForward = (text: string): boolean => FORWARD_PREFIXES.some((p) => text.startsWith(p));
+
   const origWarn = console.warn.bind(console);
   console.warn = (...args: unknown[]) => {
     origWarn(...args);
     try {
       const text = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      if (/hls/i.test(text) || text.startsWith('[VideoPlayer]')) {
+      if (/hls/i.test(text) || text.startsWith('[VideoPlayer]') || shouldForward(text)) {
         log(`[warn] ${text.slice(0, 2000)}`);
       }
     } catch {
@@ -64,9 +68,7 @@ function captureWebviewErrors() {
     origLog(...args);
     try {
       const text = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      if (text.startsWith('[CollectorPerf]')) {
-        log(text.slice(0, 2000));
-      }
+      if (shouldForward(text)) log(text.slice(0, 2000));
     } catch {
       // ignore
     }

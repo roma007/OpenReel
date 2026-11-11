@@ -92,6 +92,14 @@ export interface DatabaseProvider {
   getMediaByVodId(sourceId: string, vodId: string): Promise<Media | null>;
   /** 批量按「源 + 源侧 vod_id」精确查片（C2 页级去重前置：整页一次 IN 查询）。 */
   getMediaByVodIdSet(sourceId: string, vodIds: string[]): Promise<Media[]>;
+  /**
+   * 批量取「该源对这批 vod_id 的上次同步时间」（media_source.updated_at，即该源上次看到的 vod_time）。
+   *
+   * 采集跳过判定必须按源比较：media.source_updated_at 是每条 media 一个值，会被"最新那个源"覆盖，
+   * 用它跨源比较会把其他源的条目误判成"源未变"而整条跳过，导致 media_source 漏登记（实测：
+   * 《伟大的长征》6 个源有 5 个有片，只登记了 2 个源）。
+   */
+  getMediaSourceSyncedAtSet(sourceId: string, vodIds: string[]): Promise<Map<string, string | null>>;
 
   // —— 索引层：媒体 ↔ 视频源（vod_id 用于按需详情拉取）——
   upsertMediaSource(mediaId: number, sourceId: string, vodId: string, updatedAt: string | null): Promise<void>;

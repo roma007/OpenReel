@@ -956,6 +956,8 @@ sourceUpdatedAt,
     // （后续 worker 的 maybeSkipUnchangedSourceItem 用内存 Map 短路，免逐条查库）。
     const allVodIds = Array.from(new Set(items.map((it) => (it && it.vod_id != null ? String(it.vod_id) : '')).filter(Boolean)));
     const vodIdCache = new Map<string, Media | null>();
+    // 页级一次取回「该源对这些条目上次看到的 vod_time」，跳过判定按源比较（见 maybeSkip 注释）
+    const syncedAtCache = new Map<string, string | null>();
     if (allVodIds.length > 0) {
       const existingRows = await this.db.getMediaByVodIdSet(sourceId, allVodIds);
       const byVodId = new Map<string, Media>();
@@ -963,6 +965,8 @@ sourceUpdatedAt,
         if (m.vodId) byVodId.set(m.vodId, m);
       }
       for (const vid of allVodIds) vodIdCache.set(vid, byVodId.get(vid) ?? null);
+      const synced = await this.db.getMediaSourceSyncedAtSet(sourceId, allVodIds);
+      for (const [vid, at] of synced) syncedAtCache.set(vid, at);
     }
     // D2 同指纹短剧探测复用：本页内多个条目共享同一 fingerprint 时只探测一次
     const shortDramaCache = new Map<string, { isShortDrama: boolean; status: 'SUMMARY' | 'PROBE' | 'FALLBACK'; episodeDuration: number | null }>();
@@ -978,7 +982,7 @@ sourceUpdatedAt,
         try {
           console.log(`[Collector] Processing (worker): ${listItem.vod_name} (vod_id=${listItem.vod_id}) index=${currentIndex}`);
 
-          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, sourceId, config.minYear, config.ignoreSourceSkip, vodIdCache);
+          const skippedExisting = await this.maybeSkipUnchangedSourceItem(listItem, sourceId, config.minYear, config.ignoreSourceSkip, vodIdCache, syncedAtCache);
           if (skippedExisting) {
             skippedCount++;
             console.log(`[Collector] 跳过(源未变): ${listItem.vod_name}`);
@@ -1143,17 +1147,24 @@ sourceUpdatedAt,
   }
 
   /**
-   * 源更新时间跳过判定：list item 携带源侧 vod_time，若本地已有该指纹且
-   * 上次记录的源更新时间 ≥ 当前 vod_time，说明该片自上次采集未变 → 返回 existing 表示跳过；
-   * 否则返回 null（正常拉取详情）。vod_time 缺失/解析失败时一律不跳过。
-   * 判定镜像 processItem 的指纹计算逻辑，保证 fingerprint 一致。
+   * 源更新时间跳过判定：list item 携带源侧 vod_time，**按源**比较「该源上次看到的 vod_time」，
+   * 未变才返回 existing 表示跳过；否则返回 null（正常拉取详情）。
+   *
+   * 为什么必须按源：`media.source_updated_at` 每条 media 只有一个值，会被「最新那个源」覆盖。
+   * 过去用它跨源比较，导致另一个源的同片被误判成「源未变」而整条跳过，`media_source` 漏登记
+   * （实测《伟大的长征》6 源里 5 源有片，只登记了 2 源，播放页就只显示 2 个源）。
+   * 现在权威水位是 `media_source.updated_at`（每个源自己的 vod_time）。
+   *
+   * 该源**没有登记过**这条时一律不跳过——必须走一次提交把 media_source 补上。
+   * vod_time 缺失/解析失败时同样不跳过。
    */
   private async maybeSkipUnchangedSourceItem(
     listItem: CMSMediaItem,
     sourceId: string,
     minYear: number,
     ignoreSourceSkip: boolean,
-    vodIdCache?: Map<string, Media | null>
+    vodIdCache?: Map<string, Media | null>,
+    syncedAtCache?: Map<string, string | null>
   ): Promise<Media | null> {
     if (ignoreSourceSkip) return null;
     const rawVodTime = listItem.vod_time;
@@ -1161,20 +1172,28 @@ sourceUpdatedAt,
     const vodTimeMs = Date.parse(rawVodTime.replace(' ', 'T'));
     if (Number.isNaN(vodTimeMs)) return null;
 
+    const vodIdStr = listItem.vod_id != null ? String(listItem.vod_id) : '';
+
+    // 按源水位：media_source.updated_at（该源上次看到的 vod_time），页级已批量预取
+    let syncedAt: string | null | undefined;
+    if (vodIdStr) {
+      if (syncedAtCache) {
+        syncedAt = syncedAtCache.get(vodIdStr);
+      } else {
+        syncedAt = (await this.db.getMediaSourceSyncedAtSet(sourceId, [vodIdStr])).get(vodIdStr) ?? null;
+      }
+    }
+
     // C2 批量去重前置：页级已按本页全部 vod_id 一次查回内存 Map，命中即免逐条查库。
     // Map 值为 null 表示「该 vod_id 无存量行」，与「查库返回 null」语义一致。
     let existing: Media | null | undefined;
-    if (vodIdCache && listItem.vod_id) {
-      existing = vodIdCache.has(String(listItem.vod_id))
-        ? vodIdCache.get(String(listItem.vod_id))!
-        : undefined;
+    if (vodIdCache && vodIdStr) {
+      existing = vodIdCache.has(vodIdStr) ? vodIdCache.get(vodIdStr)! : undefined;
     } else {
-      existing = listItem.vod_id
-        ? await this.db.getMediaByVodId(sourceId, String(listItem.vod_id))
-        : null;
+      existing = vodIdStr ? await this.db.getMediaByVodId(sourceId, vodIdStr) : null;
     }
-    if (existing?.sourceUpdatedAt) {
-      const lastMs = Date.parse(existing.sourceUpdatedAt);
+    if (existing && syncedAt) {
+      const lastMs = Date.parse(syncedAt);
       if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return existing;
     }
 
@@ -1210,21 +1229,25 @@ sourceUpdatedAt,
     const seasonNumber = normalizer.extractSeasonNumber(title) || 1;
     const fingerprint = await normalizer.generateFingerprint(title, year, mediaType, seasonNumber);
 
-    const fpExisting = await this.db.getMediaByFingerprint(fingerprint);
-    if (fpExisting?.sourceUpdatedAt) {
-      const lastMs = Date.parse(fpExisting.sourceUpdatedAt);
-      if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return fpExisting;
-    }
+    // 有 vod_id 时不再用指纹水位跳过：该源还没登记这条，必须提交一次把 media_source 补上，
+    // 否则播放页永远看不到这个源。只有没有 vod_id（无法登记）的条目才退回共享水位兜底。
+    if (!vodIdStr) {
+      const fpExisting = await this.db.getMediaByFingerprint(fingerprint);
+      if (fpExisting?.sourceUpdatedAt) {
+        const lastMs = Date.parse(fpExisting.sourceUpdatedAt);
+        if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return fpExisting;
+      }
 
-    // 版本候选：基准指纹（剥离版本词/尾部年份后）命中的主条目同样视为已处理（已并入主条目）
-    const { baseTitle, isVersionItem } = computeBaseTitle(title, year);
-    if (isVersionItem && baseTitle !== title) {
-      const baseFp = await normalizer.generateFingerprint(baseTitle, year, mediaType, seasonNumber);
-      if (baseFp !== fingerprint) {
-        const baseExisting = await this.db.getMediaByFingerprint(baseFp);
-        if (baseExisting?.sourceUpdatedAt) {
-          const lastMs = Date.parse(baseExisting.sourceUpdatedAt);
-          if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return baseExisting;
+      // 版本候选：基准指纹（剥离版本词/尾部年份后）命中的主条目同样视为已处理（已并入主条目）
+      const { baseTitle, isVersionItem } = computeBaseTitle(title, year);
+      if (isVersionItem && baseTitle !== title) {
+        const baseFp = await normalizer.generateFingerprint(baseTitle, year, mediaType, seasonNumber);
+        if (baseFp !== fingerprint) {
+          const baseExisting = await this.db.getMediaByFingerprint(baseFp);
+          if (baseExisting?.sourceUpdatedAt) {
+            const lastMs = Date.parse(baseExisting.sourceUpdatedAt);
+            if (!Number.isNaN(lastMs) && vodTimeMs <= lastMs) return baseExisting;
+          }
         }
       }
     }
