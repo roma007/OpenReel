@@ -44,7 +44,9 @@ export function CollectGuideDialog({ open, onOpenChange }: Props) {
             className="flex-1"
             onClick={() => {
               onOpenChange(false);
-              // collectAll 会走采集进度弹窗（CollectProgressDialog），无需在这里等待
+              // 全量采集的进度统一在「任务列表」页展示（数据源是 collect_task 逐页真值），
+              // 先跳过去再启动，用户立刻能看到 FULL 任务行；from 用于返回时回到首页。
+              navigate('/tasks', { state: { from: '/' } });
               void getStore().getState().collectAll();
             }}
           >

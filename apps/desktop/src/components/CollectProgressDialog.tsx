@@ -64,6 +64,9 @@ export function CollectProgressDialog() {
     setDismissed(true);
   };
 
+  // 全量采集不弹本浮窗：它的进度口径在「任务列表」页（collect_task 逐页真值），
+  // 本组件只有增量采集的逐页回调，全量期间只会停在「正在读取待采集量...」并误标成增量。
+  if (collectTrigger === 'full') return null;
   if (!collectSourceProgress || collectSourceProgress.length === 0 || dismissed) return null;
 
   const allDone = collectSourceProgress.every(

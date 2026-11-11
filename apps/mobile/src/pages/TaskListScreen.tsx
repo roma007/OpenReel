@@ -28,7 +28,7 @@ function getTypeLabel(type: string): string {
 }
 
 export default function TaskListScreen({ navigation }: Props) {
-  const { collectTasks, loadCollectTasks, deleteCollectTask, deleteOldTasks, resumeCollectTask, retryFailedItems } = useAppStore();
+  const { collectTasks, isCollecting, loadCollectTasks, deleteCollectTask, deleteOldTasks, resumeCollectTask, retryFailedItems } = useAppStore();
   const colors = useThemeColors();
   const cardOpacity = useThemeStore((s) => s.cardOpacity);
   const cardBg = hexToRgba(colors.card, cardOpacity / 100);
@@ -113,13 +113,15 @@ export default function TaskListScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
   useEffect(() => {
     if (!isFocused) return;
-    const hasActive = collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
+    // isCollecting 兜底：从引导弹窗跳进来时，页面可能先于第一个任务行落库挂载，
+    // 只按「已有活动任务」判断会永远不开始轮询（任务行之后才出现）。
+    const hasActive = isCollecting || collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
     if (!hasActive && resumingIds.size === 0 && retryingIds.size === 0) return;
     const id = setInterval(() => {
       loadCollectTasks();
     }, 2000);
     return () => clearInterval(id);
-  }, [isFocused, collectTasks, resumingIds, retryingIds, loadCollectTasks]);
+  }, [isFocused, collectTasks, isCollecting, resumingIds, retryingIds, loadCollectTasks]);
 
   // 续采任务已在库中真实开跑（状态离开 FAILED）时，提前解除该任务的「续采中」按钮态
   useEffect(() => {

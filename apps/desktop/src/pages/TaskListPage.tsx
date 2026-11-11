@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../useAppStore';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useToast } from '@/components/Layout';
@@ -94,9 +94,15 @@ function formatTimeAgo(dateString: string): string {
 
 export default function TaskListPage() {
   const navigate = useNavigate();
+  // 从「引导弹窗/其它页面」跳进来时带了 from：返回要回来源页（从哪来回哪去），
+  // 默认仍回视频源管理（历史入口）。
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from;
+  const backTo = from || '/sources';
+  const backLabel = from ? '返回' : '返回视频源';
   const clearBgImage = useBackgroundStore((s) => s.clearBgImage);
   useEffect(() => { clearBgImage(); }, [clearBgImage]);
-  const { collectTasks, loadCollectTasks, deleteCollectTask, deleteOldTasks, resumeCollectTask, retryFailedItems } = useAppStore();
+  const { collectTasks, isCollecting, loadCollectTasks, deleteCollectTask, deleteOldTasks, resumeCollectTask, retryFailedItems } = useAppStore();
   const confirm = useConfirm();
   const toast = useToast();
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -119,13 +125,15 @@ export default function TaskListPage() {
   }, [loadCollectTasks]);
 
   useEffect(() => {
-    const hasActive = collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
+    // isCollecting 兜底：从引导弹窗跳进来时，页面可能先于第一个任务行落库挂载，
+    // 只按「已有活动任务」判断会永远不开始轮询（任务行之后才出现）。
+    const hasActive = isCollecting || collectTasks.some((t) => t.status === 'RUNNING' || t.status === 'PENDING');
     if (!hasActive && !resumingId && !retryingId) return;
     const id = setInterval(() => {
       loadCollectTasks();
     }, 2000);
     return () => clearInterval(id);
-  }, [collectTasks, resumingId, retryingId, loadCollectTasks]);
+  }, [collectTasks, isCollecting, resumingId, retryingId, loadCollectTasks]);
 
   useEffect(() => {
     if (!resumingId) return;
@@ -208,8 +216,8 @@ export default function TaskListPage() {
       <div className="sticky top-0 z-10 -mx-6 px-6 pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => navigate('/sources')} className="hover:text-text shrink-0">
-              <ArrowLeft className="size-4 mr-2" /> 返回视频源
+            <Button variant="ghost" onClick={() => navigate(backTo)} className="hover:text-text shrink-0">
+              <ArrowLeft className="size-4 mr-2" /> {backLabel}
             </Button>
             <div>
               <h1 className="text-2xl font-bold">采集任务列表</h1>

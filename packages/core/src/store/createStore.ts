@@ -132,7 +132,7 @@ export interface AppState {
     error?: string;
   }> | null;
 
-  collectTrigger: 'manual' | 'auto' | null;
+  collectTrigger: 'manual' | 'auto' | 'full' | null;
 
   videoManageDeleteType: string;
   videoManageHideType: string;
@@ -863,7 +863,9 @@ export function createAppStore(db: DatabaseProvider) {
       // 注意：不能调用 collectorService.collectAll()——那条路径直接逐页采集，
       // 不写 collect_task，任务列表永远是空的、也无法中止/续采（用户实测反馈）。
       // 改为逐源走 collectSourceAll（会创建 FULL 任务、更新 last_collected_at）。
-      set({ isCollecting: true, error: null, collectSourceProgress: null });
+      // trigger='full'：全量采集的进度以「任务列表页」为唯一展示口径（任务行来自
+      // collect_task，逐页真实），各端全局进度浮窗据此不再弹，避免标题/进度口径错位。
+      set({ isCollecting: true, error: null, collectSourceProgress: null, collectTrigger: 'full' });
       let totalCollected = 0;
       let totalPages = 0;
       try {
@@ -915,7 +917,7 @@ export function createAppStore(db: DatabaseProvider) {
         set({ error: err.message });
         return { totalCollected, totalPages };
       } finally {
-        set({ isCollecting: false, collectSourceProgress: null });
+        set({ isCollecting: false, collectSourceProgress: null, collectTrigger: null });
       }
     },
 

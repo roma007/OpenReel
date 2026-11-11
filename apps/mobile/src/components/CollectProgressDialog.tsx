@@ -157,6 +157,9 @@ export default function CollectProgressDialog() {
     },
   }), [colors, cardBg, surfaceBg, s, insets]);
 
+  // 全量采集不弹本浮窗：进度统一在「任务列表」页展示（collect_task 逐页真值），
+  // 本组件只有增量采集的逐页回调，全量期间只会停在 0 页并误标成增量。
+  if (collectTrigger === 'full') return null;
   if (!collectSourceProgress || collectSourceProgress.length === 0 || dismissed) return null;
 
   const allDone = collectSourceProgress.every(

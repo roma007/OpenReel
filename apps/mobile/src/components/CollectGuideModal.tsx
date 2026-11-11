@@ -83,6 +83,9 @@ export default function CollectGuideModal({ visible, onClose }: Props) {
             <Button
               onPress={() => {
                 onClose();
+                // 全量采集进度统一在任务列表页展示（数据源是 collect_task 逐页真值），
+                // 先跳过去再启动，用户立刻能看到 FULL 任务行；返回键自然回首页。
+                navigation.navigate('TaskList');
                 void collectAll();
               }}
             >
