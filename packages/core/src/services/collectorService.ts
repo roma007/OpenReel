@@ -156,10 +156,6 @@ const DETAIL_PAGE_WINDOW_MIN = 2;
 const DETAIL_PAGE_WINDOW_MAX = 8;
 /** 连续成功多少页后允许窗口 +1 */
 const DETAIL_PAGE_GROW_AFTER = 20;
-/** 采集链路长短剧探测：单次 m3u8 请求超时（成功样本实测 1.5~2.3s） */
-const PROBE_TIMEOUT_MS = 8000;
-/** 采集链路长短剧探测：单条目总预算，超出即转关键词兜底（原为 8 集 × 30s 最坏 240s） */
-const PROBE_TOTAL_BUDGET_MS = 12000;
 
 interface FetchedDetailPage {
   page: number;
@@ -426,7 +422,7 @@ export class CollectorService {
           if (durationCheckStatus == null) {
             const configService = new SystemConfigService(this.db);
             const config = await configService.getShortDramaConfig();
-            const result = await trace('shortDrama', () => this.determineShortDrama(genres, description || '', title, epGroups, config, meter));
+            const result = await trace('shortDrama', () => this.determineShortDrama(genres, description || '', title, config));
             isShortDrama = result.isShortDrama;
             durationCheckStatus = result.status;
             episodeDurationSec = result.episodeDuration;
@@ -756,16 +752,17 @@ sourceUpdatedAt,
   /**
    * 三级降级长短剧判断：
    * 第1级：从简介提取时长（extractDurationFromSummary）→ isShortDramaByDuration
-   * 第2级：实际探测前N集视频时长（m3u8 #EXTINF 累加）→ isShortDramaByDuration
+   * 第2级（已移除）：原先会逐集请求 m3u8 探测真实时长。实测每页累计 4.8~14.8 秒，
+   *   是采集期最大的单页开销，且和源站限流叠加后极不稳定；采集只做索引，短剧判定改为
+   *   「简介提取 + 关键词兜底」，需要精确判定时走后台「批量重新探测」（reprobe 路径，
+   *   仍会真实探测 m3u8，不受此处影响）。
    * 第3级：元数据关键词兜底（isShortDramaByMeta），标记 FALLBACK
    */
   private async determineShortDrama(
     genres: string[],
     summary: string,
     title: string,
-    epGroups: { title: string; url: string }[][],
-    config: ShortDramaConfig,
-    meter?: PerfMeter
+    config: ShortDramaConfig
   ): Promise<{
     isShortDrama: boolean;
     status: 'SUMMARY' | 'PROBE' | 'FALLBACK';
@@ -780,39 +777,6 @@ sourceUpdatedAt,
         status: 'SUMMARY',
         episodeDuration: summaryDuration * 60,
       };
-    }
-
-    // 第2级：实际探测视频时长（逐集探测，成功1集即停）
-    // 取「可播放」的第一组：第一组若是分享页等被过滤成的空组，探测必然失败，白白回退关键词兜底。
-    const firstPlayableGroup = epGroups.find((g) => g.length > 0);
-    if (firstPlayableGroup) {
-      const probeCount = Math.min(config.probeEpisodeCount, firstPlayableGroup.length);
-      console.log(`[长短剧判断] 第1级未命中，尝试第2级(实际探测) 最多${probeCount}集`);
-
-      const durationService = new VideoDurationService();
-      const probeStart = Date.now();
-      for (let i = 0; i < probeCount; i++) {
-        // 采集链路探测预算：单请求 8s、整体 12s。探测只是「短剧/长剧」的第 2 级辅助判断，
-        // 死链不该在采集里各耗 30s（实测源站探测成功 1.5~2.3s，失败即长尾）；
-        // 超预算直接落到第 3 级关键词兜底，语义与原来「探测全部失败」一致。
-        if (Date.now() - probeStart > PROBE_TOTAL_BUDGET_MS) {
-          console.log(`[长短剧判断] 第2级(探测)超出 ${PROBE_TOTAL_BUDGET_MS}ms 预算（已试 ${i}/${probeCount} 集），转关键词兜底`);
-          break;
-        }
-        const duration = meter
-          ? await meter.trace('probe.m3u8', () => durationService.getDurationFromM3U8(firstPlayableGroup[i].url, undefined, PROBE_TIMEOUT_MS))
-          : await durationService.getDurationFromM3U8(firstPlayableGroup[i].url, undefined, PROBE_TIMEOUT_MS);
-        if (duration !== null) {
-          const durationMin = duration / 60;
-          console.log(`[长短剧判断] 第2级(探测)命中: 第${i + 1}集成功, ${durationMin.toFixed(1)}分钟 → ${normalizer.isShortDramaByDuration(durationMin, config.durationThresholdMinutes) ? '短剧' : '长剧'}`);
-          return {
-            isShortDrama: normalizer.isShortDramaByDuration(durationMin, config.durationThresholdMinutes),
-            status: 'PROBE',
-            episodeDuration: duration,
-          };
-        }
-      }
-      console.log(`[长短剧判断] 第2级(探测)失败: ${probeCount}集全部探测失败`);
     }
 
     // 第3级：元数据关键词兜底
