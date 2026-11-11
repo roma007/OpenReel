@@ -144,13 +144,22 @@ const REPROBE_PROGRESS_PERSIST_INTERVAL_MS = 1000;
 const REPROBE_DB_WRITE_TIMEOUT_MS = 5000;
 
 /**
- * 详情分页的跨页并发窗口（页数）。
+ * 详情分页的跨页并发窗口（页数，运行期自适应）。
  *
- * 源站忽略 `limit`（实测传 limit=3 仍返回 20 条/页），所以页大小无法加大，
- * 提速只能靠「一页一请求 + 跨页并发」。3 页在飞 ≈ 3 倍吞吐，同时避免单源
- * 瞬时并发过高被限流（红牛单页响应可达数百 KB）。
+ * 源站忽略 `limit`（实测 limit=3/50/100 均仍返回 20 条/页），页大小无法加大，
+ * 提速只能靠「一页一请求 + 跨页并发」：吞吐 ≈ 窗口 / 单页 RTT。
+ * 基准 6 页在飞；抓取失败（超时/限流/网络）时对半收缩到下限 2，
+ * 连续成功 20 页后再逐页回放到上限 8，避免把慢源/限流源打死。
  */
-const DETAIL_PAGE_CONCURRENCY = 3;
+const DETAIL_PAGE_CONCURRENCY = 6;
+const DETAIL_PAGE_WINDOW_MIN = 2;
+const DETAIL_PAGE_WINDOW_MAX = 8;
+/** 连续成功多少页后允许窗口 +1 */
+const DETAIL_PAGE_GROW_AFTER = 20;
+/** 采集链路长短剧探测：单次 m3u8 请求超时（成功样本实测 1.5~2.3s） */
+const PROBE_TIMEOUT_MS = 8000;
+/** 采集链路长短剧探测：单条目总预算，超出即转关键词兜底（原为 8 集 × 30s 最坏 240s） */
+const PROBE_TOTAL_BUDGET_MS = 12000;
 
 interface FetchedDetailPage {
   page: number;
@@ -167,15 +176,40 @@ interface FetchedDetailPage {
 class DetailPageWindow {
   private nextFetchPage: number;
   private readonly buffer = new Map<number, Promise<FetchedDetailPage>>();
+  /** 当前在飞页数（自适应） */
+  private windowSize: number;
+  /** 连续成功页数（用于缓慢放大窗口） */
+  private successStreak = 0;
 
   constructor(
     private readonly fetchPage: (page: number) => Promise<CMSListResponse>,
     startPage: number,
-    private readonly windowSize: number,
+    windowSize: number,
     /** 抓取上界：已知 pagecount 后收紧，避免多抓不存在的页 */
     private readonly maxPage: () => number
   ) {
     this.nextFetchPage = startPage;
+    this.windowSize = Math.min(DETAIL_PAGE_WINDOW_MAX, Math.max(DETAIL_PAGE_WINDOW_MIN, windowSize));
+  }
+
+  /** 抓取失败（超时/429/网络）→ 对半收缩，优先保住成功率 */
+  private onFetchFailure(): void {
+    this.successStreak = 0;
+    const next = Math.max(DETAIL_PAGE_WINDOW_MIN, Math.floor(this.windowSize / 2));
+    if (next !== this.windowSize) {
+      console.log(`[CollectorPerf] WINDOW ${JSON.stringify({ action: 'shrink', from: this.windowSize, to: next })}`);
+      this.windowSize = next;
+    }
+  }
+
+  /** 连续成功后逐页放大，回收吞吐 */
+  private onFetchSuccess(): void {
+    this.successStreak++;
+    if (this.successStreak >= DETAIL_PAGE_GROW_AFTER && this.windowSize < DETAIL_PAGE_WINDOW_MAX) {
+      this.windowSize++;
+      this.successStreak = 0;
+      console.log(`[CollectorPerf] WINDOW ${JSON.stringify({ action: 'grow', to: this.windowSize })}`);
+    }
   }
 
   private fill(untilPage: number): void {
@@ -185,8 +219,14 @@ class DetailPageWindow {
       this.buffer.set(
         page,
         this.fetchPage(page).then(
-          (response) => ({ page, response }),
-          (err) => ({ page, response: null, error: err instanceof Error ? err : new Error(String(err)) })
+          (response) => {
+            this.onFetchSuccess();
+            return { page, response };
+          },
+          (err) => {
+            this.onFetchFailure();
+            return { page, response: null, error: err instanceof Error ? err : new Error(String(err)) };
+          }
         )
       );
     }
@@ -219,6 +259,13 @@ export class CollectorService {
   private lastVersionMergeAt = 0;
   /** 详情分页能力探测缓存（按 baseUrl），进程内只探测一次 */
   private detailPageSupportCache = new Map<string, boolean>();
+  /**
+   * 隐藏分类缓存：prepareItem 对**每条新媒体**都要用它判 hidden，
+   * 几万条采集就是几万次同值查询（实测每条 2~30ms）。TTL 30s，
+   * 最坏延迟 30s 生效，且只影响新入库条目的 hidden 标记，不影响已有数据。
+   */
+  private hiddenGenresCache: { at: number; value: string[] } | null = null;
+  private static readonly HIDDEN_GENRES_TTL_MS = 30_000;
 
   constructor(private db: DatabaseProvider) {
     this.recommendationService = new RecommendationService(db);
@@ -238,6 +285,17 @@ export class CollectorService {
     } catch {
       console.log(`[CollectorPerf] ${level} ${JSON.stringify(context)}`);
     }
+  }
+
+  /** 隐藏分类（30s 内存缓存，见字段注释） */
+  private async getHiddenGenresCached(): Promise<string[]> {
+    const now = Date.now();
+    if (this.hiddenGenresCache && now - this.hiddenGenresCache.at < CollectorService.HIDDEN_GENRES_TTL_MS) {
+      return this.hiddenGenresCache.value;
+    }
+    const value = await this.db.getHiddenGenres();
+    this.hiddenGenresCache = { at: now, value };
+    return value;
   }
 
   private async prepareItem(
@@ -328,7 +386,7 @@ export class CollectorService {
 
       let hidden = existing?.hidden ?? false;
       if (!existing) {
-        const hiddenGenres = await this.db.getHiddenGenres();
+        const hiddenGenres = await this.getHiddenGenresCached();
         if (genres.length === 0) {
           if (hiddenGenres.includes(UNCATEGORIZED_GENRE)) {
             hidden = true;
@@ -732,10 +790,18 @@ sourceUpdatedAt,
       console.log(`[长短剧判断] 第1级未命中，尝试第2级(实际探测) 最多${probeCount}集`);
 
       const durationService = new VideoDurationService();
+      const probeStart = Date.now();
       for (let i = 0; i < probeCount; i++) {
+        // 采集链路探测预算：单请求 8s、整体 12s。探测只是「短剧/长剧」的第 2 级辅助判断，
+        // 死链不该在采集里各耗 30s（实测源站探测成功 1.5~2.3s，失败即长尾）；
+        // 超预算直接落到第 3 级关键词兜底，语义与原来「探测全部失败」一致。
+        if (Date.now() - probeStart > PROBE_TOTAL_BUDGET_MS) {
+          console.log(`[长短剧判断] 第2级(探测)超出 ${PROBE_TOTAL_BUDGET_MS}ms 预算（已试 ${i}/${probeCount} 集），转关键词兜底`);
+          break;
+        }
         const duration = meter
-          ? await meter.trace('probe.m3u8', () => durationService.getDurationFromM3U8(firstPlayableGroup[i].url))
-          : await durationService.getDurationFromM3U8(firstPlayableGroup[i].url);
+          ? await meter.trace('probe.m3u8', () => durationService.getDurationFromM3U8(firstPlayableGroup[i].url, undefined, PROBE_TIMEOUT_MS))
+          : await durationService.getDurationFromM3U8(firstPlayableGroup[i].url, undefined, PROBE_TIMEOUT_MS);
         if (duration !== null) {
           const durationMin = duration / 60;
           console.log(`[长短剧判断] 第2级(探测)命中: 第${i + 1}集成功, ${durationMin.toFixed(1)}分钟 → ${normalizer.isShortDramaByDuration(durationMin, config.durationThresholdMinutes) ? '短剧' : '长剧'}`);
@@ -1850,6 +1916,31 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       let prefetchPromise: Promise<CMSListResponse | null> | null = null;
       let knownPagecount = 0;
 
+      // 详情分页模式（与 collectSourceLatest 对齐）：源站支持 `ac=detail&pg=N` 时，
+      // 一页一请求即可拿回整页完整详情，替代「1 次 list + 20 次逐条 detail」，
+      // 每页请求数从 21 降到 1（索引层仍只落 media/media_source，播放地址照旧不落库）。
+      // 此前只有单源增量/单源全量走这条路径，批量增量（启动自动采集/首页按钮）一直逐条拉详情。
+      const adapter = new CMSAdapter(source.baseUrl);
+      const detailPageMode = await this.detectDetailPageMode(source.baseUrl, hours, controller.signal);
+      const detailWindow = detailPageMode
+        ? new DetailPageWindow(
+            async (p: number) => {
+              await this.db.incrementSourceRequestCount(source.id);
+              try {
+                return await adapter.getDetailList(p, pageSize, hours, controller.signal);
+              } catch (err) {
+                await this.db.incrementSourceFailCount(source.id).catch(() => {});
+                throw err;
+              }
+            },
+            currentPage,
+            DETAIL_PAGE_CONCURRENCY,
+            () => (knownPagecount > 0 ? Math.min(knownPagecount, maxPages) : maxPages)
+          )
+        : null;
+      // 详情分页模式下源站失联时，避免一直「空抓到 maxPages」：连续失败 5 页即终止本源
+      let consecutivePageFailures = 0;
+
       try {
         await this.db.updateCollectTask(taskId, { status: 'RUNNING' as TaskStatus, startedAt: now, currentPage });
         // PENDING 阶段就可能被删除：进入探测/循环前先确认任务行还在
@@ -1867,7 +1958,32 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           }
           console.log(`[Collector] Processing source ${source.name} page ${currentPage}${hours ? ` hours=${hours}` : ` (定额)`}`);
           let injectedList: CMSListResponse | null = null;
-          if (prefetchPromise) {
+          if (detailWindow) {
+            const fetched = await detailWindow.take(currentPage);
+            if (fetched.response) {
+              injectedList = fetched.response;
+              consecutivePageFailures = 0;
+            } else {
+              // 页抓取失败：记失败页后前进，不中断整源（与 collectSourceLatest 一致）
+              consecutivePageFailures++;
+              const pageErr = fetched.error ?? new Error(`详情分页第${currentPage}页无数据`);
+              const errType = classifyError(pageErr);
+              failed++;
+              await this.db.updateCollectTask(taskId, {
+                currentPage,
+                failedCount: failed,
+                errorMessage: getFriendlyErrorMessage(errType, currentPage),
+                errorType: errType,
+                lastErrorPage: currentPage,
+              });
+              console.error(`[Collector] ${source.name} 第${currentPage}页抓取失败(${errType}): ${pageErr.message}`);
+              if (consecutivePageFailures >= 5) {
+                throw new Error(`连续 ${consecutivePageFailures} 页抓取失败，终止本源本次采集：${pageErr.message}`);
+              }
+              currentPage++;
+              continue;
+            }
+          } else if (prefetchPromise) {
             const cached = await prefetchPromise.catch(() => null);
             prefetchPromise = null;
             if (cached && Array.isArray(cached.list)) {
@@ -1875,15 +1991,17 @@ const title = await normalizer.normalizeTitle(item.vod_name);
             }
           }
 
-          const runPromise = this.collectFromSource(source.id, source.baseUrl, currentPage, pageSize, hours, controller.signal, sourceMeter, injectedList);
+          const runPromise = this.collectFromSource(source.id, source.baseUrl, currentPage, pageSize, hours, controller.signal, sourceMeter, injectedList, detailPageMode);
 
-          const nextPage = currentPage + 1;
-          const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
-          if (shouldPrefetch) {
-            prefetchPromise = new CMSAdapter(source.baseUrl)
-              .getList(nextPage, pageSize, hours, controller.signal)
-              .then((r) => r)
-              .catch(() => null);
+          if (!detailWindow) {
+            const nextPage = currentPage + 1;
+            const shouldPrefetch = prefetchPromise === null && (knownPagecount === 0 || nextPage <= knownPagecount);
+            if (shouldPrefetch) {
+              prefetchPromise = adapter
+                .getList(nextPage, pageSize, hours, controller.signal)
+                .then((r) => r)
+                .catch(() => null);
+            }
           }
 
           const { media, pagecount, failedCount, failedItems } = await runPromise;
@@ -1918,6 +2036,9 @@ const title = await normalizer.normalizeTitle(item.vod_name);
           }
           currentPage++;
         }
+
+        // 提前结束（取消/异常/翻完）时，等在飞的详情分页请求收敛，不遗留未处理拒绝
+        if (detailWindow) await detailWindow.drain();
 
         if (cancelled) {
           // 任务行已被用户删除：不再写 COMPLETED、不更新源的增量时间戳，
@@ -2133,6 +2254,19 @@ const title = await normalizer.normalizeTitle(item.vod_name);
       supported = list1.length > 0 && playRatio >= 0.6 && distinct;
       console.log(
         `[Collector] 详情分页探测 ${baseUrl}: supported=${supported} page1=${list1.length} playRatio=${playRatio.toFixed(2)} distinct=${distinct} pagecount=${first.pagecount}`
+      );
+      // 同一个前缀会被桌面端转发进 video_fetch.log：采集提速/降速排查全靠这条证据
+      console.log(
+        '[CollectorPerf] DETECT ' +
+          JSON.stringify({
+            base: baseUrl,
+            hours: hours ?? null,
+            supported,
+            page1: list1.length,
+            playRatio: Number(playRatio.toFixed(2)),
+            distinct,
+            pagecount: first.pagecount ?? null,
+          })
       );
     } catch (err) {
       console.warn(`[Collector] 详情分页探测失败 ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`);

@@ -27,8 +27,11 @@ export class VideoDurationService {
    * 支持 master playlist 和 media playlist：
    * - media playlist：累加所有 #EXTINF 行的时长
    * - master playlist：取第一个 variant playlist 的 URL 递归请求
+   *
+   * @param timeoutMs 单次请求超时（默认 30s）。采集链路用更短的值（8s）：
+   *   探测是「成功 1 集即停」的辅助判断，死链不该在采集里各耗 30s；失败会落到关键词兜底。
    */
-  async getDurationFromM3U8(url: string, logger?: (msg: string) => void): Promise<number | null> {
+  async getDurationFromM3U8(url: string, logger?: (msg: string) => void, timeoutMs: number = 30000): Promise<number | null> {
     const start = Date.now();
     const log = (msg: string) => {
       console.log(msg);
@@ -37,7 +40,7 @@ export class VideoDurationService {
     try {
       const fetchFn = videoFetchFn || fetch.bind(globalThis);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       log(`[M3U8探测] 开始请求 ${url.slice(0, 100)}`);
 
@@ -91,7 +94,7 @@ export class VideoDurationService {
             ? trimmed
             : new URL(trimmed, url).href;
           log(`[M3U8探测] master playlist → 变体 ${variantUrl.slice(0, 100)}`);
-          return this.getDurationFromM3U8(variantUrl, logger);
+          return this.getDurationFromM3U8(variantUrl, logger, timeoutMs);
         }
       }
 
@@ -99,7 +102,7 @@ export class VideoDurationService {
       return null;
     } catch (err: any) {
       const elapsed = Date.now() - start;
-      const reason = err?.name === 'AbortError' ? 'timeout(30s)' : err?.message || 'unknown';
+      const reason = err?.name === 'AbortError' ? `timeout(${Math.round(timeoutMs / 1000)}s)` : err?.message || 'unknown';
       log(`[M3U8探测] 失败 ${reason} (${elapsed}ms) ${url.slice(0, 100)}`);
       return null;
     }
