@@ -1,6 +1,6 @@
 {
   "name": "@openreel/tv-launcher",
-  "version": "1.0.237",
+  "version": "1.0.238",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",

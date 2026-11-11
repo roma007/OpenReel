@@ -885,28 +885,45 @@ export function createAppStore(db: DatabaseProvider) {
           })),
         });
 
-        for (const source of sources) {
-          const r = await get().collectSourceAll(source.code);
+        // 并行（B 方案）：各源同时建立自己的 FULL 任务并各自推进。
+        // 串行版本（原来的 for…await）会让后 5 个源在第一个源跑完（几十分钟~几小时）之后
+        // 才出现任务行，用户会误以为「只采集了一个源」。
+        // 跨源不存在限流关系（不同域名各自限流）；实测 5 源并行时 DB 写每页仅 74~178ms，
+        // 单源速率无退化。每源进度由 collectorService 逐页写 collect_task，任务列表 2s 轮询展示；
+        // 进程重启后由 recoverInterruptedTasks + autoResumeCollectTasks 按断点续采。
+        const results = await Promise.all(
+          sources.map(async (source) => {
+            let r: { success: boolean; collected: number; pages: number; error?: string };
+            try {
+              r = await get().collectSourceAll(source.code);
+            } catch (err: any) {
+              // collectSourceAll 内部已 catch，这里只兜底极端情况，保证不影响其它源
+              r = { success: false, collected: 0, pages: 0, error: err?.message || String(err) };
+            }
+            set((state) => {
+              if (!state.collectSourceProgress) return state;
+              const updated = [...state.collectSourceProgress];
+              const idx = updated.findIndex((p) => p.sourceCode === source.code);
+              if (idx >= 0) {
+                updated[idx] = {
+                  ...updated[idx],
+                  status: r.success ? 'done' : 'failed',
+                  error: r.error,
+                  collected: r.success ? r.collected : updated[idx].collected,
+                  currentPage: r.success ? r.pages : updated[idx].currentPage,
+                  totalPages: r.success ? r.pages : updated[idx].totalPages,
+                };
+              }
+              return { collectSourceProgress: updated };
+            });
+            return r;
+          })
+        );
+        for (const r of results) {
           if (r.success) {
             totalCollected += r.collected;
             totalPages += r.pages;
           }
-          set((state) => {
-            if (!state.collectSourceProgress) return state;
-            const updated = [...state.collectSourceProgress];
-            const idx = updated.findIndex((p) => p.sourceCode === source.code);
-            if (idx >= 0) {
-              updated[idx] = {
-                ...updated[idx],
-                status: r.success ? 'done' : 'failed',
-                error: r.error,
-                collected: r.success ? r.collected : updated[idx].collected,
-                currentPage: r.success ? r.pages : updated[idx].currentPage,
-                totalPages: r.success ? r.pages : updated[idx].totalPages,
-              };
-            }
-            return { collectSourceProgress: updated };
-          });
         }
 
         await get().loadMediaList();
