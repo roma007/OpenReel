@@ -90,3 +90,12 @@ export const AI_SOURCE_IMPORT_SAMPLE = JSON.stringify([
     baseUrl: 'https://www.kuyunzy.com/api.php/provide/vod',
   },
 ], null, 2);
+
+/**
+ * 任务被「应用重启」打断时写入的固定 error_message。
+ *
+ * 启动恢复据此把「上次没跑完、也没被续采」的任务重新认回来（见 createStore.recoverInterruptedTasks）。
+ * 只有两个 DB provider 的 resetStaleTasks 会写这个值，其它任何失败原因都不会，
+ * 所以它同时充当「可自动续采」的可靠标记——不依赖 FAILED/CANCELLED 这类会被复用的状态。
+ */
+export const INTERRUPTED_TASK_MESSAGE = '应用重启，任务已中断';

@@ -24,6 +24,7 @@ import {
   expandSubTypes,
   extractFirstSubtypes,
   DbMaintenanceService,
+  INTERRUPTED_TASK_MESSAGE,
 } from '@openreel/core';
 import type { DatabaseProvider } from '@openreel/core';
 import type {
@@ -3707,11 +3708,11 @@ export class ExpoSqliteProvider implements DatabaseProvider {
     const result = await this.db!.runAsync(
       `UPDATE collect_task SET
          status = 'FAILED',
-         error_message = '应用重启，任务已中断',
+         error_message = ?,
          error_type = 'CANCELLED',
          completed_at = ?
        WHERE status IN ('PENDING', 'RUNNING')`,
-      [now]
+      [INTERRUPTED_TASK_MESSAGE, now]
     );
     const affected = result?.changes ?? 0;
     return affected;

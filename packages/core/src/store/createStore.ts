@@ -238,8 +238,11 @@ export interface AppState {
    * 并返回这些任务（供自动续采）。必须在 `resetStaleTasks` 语义上先取后复位。
    */
   recoverInterruptedTasks: () => Promise<CollectTask[]>;
-  /** 顺序自动续采（同一时刻只跑一个源，避免多源并发把设备拖死） */
-  autoResumeCollectTasks: (tasks: CollectTask[]) => Promise<{ resumed: number; failed: number }>;
+  /**
+   * 自动续采：先做资源体检，够了就把**全部**中断任务并行续采，不够就**全部**保持中断。
+   * 不允许出现「只续了其中一个、其余掉队」的中间态。
+   */
+  autoResumeCollectTasks: (tasks: CollectTask[]) => Promise<{ resumed: number; failed: number; skipped?: number; reason?: string }>;
   /**
    * 索引体检：对收藏 + 观看历史批量做「详情校验 + 自愈」。
    * 启动后台调用（界面就绪后延迟执行），命中缓存几乎零成本；返回统计。
@@ -299,6 +302,8 @@ import { RecommendationService, type RecommendationOverview, type DislikedMediaI
 import { MediaDetailService, type EnsureDetailResult } from '../services/mediaDetailService';
 import { DbMaintenanceService } from '../services/dbMaintenanceService';
 import { repairUserMediaIndex, type IndexRepairResult } from '../services/indexRepairService';
+import { evaluateAutoResume } from '../services/deviceGuard';
+import { INTERRUPTED_TASK_MESSAGE } from '../utils/constants';
 
 /**
  * Zustand store 工厂函数（依赖注入 DatabaseProvider）。
@@ -1123,8 +1128,16 @@ export function createAppStore(db: DatabaseProvider) {
     recoverInterruptedTasks: async () => {
       try {
         const all = await db.getAllCollectTasks();
+        // 两类都算「被中断」：
+        //  ① 此刻仍在 RUNNING/PENDING 的（本次进程被杀时正在跑）；
+        //  ② 上次重启已复位、但**没轮到/没被续采**的（FAILED + 固定中断标记）。
+        // ② 是「只续一个、其余掉队」的根因修复：只要还没被真正续起来，就会一直留在名单里。
         const interrupted = all.filter(
-          (t) => (t.status === 'RUNNING' || t.status === 'PENDING') && (t.type === 'FULL' || t.type === 'INCREMENTAL')
+          (t) =>
+            ((t.status === 'RUNNING' ||
+              t.status === 'PENDING' ||
+              (t.status === 'FAILED' && t.errorMessage === INTERRUPTED_TASK_MESSAGE)) &&
+              (t.type === 'FULL' || t.type === 'INCREMENTAL'))
         );
         if (interrupted.length > 0) {
           // 逐条复位为 FAILED（保留 currentPage/collectedCount，续采从这里继续）
@@ -1139,24 +1152,45 @@ export function createAppStore(db: DatabaseProvider) {
     },
 
     autoResumeCollectTasks: async (tasks: CollectTask[]) => {
+      if (tasks.length === 0) return { resumed: 0, failed: 0 };
+
+      // 资源体检：够了就全部并行续采，不够就全部保持「已中断」等用户手动决定。
+      // 不允许只续一部分——那会让其余任务在数据库里失去可续采身份（历史 bug）。
+      const config = await new SystemConfigService(db).getCollectConfig();
+      const decision = await evaluateAutoResume({
+        minFreeGb: config.autoResumeMinFreeGb,
+        maxCpuPercent: config.autoResumeMaxCpuPercent,
+      });
+      if (!decision.ok) {
+        console.warn(`[Store] 跳过自动续采（${tasks.length} 个中断任务保持中断）：${decision.reason}`);
+        return { resumed: 0, failed: 0, skipped: tasks.length, reason: decision.reason };
+      }
+      console.log(
+        `[Store] 自动续采体检通过（磁盘 ${decision.freeBytes === null ? '未知' : Math.round(decision.freeBytes / 1024 ** 3) + 'GB'}，CPU ${
+          decision.cpuPercent === null ? '未知' : Math.round(decision.cpuPercent) + '%'
+        }），并行续采 ${tasks.length} 个中断任务`
+      );
+
       let resumed = 0;
       let failed = 0;
-      for (const task of tasks) {
-        try {
-          console.log(`[Store] 自动续采 ${task.sourceName || task.sourceCode}（${task.type}，从第 ${(task.currentPage || 0) + 1} 页）`);
-          const result = await get().resumeCollectTask(task.taskId);
-          if (result.success) {
-            resumed++;
-            console.log(`[Store] 自动续采完成 ${task.sourceName || task.sourceCode}: 新增 ${result.collected} 条 / ${result.pages} 页`);
-          } else {
+      await Promise.all(
+        tasks.map(async (task) => {
+          try {
+            console.log(`[Store] 自动续采 ${task.sourceName || task.sourceCode}（${task.type}，从第 ${(task.currentPage || 0) + 1} 页）`);
+            const result = await get().resumeCollectTask(task.taskId);
+            if (result.success) {
+              resumed++;
+              console.log(`[Store] 自动续采完成 ${task.sourceName || task.sourceCode}: 新增 ${result.collected} 条 / ${result.pages} 页`);
+            } else {
+              failed++;
+              console.warn(`[Store] 自动续采失败 ${task.sourceName || task.sourceCode}: ${result.error || '未知错误'}`);
+            }
+          } catch (err: any) {
             failed++;
-            console.warn(`[Store] 自动续采失败 ${task.sourceName || task.sourceCode}: ${result.error || '未知错误'}`);
+            console.error(`[Store] 自动续采异常 ${task.sourceName || task.sourceCode}:`, err?.message || String(err));
           }
-        } catch (err: any) {
-          failed++;
-          console.error(`[Store] 自动续采异常 ${task.sourceName || task.sourceCode}:`, err?.message || String(err));
-        }
-      }
+        })
+      );
       return { resumed, failed };
     },
 

@@ -17,6 +17,7 @@ export {
   isPlayableMediaUrl,
   AI_SOURCE_PROMPT,
   AI_SOURCE_IMPORT_SAMPLE,
+  INTERRUPTED_TASK_MESSAGE,
 } from './utils/constants';
 export { getHttpClient, setHttpClient, type HttpClient } from './utils/httpClient';
 export { isChildSafe } from './utils/kidSafe';
@@ -58,6 +59,12 @@ export {
   MIN_FREE_BYTES_FOR_COLLECT,
   LOW_FREE_BYTES_WARN,
 } from './services/storageGuard';
+export {
+  setCpuUsageProvider,
+  sampleCpuPercent,
+  evaluateAutoResume,
+  type AutoResumeDecision,
+} from './services/deviceGuard';
 export {
   fetchLatestRelease,
   compareVersions,

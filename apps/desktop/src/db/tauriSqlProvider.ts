@@ -17,6 +17,7 @@ import {
   resolveCollectTaskCutoff,
   expandSubTypes,
   extractFirstSubtypes,
+  INTERRUPTED_TASK_MESSAGE,
 } from '@openreel/core';
 import type { DatabaseProvider } from '@openreel/core';
 import type {
@@ -3040,11 +3041,11 @@ async clearWatchHistory(): Promise<void> {
     const result = await this.db!.execute(
       `UPDATE collect_task SET
          status = 'FAILED',
-         error_message = '应用重启，任务已中断',
+         error_message = ?,
          error_type = 'CANCELLED',
          completed_at = ?
        WHERE status IN ('PENDING', 'RUNNING')`,
-      [now]
+      [INTERRUPTED_TASK_MESSAGE, now]
     );
     const affected = result?.rowsAffected ?? 0;
     return affected;

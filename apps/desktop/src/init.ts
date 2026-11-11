@@ -1,5 +1,5 @@
 import { TauriSqlProvider, type MigrationProgress } from './db/tauriSqlProvider';
-import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, setFreeDiskProvider, type AppStore, type AppState, type HttpClient, type CollectTask } from '@openreel/core';
+import { createAppStore, setHttpClient, setVideoFetchFn, getCurrentStoreApiVersion, getStoreApiVersion, setFreeDiskProvider, setCpuUsageProvider, type AppStore, type AppState, type HttpClient, type CollectTask } from '@openreel/core';
 
 let _provider: TauriSqlProvider | null = null;
 let _store: AppStore | null = null;
@@ -247,6 +247,15 @@ export async function initApp(
         setFreeDiskProvider(async () => {
           const v = await invoke<number>('disk_free_bytes', { path: await pathModule.appDataDir() });
           return Number.isFinite(Number(v)) ? Number(v) : null;
+        });
+        // 自动续采体检用的 CPU 信号（仅桌面端有；首次调用返回 -1 由 core 侧补采样）
+        setCpuUsageProvider(async () => {
+          try {
+            const v = await invoke<number>('process_cpu_percent');
+            return Number.isFinite(Number(v)) ? Number(v) : null;
+          } catch {
+            return null;
+          }
         });
         console.log('[INIT] 存储守卫已注册（采集前会校验可用空间）');
       } catch (err) {

@@ -20,6 +20,10 @@ export interface CollectConfig {
   autoLastRunAt: string | null;
   /** 1=忽略「源更新时间未变跳过」逻辑，强制全量处理每一条（应对源侧 vod_time 漏刷导致的漏更新） */
   ignoreSourceSkip: boolean;
+  /** 自动续采的最小可用磁盘（GB）；低于该值则全部中断任务都不自动续采 */
+  autoResumeMinFreeGb: number;
+  /** 自动续采的最大进程 CPU 占用（%）；高于该值则不自动续采（仅桌面端有 CPU 信号） */
+  autoResumeMaxCpuPercent: number;
 }
 
 export interface PlaybackConfig {
@@ -71,6 +75,8 @@ const DEFAULT_COLLECT_CONFIG: CollectConfig = {
   autoOnStartup: false,
   autoLastRunAt: null,
   ignoreSourceSkip: false,
+  autoResumeMinFreeGb: 5,
+  autoResumeMaxCpuPercent: 50,
 };
 
 const CONFIG_REMARKS: Record<string, string> = {
@@ -84,6 +90,8 @@ const CONFIG_REMARKS: Record<string, string> = {
   'collect.autoOnStartup': '启动APP时自动执行增量采集',
   'collect.autoLastRunAt': '上次启动时自动采集时间',
   'collect.ignoreSourceSkip': '忽略「源更新时间未变跳过」（0=开启跳过，1=全部处理）',
+  'collect.autoResumeMinFreeGb': '自动续采最小可用磁盘（GB，低于则不自动续采）',
+  'collect.autoResumeMaxCpuPercent': '自动续采最大进程 CPU 占用（%，高于则不自动续采）',
 };
 
 export class SystemConfigService {
@@ -172,6 +180,8 @@ export class SystemConfigService {
       autoOnStartup: (await this.getNumber('collect.autoOnStartup', DEFAULT_COLLECT_CONFIG.autoOnStartup ? 1 : 0)) === 1,
       autoLastRunAt: await this.getString('collect.autoLastRunAt', DEFAULT_COLLECT_CONFIG.autoLastRunAt || '') || null,
       ignoreSourceSkip: (await this.getNumber('collect.ignoreSourceSkip', DEFAULT_COLLECT_CONFIG.ignoreSourceSkip ? 1 : 0)) === 1,
+      autoResumeMinFreeGb: await this.getNumber('collect.autoResumeMinFreeGb', DEFAULT_COLLECT_CONFIG.autoResumeMinFreeGb),
+      autoResumeMaxCpuPercent: await this.getNumber('collect.autoResumeMaxCpuPercent', DEFAULT_COLLECT_CONFIG.autoResumeMaxCpuPercent),
     };
   }
 

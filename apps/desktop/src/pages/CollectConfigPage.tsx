@@ -23,6 +23,8 @@ export default function CollectConfigPage() {
     maxIncrementalHours: 720,
     concurrency: 1,
     autoOnStartup: false,
+    autoResumeMinFreeGb: 5,
+    autoResumeMaxCpuPercent: 50,
   });
   const [autoLastRunAt, setAutoLastRunAt] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -51,6 +53,8 @@ export default function CollectConfigPage() {
         maxIncrementalHours: collectConfig.maxIncrementalHours,
         concurrency: collectConfig.concurrency,
         autoOnStartup: collectConfig.autoOnStartup,
+        autoResumeMinFreeGb: collectConfig.autoResumeMinFreeGb,
+        autoResumeMaxCpuPercent: collectConfig.autoResumeMaxCpuPercent,
       });
       setLocalConfig({
         minYear: collectConfig.minYear,
@@ -61,6 +65,8 @@ export default function CollectConfigPage() {
         maxIncrementalHours: collectConfig.maxIncrementalHours,
         concurrency: collectConfig.concurrency,
         autoOnStartup: collectConfig.autoOnStartup,
+        autoResumeMinFreeGb: collectConfig.autoResumeMinFreeGb,
+        autoResumeMaxCpuPercent: collectConfig.autoResumeMaxCpuPercent,
       });
     }
   }, [collectConfig]);
@@ -76,6 +82,8 @@ export default function CollectConfigPage() {
       maxIncrementalHours: Math.max(0, localConfig.maxIncrementalHours),
       concurrency: localConfig.concurrency,
       autoOnStartup: localConfig.autoOnStartup,
+      autoResumeMinFreeGb: localConfig.autoResumeMinFreeGb,
+      autoResumeMaxCpuPercent: localConfig.autoResumeMaxCpuPercent,
     });
     return current !== savedConfigRef.current;
   }, [localConfig, collectConfig]);
@@ -141,6 +149,8 @@ export default function CollectConfigPage() {
       maxIncrementalHours: 720,
       concurrency: 6,
       autoOnStartup: false,
+      autoResumeMinFreeGb: 5,
+      autoResumeMaxCpuPercent: 50,
     }, true);
   };
 
@@ -260,6 +270,32 @@ export default function CollectConfigPage() {
               onChange={(e) => update({ retryTimes: Math.min(10, Math.max(0, parseInt(e.target.value) || 3)) })}
             />
             <p className="text-xs text-muted-foreground">采集失败时的重试次数</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="autoResumeMinFreeGb">自动续采最小磁盘（GB）</Label>
+            <Input
+              id="autoResumeMinFreeGb"
+              type="number"
+              min="0"
+              max="100"
+              value={localConfig.autoResumeMinFreeGb}
+              onChange={(e) => update({ autoResumeMinFreeGb: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+            />
+            <p className="text-xs text-muted-foreground">可用空间低于此值时，重启后不自动续采被中断的任务</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="autoResumeMaxCpuPercent">自动续采最大 CPU（%）</Label>
+            <Input
+              id="autoResumeMaxCpuPercent"
+              type="number"
+              min="0"
+              max="100"
+              value={localConfig.autoResumeMaxCpuPercent}
+              onChange={(e) => update({ autoResumeMaxCpuPercent: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+            />
+            <p className="text-xs text-muted-foreground">进程 CPU 高于此值时，重启后不自动续采（仅桌面端有该信号）</p>
           </div>
         </div>
       </Card>
