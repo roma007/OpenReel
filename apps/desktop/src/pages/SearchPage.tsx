@@ -11,9 +11,6 @@ import { ArrowLeft, Search, X, Database, Clock, Flame, ChevronLeft, ChevronRight
 
 const pageSize = 30;
 
-const resultCache = new Map<string, Media[]>();
-const metaCache = new Map<string, PaginatedResponse<Media>['meta']>();
-
 export default function SearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -21,16 +18,16 @@ export default function SearchPage() {
   const clearBgImage = useBackgroundStore((s) => s.clearBgImage);
   const q = (searchParams.get('q') ?? '').trim();
   const currentPage = Math.max(1, Number(searchParams.get('page')) || 1);
+  // 缓存随组件卸载一起失效：离开搜索页（去采集/详情）再回来必定重新查库，
+  // 避免媒体库新增后仍命中旧结果（尤其空结果）导致「采集了却搜不到」。
+  const searchCacheRef = useRef({
+    results: new Map<string, Media[]>(),
+    meta: new Map<string, PaginatedResponse<Media>['meta']>(),
+  });
   const [keyword, setKeyword] = useState(q);
-  const [results, setResults] = useState<Media[]>(() => {
-    if (!q) return [];
-    return resultCache.get(`${q}#${currentPage}`) ?? [];
-  });
-  const [resultMeta, setResultMeta] = useState<PaginatedResponse<Media>['meta'] | null>(() => {
-    if (!q) return null;
-    return metaCache.get(`${q}#${currentPage}`) ?? null;
-  });
-  const [searching, setSearching] = useState(() => !!q && !resultCache.has(`${q}#${currentPage}`));
+  const [results, setResults] = useState<Media[]>([]);
+  const [resultMeta, setResultMeta] = useState<PaginatedResponse<Media>['meta'] | null>(null);
+  const [searching, setSearching] = useState(() => !!q);
   const [searchHistory, setSearchHistory] = useState<{ keyword: string; count: number }[]>([]);
   const [hotSearches, setHotSearches] = useState<{ keyword: string; count: number }[]>([]);
   const reqRef = useRef(0);
@@ -46,18 +43,22 @@ export default function SearchPage() {
     if (!trimKw) return;
     const id = ++reqRef.current;
     const cacheKey = `${trimKw}#${page}`;
-    const cached = resultCache.get(cacheKey);
-    if (cached) {
+    const cached = searchCacheRef.current.results.get(cacheKey);
+    // 空结果不复用：媒体库可能刚新增了匹配项，必须重新查库。
+    if (cached && cached.length > 0) {
       setResults(cached);
-      setResultMeta(metaCache.get(cacheKey) ?? null);
+      setResultMeta(searchCacheRef.current.meta.get(cacheKey) ?? null);
       return;
     }
     setSearching(true);
     try {
       const result = await getProvider().searchMedia(trimKw, { page, pageSize });
       if (id !== reqRef.current) return;
-      resultCache.set(cacheKey, result.items);
-      metaCache.set(cacheKey, result.meta);
+      // 只缓存非空结果，避免空结果把后续新采集的内容挡住。
+      if (result.items.length > 0) {
+        searchCacheRef.current.results.set(cacheKey, result.items);
+        searchCacheRef.current.meta.set(cacheKey, result.meta);
+      }
       setResults(result.items);
       setResultMeta(result.meta);
       getStore().getState().scheduleRecommendationRecompute();

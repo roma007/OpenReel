@@ -116,7 +116,7 @@ let sourceGuideShownThisLaunch = false;
 let collectGuideShownThisLaunch = false;
 
 export function Layout() {
-  const [appVersion, setAppVersion] = useState('1.0.254');
+  const [appVersion, setAppVersion] = useState('1.0.255');
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [showUsageGuide, setShowUsageGuide] = useState(false);
   const [showSourceGuide, setShowSourceGuide] = useState(false);
