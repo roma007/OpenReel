@@ -1,13 +1,13 @@
 {
-  "version": "2026-11-21",
-  "updatedAt": "2026-11-21T06:30:02.709Z",
+  "version": "2026-11-28",
+  "updatedAt": "2026-11-28T12:03:02.947Z",
   "boards": [
     {
       "board": "hot",
       "type": "all",
       "file": "hot-all.json",
       "label": "红果热播榜",
-      "updatedText": "11月21日已更新·基于红果内观看/互动等综合热度排序",
+      "updatedText": "11月28日已更新·基于红果内观看/互动等综合热度排序",
       "count": 100
     },
     {
@@ -15,7 +15,7 @@
       "type": "real",
       "file": "hot-real.json",
       "label": "红果热播榜 · 真人剧",
-      "updatedText": "11月21日已更新·基于红果内观看/互动等综合热度排序",
+      "updatedText": "11月28日已更新·基于红果内观看/互动等综合热度排序",
       "count": 100
     },
     {
@@ -23,7 +23,7 @@
       "type": "comic",
       "file": "hot-comic.json",
       "label": "红果热播榜 · 漫剧",
-      "updatedText": "11月21日已更新·基于红果内观看/互动等综合热度排序",
+      "updatedText": "11月28日已更新·基于红果内观看/互动等综合热度排序",
       "count": 100
     },
     {
@@ -31,7 +31,7 @@
       "type": "ai",
       "file": "hot-ai.json",
       "label": "红果热播榜 · AI剧",
-      "updatedText": "11月21日已更新·基于红果内观看/互动等综合热度排序",
+      "updatedText": "11月28日已更新·基于红果内观看/互动等综合热度排序",
       "count": 100
     },
     {
@@ -39,7 +39,7 @@
       "type": "all",
       "file": "new-all.json",
       "label": "红果新剧榜",
-      "updatedText": "11月21日已更新·红果上架3天内的剧集热度排名",
+      "updatedText": "11月28日已更新·红果上架3天内的剧集热度排名",
       "count": 100
     },
     {
@@ -47,7 +47,7 @@
       "type": "all",
       "file": "hot-search-all.json",
       "label": "红果热搜榜",
-      "updatedText": "11月21日已更新·基于红果内观看/互动以及个人兴趣排序",
+      "updatedText": "11月28日已更新·基于红果内观看/互动以及个人兴趣排序",
       "count": 100
     },
     {
@@ -63,7 +63,7 @@
       "type": "all",
       "file": "must-watch-all.json",
       "label": "红果必看榜",
-      "updatedText": "11月21日已更新·2025年后的剧集回溯新版最高热度值排序",
+      "updatedText": "11月28日已更新·2025年后的剧集回溯新版最高热度值排序",
       "count": 100
     },
     {
